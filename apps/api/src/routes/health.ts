@@ -44,8 +44,8 @@ export function healthRoutes(app: FastifyInstance): void {
         response: { 200: ReadyResponse, 503: ReadyResponse },
       },
     },
-    async (_, reply) => {
-      const db = await checkDb();
+    async (req, reply) => {
+      const db = await checkDb(req.log);
       const status = db.ok ? ('ready' as const) : ('degraded' as const);
       const code = db.ok ? 200 : 503;
       return reply.code(code).send({ status, checks: { db } });
