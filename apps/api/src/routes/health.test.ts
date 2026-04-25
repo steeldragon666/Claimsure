@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { sql } from '@cpa/db/client';
 import { buildApp, type App } from '../app.js';
 
 // before/after are file-scoped in node:test. Tests share one App instance;
@@ -16,6 +17,12 @@ before(async () => {
 
 after(async () => {
   await app.close();
+  // The shared postgres client (`@cpa/db/client`) is module-scoped and
+  // would otherwise keep the event loop alive past the last test, hanging
+  // node:test's TAP epilogue. /readyz hits this client on every request,
+  // so closing app.close() alone is not enough — we own the connection
+  // pool's lifecycle in tests.
+  await sql.end();
 });
 
 test('GET /healthz returns 200 with the expected envelope', async () => {
@@ -52,4 +59,28 @@ test('Fastify uses our pino instance (regression check)', () => {
   const log = app.log as unknown as LoggerWithBindings;
   const bindings = log.bindings();
   assert.equal(bindings.name, 'api');
+});
+
+test('GET /readyz returns 200 with checks.db.ok=true when DB is reachable', async () => {
+  const res = await app.inject({ method: 'GET', url: '/readyz' });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<Record<string, unknown>>();
+  assert.equal(body.status, 'ready');
+  const checks = body.checks as Record<string, unknown>;
+  const db = checks.db as Record<string, unknown>;
+  assert.equal(db.ok, true);
+  assert.equal(typeof db.latencyMs, 'number');
+  assert.ok((db.latencyMs as number) >= 0);
+  assert.ok((db.latencyMs as number) < 5000, 'DB latency should be under 5s');
+});
+
+test('GET /readyz response shape: status + checks.db', async () => {
+  const res = await app.inject({ method: 'GET', url: '/readyz' });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<Record<string, unknown>>();
+  assert.deepEqual(Object.keys(body).sort(), ['checks', 'status']);
+  const checks = body.checks as Record<string, unknown>;
+  assert.deepEqual(Object.keys(checks).sort(), ['db']);
+  const db = checks.db as Record<string, unknown>;
+  assert.deepEqual(Object.keys(db).sort(), ['latencyMs', 'ok']);
 });
