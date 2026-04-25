@@ -1,5 +1,26 @@
+# core
 node_modules/
+
+# secrets
 .env
+.env.local
+.env.*.local
+
+# build artefacts
 .turbo/
 dist/
+*.tsbuildinfo
+
+# logs
 *.log
+
+# editor
+.idea/
+.vscode/
+
+# os
+.DS_Store
+Thumbs.db
+
+# coverage
+coverage/

@@ -1,0 +1,20 @@
+# Default: detect text vs binary, force LF on checkout for text files.
+# Without this, Windows contributors with core.autocrlf=true see spurious
+# format:check failures because prettier (.prettierrc.json sets endOfLine=lf)
+# rejects CRLF working-tree files.
+* text=auto eol=lf
+
+# Explicit binary excludes — never normalise these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.tgz binary
+
+# Lockfile: pnpm owns its own formatting; don't normalise.
+pnpm-lock.yaml -text
