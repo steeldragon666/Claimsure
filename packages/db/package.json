@@ -1,0 +1,42 @@
+{
+  "name": "@cpa/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./schema": {
+      "types": "./dist/schema/index.d.ts",
+      "import": "./dist/schema/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate.ts",
+    "studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@cpa/schemas": "workspace:*",
+    "drizzle-orm": "^0.36.4",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "drizzle-kit": "^0.29.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
