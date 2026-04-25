@@ -1,4 +1,5 @@
-const DEV_DATABASE_URL = 'postgres://cpa:cpa@localhost:5432/cpa_dev';
+// Port 5433 (not 5432) to coexist with any native Postgres install on the host.
+const DEV_DATABASE_URL = 'postgres://cpa:cpa@localhost:5433/cpa_dev';
 
 /**
  * Resolve the Postgres connection URL.
