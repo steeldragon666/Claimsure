@@ -337,3 +337,134 @@ test('GET /v1/events: filter=overrides empty when no overrides exist', async () 
   assert.equal(body.events.length, 0);
   await app.close();
 });
+
+test('POST /v1/events/:id/override: 404 unknown event', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/events/00000000-0000-4000-8000-00000000dead/override',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { new_kind: 'INELIGIBLE', reason: 'Routine work, not R&D.' },
+  });
+  assert.equal(res.statusCode, 404);
+  await app.close();
+});
+
+test('POST /v1/events/:id/override: 400 invalid body', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/events/00000000-0000-4000-8000-00000000dead/override',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { reason: 'no new_kind' },
+  });
+  assert.equal(res.statusCode, 400);
+  await app.close();
+});
+
+test('POST /v1/events/:id/override: 201 → original surfaces is_overridden=true', async () => {
+  // Pick the oldest event still on SUBJECT_A1 (HYPOTHESIS @ Jan 1).
+  const targets = await privilegedSql<{ id: string; kind: string }[]>`
+    SELECT id, kind FROM event WHERE subject_tenant_id = ${SUBJECT_A1}
+     ORDER BY captured_at ASC LIMIT 1
+  `;
+  const target = targets[0];
+  assert.ok(target);
+  assert.notEqual(target.kind, 'OVERRIDE');
+
+  const app = buildApp();
+  const r = await app.inject({
+    method: 'POST',
+    url: `/v1/events/${target.id}/override`,
+    cookies: { cpa_session: await adminJwt() },
+    payload: { new_kind: 'INELIGIBLE', reason: 'On reflection, BAU activity.' },
+  });
+  assert.equal(r.statusCode, 201);
+  const body = r.json<{
+    override_event: {
+      kind: string;
+      override_of_event_id: string | null;
+      override_new_kind: string | null;
+      override_reason: string | null;
+    };
+  }>();
+  assert.equal(body.override_event.kind, 'OVERRIDE');
+  assert.equal(body.override_event.override_of_event_id, target.id);
+  assert.equal(body.override_event.override_new_kind, 'INELIGIBLE');
+  assert.equal(body.override_event.override_reason, 'On reflection, BAU activity.');
+
+  // Verify the original now reads as is_overridden=true via the view +
+  // effective_kind = INELIGIBLE.
+  const list = await app.inject({
+    method: 'GET',
+    url: `/v1/events?subject_tenant_id=${SUBJECT_A1}&filter=all&limit=200`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  const listBody = list.json<{
+    events: Array<{
+      id: string;
+      kind: string;
+      effective_kind: string;
+      is_overridden: boolean;
+    }>;
+  }>();
+  const orig = listBody.events.find((e) => e.id === target.id);
+  assert.ok(orig);
+  assert.equal(orig?.is_overridden, true);
+  assert.equal(orig?.effective_kind, 'INELIGIBLE');
+  await app.close();
+});
+
+test('POST /v1/events/:id/override: 400 override-of-override', async () => {
+  // Find the OVERRIDE row we just created and try to override IT.
+  const overrides = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM event WHERE subject_tenant_id = ${SUBJECT_A1} AND kind = 'OVERRIDE'
+     ORDER BY captured_at DESC LIMIT 1
+  `;
+  const ov = overrides[0];
+  assert.ok(ov);
+
+  const app = buildApp();
+  const r = await app.inject({
+    method: 'POST',
+    url: `/v1/events/${ov.id}/override`,
+    cookies: { cpa_session: await adminJwt() },
+    payload: { new_kind: 'HYPOTHESIS', reason: 'try to undo the override' },
+  });
+  assert.equal(r.statusCode, 400);
+  const body = r.json<{ error: string }>();
+  assert.equal(body.error, 'override_of_override');
+  await app.close();
+});
+
+test('POST /v1/events/:id/override: 404 cross-firm', async () => {
+  // Insert an event on TENANT_B / SUBJECT_B1 via privilegedSql, then try
+  // to override it from a TENANT_A session — RLS on the SELECT should
+  // 404 it.
+  await insertEventWithChain({
+    tenant_id: TENANT_B,
+    subject_tenant_id: SUBJECT_B1,
+    kind: 'HYPOTHESIS',
+    payload: { _v: 1, source: 'fixture-cross-firm', text: 'firm B event' },
+    classification: null,
+    captured_at: new Date('2026-01-01T00:00:00Z'),
+    captured_by_user_id: ADMIN_USER, // user globally exists; tenant_user is firm A only, but FK is on user not tenant_user
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  const [b1] = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM event WHERE subject_tenant_id = ${SUBJECT_B1} ORDER BY captured_at ASC LIMIT 1
+  `;
+  assert.ok(b1);
+
+  const app = buildApp();
+  const r = await app.inject({
+    method: 'POST',
+    url: `/v1/events/${b1.id}/override`,
+    cookies: { cpa_session: await adminJwt() }, // session is firm A
+    payload: { new_kind: 'INELIGIBLE', reason: 'cross-firm attempt' },
+  });
+  assert.equal(r.statusCode, 404);
+  await app.close();
+});
