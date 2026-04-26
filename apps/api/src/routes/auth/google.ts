@@ -79,7 +79,7 @@ export async function registerGoogleAuth(
   });
 
   app.get('/v1/auth/google/callback', async (req, reply) => {
-    const handshakeCookie = (req.cookies as Record<string, string | undefined>)[HANDSHAKE_COOKIE];
+    const handshakeCookie = req.cookies[HANDSHAKE_COOKIE];
     if (!handshakeCookie) {
       return reply.status(400).send({
         error: 'missing_handshake',

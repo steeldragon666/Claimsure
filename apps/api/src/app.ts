@@ -13,7 +13,15 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import { createLogger } from '@cpa/observability';
+import { sessionPlugin } from '@cpa/auth';
+import { registerGoogleAuth } from './routes/auth/google.js';
+import { registerMicrosoftAuth } from './routes/auth/microsoft.js';
 import { healthRoutes } from './routes/health.js';
+
+const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
+const DEFAULT_SESSION_COOKIE_NAME = 'cpa_session';
+const DEFAULT_SESSION_TTL_SECONDS = 86400; // 24h per W2 design Q3
+const DEFAULT_POST_LOGIN_REDIRECT = '/';
 
 /**
  * The Fastify app type, widened to FastifyBaseLogger for portability
@@ -79,7 +87,62 @@ export function buildApp(): App {
   // routes so session-aware handlers can read req.cookies.
   app.register(cookie);
 
+  // Session middleware: verifies cpa_session cookie, attaches req.user,
+  // sets app.current_tenant_id GUC for RLS-scoped queries.
+  // Production must set SESSION_JWT_SECRET (the dev default is a constant
+  // string and is NOT secure for any non-local environment).
+  const sessionSecret = process.env['SESSION_JWT_SECRET'] ?? DEFAULT_DEV_SESSION_SECRET;
+  const cookieName = process.env['SESSION_COOKIE_NAME'] ?? DEFAULT_SESSION_COOKIE_NAME;
+  app.register(sessionPlugin, { secret: sessionSecret, cookieName });
+
   app.register(healthRoutes);
+
+  // OIDC routes only register when both clientId AND clientSecret are
+  // present. In tests + bare-bones dev, env vars are unset and the
+  // routes simply don't exist; the rest of the API still works. This
+  // avoids a network call to Issuer.discover during cold start when
+  // we don't even have credentials configured.
+  const cookieSecure = process.env['NODE_ENV'] === 'production';
+  const ttlSeconds = Number(process.env['SESSION_TTL_SECONDS'] ?? DEFAULT_SESSION_TTL_SECONDS);
+
+  const msClientId = process.env['MICROSOFT_OIDC_CLIENT_ID'];
+  const msClientSecret = process.env['MICROSOFT_OIDC_CLIENT_SECRET'];
+  if (msClientId && msClientSecret) {
+    app.register(async (instance) => {
+      await registerMicrosoftAuth(instance, {
+        tenantId: process.env['MICROSOFT_OIDC_TENANT'] ?? 'common',
+        clientId: msClientId,
+        clientSecret: msClientSecret,
+        redirectUri:
+          process.env['MICROSOFT_OIDC_REDIRECT_URI'] ??
+          'http://localhost:3000/v1/auth/microsoft/callback',
+        sessionSecret,
+        cookieName,
+        cookieSecure,
+        ttlSeconds,
+        postLoginRedirect: DEFAULT_POST_LOGIN_REDIRECT,
+      });
+    });
+  }
+
+  const gClientId = process.env['GOOGLE_OIDC_CLIENT_ID'];
+  const gClientSecret = process.env['GOOGLE_OIDC_CLIENT_SECRET'];
+  if (gClientId && gClientSecret) {
+    app.register(async (instance) => {
+      await registerGoogleAuth(instance, {
+        clientId: gClientId,
+        clientSecret: gClientSecret,
+        redirectUri:
+          process.env['GOOGLE_OIDC_REDIRECT_URI'] ??
+          'http://localhost:3000/v1/auth/google/callback',
+        sessionSecret,
+        cookieName,
+        cookieSecure,
+        ttlSeconds,
+        postLoginRedirect: DEFAULT_POST_LOGIN_REDIRECT,
+      });
+    });
+  }
 
   // Single error envelope across all routes — { error, message, requestId }.
   // Errors with a numeric `statusCode` use that; everything else 500s.
