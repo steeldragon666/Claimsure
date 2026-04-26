@@ -1,6 +1,19 @@
 import type { SubjectTenant, SubjectTenantKind } from '@cpa/schemas';
 import { apiFetch } from '@/lib/api';
 
+export interface SubjectTenantDetail {
+  subject_tenant: SubjectTenant;
+  event_count: number;
+  head_hash: string | null;
+}
+
+export interface ChainStatus {
+  verified: boolean;
+  head_hash: string | null;
+  event_count: number;
+  first_break_at: number | null;
+}
+
 /**
  * Typed fetch helpers for the subject-tenant + event surfaces.
  *
@@ -31,4 +44,12 @@ export async function createSubjectTenant(
     body: JSON.stringify(input),
   });
   return body.subject_tenant;
+}
+
+export async function getSubjectTenant(id: string): Promise<SubjectTenantDetail> {
+  return apiFetch<SubjectTenantDetail>(`/v1/subject-tenants/${id}`);
+}
+
+export async function getChainStatus(id: string): Promise<ChainStatus> {
+  return apiFetch<ChainStatus>(`/v1/subject-tenants/${id}/chain-status`);
 }
