@@ -68,10 +68,10 @@ data the platform stores.
 
 - **The reqId we generate via Fastify's `genReqId` IS a v4 UUID, not a W3C trace context
   identifier.** This is intentional for P1.
-- `reqId` is a *log* correlation primitive — it appears in every pino line, in error
+- `reqId` is a _log_ correlation primitive — it appears in every pino line, in error
   responses (`{ error, message, requestId }`), and in audit-log rows.
 - OTel auto-instrumentation produces a separate `traceparent`/`tracestate` pair that
-  flows through HTTP headers and into Tempo spans. These are *trace* correlation
+  flows through HTTP headers and into Tempo spans. These are _trace_ correlation
   primitives.
 - The two are linked through pino's automatic `trace_id` and `span_id` injection (provided
   by `@opentelemetry/instrumentation-pino`, included in `getNodeAutoInstrumentations()`).

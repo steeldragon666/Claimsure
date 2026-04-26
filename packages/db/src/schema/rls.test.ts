@@ -135,7 +135,11 @@ test('RLS: cross-tenant INSERT is rejected (WITH CHECK enforces tenant_id match)
   }
   assert.ok(caught !== null, 'INSERT with mismatched tenant_id should throw');
   const message = String((caught as Error)?.message ?? caught);
-  assert.match(message, /row-level security/i, `error should mention row-level security; got: ${message}`);
+  assert.match(
+    message,
+    /row-level security/i,
+    `error should mention row-level security; got: ${message}`,
+  );
 });
 
 test('RLS: tenant A context sees only its own delegation_tokens', async () => {
