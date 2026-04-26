@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from '@cpa/auth';
 import { sql } from '@cpa/db/client';
-import { listSubjectTenantsQuery, type SubjectTenant } from '@cpa/schemas';
+import { createSubjectTenantBody, listSubjectTenantsQuery, type SubjectTenant } from '@cpa/schemas';
 
 interface RawSubjectTenantRow {
   id: string;
@@ -66,6 +66,86 @@ export function registerSubjectTenants(app: FastifyInstance): void {
           `;
 
       return { subject_tenants: rows.map(toApi) };
+    });
+  });
+
+  app.post('/v1/subject-tenants', { preHandler: requireSession }, async (req, reply) => {
+    // role gating: read-only viewers can't create claimants. Admin and
+    // consultant both can — admins get implicit access to all claimants
+    // anyway (see subject_tenant_user.ts default-access semantics), and
+    // consultants need to be able to onboard a new claimant they're
+    // assigned to.
+    const role = req.user!.role;
+    if (role !== 'admin' && role !== 'consultant') {
+      return reply.status(403).send({
+        error: 'forbidden',
+        message: 'Admin or consultant role required',
+        requestId: req.id,
+      });
+    }
+
+    const parsed = createSubjectTenantBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'invalid_body',
+        message: 'Body must be { name: string (1..200), kind?: "claimant"|"financier" }',
+        requestId: req.id,
+      });
+    }
+
+    const { name, kind } = parsed.data;
+    const tenantId = req.user!.tenantId!;
+    const userId = req.user!.id;
+
+    return await sql.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
+
+      // Duplicate-name check within firm (the schema doesn't enforce a
+      // (tenant_id, name) unique index — see subject_tenant.ts — so we
+      // enforce in app code under transaction). RLS already restricts the
+      // SELECT to the active firm, so the check is implicitly per-firm.
+      const dupes = await tx<{ id: string }[]>`
+        SELECT id FROM subject_tenant
+         WHERE name = ${name} AND deleted_at IS NULL
+      `;
+      if (dupes[0]) {
+        return reply.status(409).send({
+          error: 'duplicate_name',
+          message: `A subject_tenant with name "${name}" already exists in this firm`,
+          requestId: req.id,
+        });
+      }
+
+      const newId = crypto.randomUUID();
+      const inserted = await tx<
+        {
+          id: string;
+          tenant_id: string;
+          name: string;
+          kind: 'claimant' | 'financier';
+          created_at: Date | string;
+          updated_at: Date | string;
+        }[]
+      >`
+        INSERT INTO subject_tenant (id, tenant_id, name, kind)
+        VALUES (${newId}, ${tenantId}, ${name}, ${kind})
+        RETURNING id, tenant_id, name, kind, created_at, updated_at
+      `;
+      if (!inserted[0]) {
+        throw new Error('POST /v1/subject-tenants: INSERT returned no row');
+      }
+
+      // ACL row: the creator gets 'lead' role on this claimant. The
+      // subject_tenant_user.role enum is ('lead' | 'observer') — the plan-
+      // spec mentions 'owner' but the schema (T7, db/schema/subject_tenant_user.ts)
+      // doesn't include that value, so 'lead' is the schema-correct
+      // equivalent (primary consultant on the claimant, full access).
+      await tx`
+        INSERT INTO subject_tenant_user (id, subject_tenant_id, user_id, role)
+        VALUES (${crypto.randomUUID()}, ${newId}, ${userId}, 'lead')
+      `;
+
+      return reply.status(201).send({ subject_tenant: toApi(inserted[0]) });
     });
   });
 }
