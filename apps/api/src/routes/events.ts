@@ -13,6 +13,7 @@ import { insertEventWithChain } from '@cpa/db';
 import { sql } from '@cpa/db/client';
 import {
   createEventBody,
+  listEventsQuery,
   type Classification,
   type Event as ApiEvent,
 } from '@cpa/schemas';
@@ -223,4 +224,135 @@ export function registerEvents(app: FastifyInstance): void {
 
     return reply.status(201).send({ event: rowToEvent(fresh) });
   });
+
+  app.get('/v1/events', { preHandler: requireSession }, async (req, reply) => {
+    const parsed = listEventsQuery.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'invalid_query',
+        message:
+          'Query must include subject_tenant_id; optional filter, limit (1..200), cursor',
+        requestId: req.id,
+      });
+    }
+    const { subject_tenant_id, filter, limit, cursor } = parsed.data;
+    const tenantId = req.user!.tenantId!;
+
+    // Decode the opaque cursor. Forward-pagination only (older first → next).
+    // The cursor encodes the tuple (captured_at, received_at, id) of the
+    // last row on the previous page; the next page is "rows strictly less
+    // than this tuple" since we sort DESC.
+    const decoded = cursor ? decodeCursor(cursor) : null;
+    if (cursor && !decoded) {
+      return reply.status(400).send({
+        error: 'invalid_cursor',
+        message: 'cursor is malformed',
+        requestId: req.id,
+      });
+    }
+
+    return await sql.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
+
+      // Use the view so effective_kind / is_overridden are pre-computed.
+      // RLS on the underlying `event` table still applies through the view.
+      // We over-fetch by 1 to know whether a next page exists.
+      const fetchN = limit + 1;
+
+      // Cursor predicate: lexicographic (captured_at, received_at, id) DESC.
+      // Postgres doesn't have a "row-tuple <" comparison that works cleanly
+      // with timestamps + uuid + nullable order columns, so we expand it.
+      const cursorClause = decoded
+        ? tx`AND (
+            captured_at < ${decoded.captured_at}
+            OR (captured_at = ${decoded.captured_at} AND received_at < ${decoded.received_at})
+            OR (
+              captured_at = ${decoded.captured_at}
+              AND received_at = ${decoded.received_at}
+              AND id < ${decoded.id}
+            )
+          )`
+        : tx``;
+
+      const filterClause =
+        filter === 'needs_review'
+          ? tx`AND effective_kind <> 'OVERRIDE'
+                AND classification IS NOT NULL
+                AND (classification->>'confidence')::float < 0.7
+                AND NOT is_overridden`
+          : filter === 'ineligible'
+            ? tx`AND effective_kind = 'INELIGIBLE'`
+            : filter === 'overrides'
+              ? tx`AND kind = 'OVERRIDE'`
+              : tx``;
+
+      const rows = await tx<RawEventViewRow[]>`
+        SELECT * FROM event_with_effective_kind
+         WHERE subject_tenant_id = ${subject_tenant_id}
+           ${cursorClause}
+           ${filterClause}
+         ORDER BY captured_at DESC, received_at DESC, id DESC
+         LIMIT ${fetchN}
+      `;
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      const last = page[page.length - 1];
+      const nextCursor =
+        hasMore && last
+          ? encodeCursor({
+              captured_at: typeof last.captured_at === 'string'
+                ? last.captured_at
+                : last.captured_at.toISOString(),
+              received_at: typeof last.received_at === 'string'
+                ? last.received_at
+                : last.received_at.toISOString(),
+              id: last.id,
+            })
+          : null;
+
+      return { events: page.map(rowToEvent), next_cursor: nextCursor };
+    });
+  });
+}
+
+interface CursorTuple {
+  captured_at: string;
+  received_at: string;
+  id: string;
+}
+
+/**
+ * Encode a cursor tuple as opaque base64 JSON. Clients shouldn't introspect
+ * — the format is internal and can change without bumping the API contract
+ * since cursors are returned by us and passed back as-is.
+ */
+function encodeCursor(t: CursorTuple): string {
+  return Buffer.from(JSON.stringify(t), 'utf8').toString('base64url');
+}
+
+/**
+ * Decode an opaque cursor. Returns null on any parse error so the route can
+ * surface a 400; never throws (untrusted input). Validates the three field
+ * shapes minimally so a corrupted cursor doesn't slip into the WHERE clause.
+ */
+function decodeCursor(s: string): CursorTuple | null {
+  try {
+    const json = Buffer.from(s, 'base64url').toString('utf8');
+    const parsed = JSON.parse(json) as Partial<CursorTuple>;
+    if (
+      typeof parsed.captured_at !== 'string' ||
+      typeof parsed.received_at !== 'string' ||
+      typeof parsed.id !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      captured_at: parsed.captured_at,
+      received_at: parsed.received_at,
+      id: parsed.id,
+    };
+  } catch {
+    return null;
+  }
 }
