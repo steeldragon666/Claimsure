@@ -5,6 +5,9 @@
 **Author:** Aaron Newson + AI pair (Claude Opus 4.7 1M)
 **Builds on:** [P1 Identity & Tenancy](./2026-04-26-p1-identity-tenancy-design.md) (branch `p1/identity-tenancy`, head at this branch's parent)
 **Source spec:** [Architecture design §3 + §4 + §6 P2 row](./2026-04-25-rdti-grants-platform-design.md)
+**Product spec:** [Omniscient Feature Architecture](../product/2026-04-27-omniscient-feature-spec.md) (canonical) + [Spec ↔ Phase Mapping](../product/2026-04-27-spec-to-phase-mapping.md)
+**Modules covered:** Module 1 core (Evidence & Compliance Engine — hash chain, evidence kinds, override semantics, Division 355 anchors), Module 2 ground floor (classifier agent with citation-grounded statutory anchors)
+**Pillars advanced:** 1 (compliance-grade), 2 (augmentation via override + needs-review queue), 3 (AU-native — Division 355), 4 (closed system, citation-grounded), 5 (multi-tenant — RLS extended to event)
 
 ---
 
