@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'p1/**']
   pull_request:
     branches: [main]
 
@@ -69,3 +69,73 @@ jobs:
 
       - name: Format check
         run: pnpm format:check
+
+  e2e:
+    name: Playwright e2e
+    needs: [ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_USER: cpa
+          POSTGRES_PASSWORD: cpa
+          POSTGRES_DB: cpa_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cpa -d cpa_dev"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # Migrations + privileged DB access (cpa role)
+      DATABASE_URL: postgres://cpa:cpa@localhost:5432/cpa_dev
+      # Application runtime (cpa_app role; created by migration 0002)
+      DATABASE_URL_APP: postgres://cpa_app:cpa_app_dev_pwd@localhost:5432/cpa_dev
+      # Session JWT secret — fixture mints JWTs the API will accept
+      SESSION_JWT_SECRET: ci-test-32-bytes-of-entropy-padd!
+      # Override Playwright webServer URLs (default ports stand)
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Init pgvector + pgcrypto
+        run: PGPASSWORD=cpa psql -h localhost -U cpa -d cpa_dev -f tools/postgres/init.sql
+
+      - name: Build (workspace packages — produces dist/)
+        run: pnpm build
+
+      - name: Migrate (creates cpa_app role + RLS policies + all schemas)
+        run: pnpm db:migrate
+
+      - name: Install Chromium for Playwright
+        run: pnpm --filter @cpa/web exec playwright install --with-deps chromium
+
+      - name: Run e2e suite
+        run: pnpm --filter @cpa/web exec playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
