@@ -102,8 +102,18 @@ export function buildApp(): App {
   // Identity routes — always registered (no env dependencies):
   // - POST /v1/auth/signout: clears the session cookie (idempotent)
   // - GET  /v1/whoami: returns the current user + tenant + memberships
-  registerSignout(app, { cookieName, cookieSecure: process.env['NODE_ENV'] === 'production' });
-  registerWhoami(app);
+  // Wrapped in app.register so Fastify resolves the instance type to
+  // its plugin-default shape (which the helpers accept), avoiding the
+  // pino-narrowed type leak from the outer buildApp scope.
+  app.register(async (instance) => {
+    registerSignout(instance, {
+      cookieName,
+      cookieSecure: process.env['NODE_ENV'] === 'production',
+    });
+  });
+  app.register(async (instance) => {
+    registerWhoami(instance);
+  });
 
   // OIDC routes only register when both clientId AND clientSecret are
   // present. In tests + bare-bones dev, env vars are unset and the

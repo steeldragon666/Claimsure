@@ -18,7 +18,7 @@ test('GET /v1/whoami: 401 when no session cookie', async () => {
   const app = buildApp();
   const res = await app.inject({ method: 'GET', url: '/v1/whoami' });
   assert.equal(res.statusCode, 401);
-  const body = res.json() as { error: string };
+  const body = res.json();
   assert.equal(body.error, 'unauthenticated');
   await app.close();
 });
@@ -55,10 +55,7 @@ test('GET /v1/whoami: 200 with user + tenant info when authenticated', async () 
       cookies: { cpa_session: jwt },
     });
     assert.equal(res.statusCode, 200);
-    const body = res.json() as {
-      user: { id: string; email: string; tenantId: string; role: string };
-      availableTenants: Array<{ tenantId: string; name: string; role: string; isDefault: boolean }>;
-    };
+    const body = res.json();
     assert.equal(body.user.id, USER_ID);
     assert.equal(body.user.email, 'whoami@example.com');
     assert.equal(body.user.tenantId, TENANT_ID);
