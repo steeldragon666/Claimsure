@@ -16,7 +16,9 @@ import { createLogger } from '@cpa/observability';
 import { sessionPlugin } from '@cpa/auth';
 import { registerGoogleAuth } from './routes/auth/google.js';
 import { registerMicrosoftAuth } from './routes/auth/microsoft.js';
+import { registerSignout } from './routes/auth/signout.js';
 import { healthRoutes } from './routes/health.js';
+import { registerWhoami } from './routes/whoami.js';
 
 const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
 const DEFAULT_SESSION_COOKIE_NAME = 'cpa_session';
@@ -96,6 +98,12 @@ export function buildApp(): App {
   app.register(sessionPlugin, { secret: sessionSecret, cookieName });
 
   app.register(healthRoutes);
+
+  // Identity routes — always registered (no env dependencies):
+  // - POST /v1/auth/signout: clears the session cookie (idempotent)
+  // - GET  /v1/whoami: returns the current user + tenant + memberships
+  registerSignout(app, { cookieName, cookieSecure: process.env['NODE_ENV'] === 'production' });
+  registerWhoami(app);
 
   // OIDC routes only register when both clientId AND clientSecret are
   // present. In tests + bare-bones dev, env vars are unset and the
