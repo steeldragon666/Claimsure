@@ -102,3 +102,105 @@ export async function lookupActiveTenant(userId: string): Promise<ActiveTenantRe
     availableTenants,
   };
 }
+
+export interface GetOrAddTenantUserInput {
+  tenantId: string;
+  userId: string;
+  role: 'admin' | 'consultant' | 'viewer';
+  isDefault: boolean;
+}
+
+export interface TenantUserRow {
+  id: string;
+  tenantId: string;
+  userId: string;
+  role: 'admin' | 'consultant' | 'viewer';
+  isDefault: boolean;
+  addedAt: Date | string;
+}
+
+export interface GetOrAddTenantUserResult {
+  row: TenantUserRow;
+  status: 'created' | 'undeleted' | 'already_member';
+}
+
+interface RawTenantUserRow {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  role: 'admin' | 'consultant' | 'viewer';
+  is_default: boolean;
+  deleted_at: Date | string | null;
+  created_at: Date | string;
+}
+
+const toCamel = (r: RawTenantUserRow): TenantUserRow => ({
+  id: r.id,
+  tenantId: r.tenant_id,
+  userId: r.user_id,
+  role: r.role,
+  isDefault: r.is_default,
+  addedAt: r.created_at,
+});
+
+/**
+ * Add a user to a tenant, or undelete + re-role them if they were
+ * previously soft-deleted, or report 'already_member' if a non-deleted
+ * row exists.
+ *
+ * SELECT-then-branch inside a single sql.begin transaction:
+ *   - if no row: INSERT new
+ *   - if row exists & deleted_at IS NULL: 'already_member' (caller decides
+ *     whether 409 or no-op)
+ *   - if row exists & soft-deleted: UPDATE deleted_at=NULL + new role + isDefault
+ *
+ * The transaction sets app.current_tenant_id to the input tenantId via
+ * SET LOCAL so RLS USING + WITH CHECK both pass for that tenant. Caller
+ * (route handler) is responsible for ensuring tenantId === req.user.tenantId
+ * before calling — this helper trusts its caller.
+ *
+ * Race-safety: the partial unique index on (tenant_id, user_id) WHERE
+ * deleted_at IS NULL (migration 0005) means concurrent INSERTs for the
+ * same pair don't both succeed. The second one fails with a unique-
+ * violation error; the route handler retries by re-running the SELECT
+ * branch.
+ */
+export async function getOrAddTenantUser(
+  input: GetOrAddTenantUserInput,
+): Promise<GetOrAddTenantUserResult> {
+  return await sql.begin(async (tx) => {
+    await tx`SELECT set_config('app.current_tenant_id', ${input.tenantId}, true)`;
+
+    const existing = await tx<RawTenantUserRow[]>`
+      SELECT id, tenant_id, user_id, role, is_default, deleted_at, created_at
+        FROM tenant_user
+       WHERE tenant_id = ${input.tenantId} AND user_id = ${input.userId}
+       FOR UPDATE
+    `;
+
+    if (existing[0]) {
+      if (existing[0].deleted_at === null) {
+        return { row: toCamel(existing[0]), status: 'already_member' as const };
+      }
+      const updated = await tx<RawTenantUserRow[]>`
+        UPDATE tenant_user
+           SET deleted_at = NULL,
+               role = ${input.role},
+               is_default = ${input.isDefault}
+         WHERE id = ${existing[0].id}
+        RETURNING id, tenant_id, user_id, role, is_default, deleted_at, created_at
+      `;
+      if (!updated[0]) throw new Error('getOrAddTenantUser: undelete UPDATE returned no row');
+      return { row: toCamel(updated[0]), status: 'undeleted' as const };
+    }
+
+    const newId = crypto.randomUUID();
+    const created = await tx<RawTenantUserRow[]>`
+      INSERT INTO tenant_user (id, tenant_id, user_id, role, is_default)
+      VALUES (${newId}, ${input.tenantId}, ${input.userId}, ${input.role}, ${input.isDefault})
+      RETURNING id, tenant_id, user_id, role, is_default, deleted_at, created_at
+    `;
+    if (!created[0]) throw new Error('getOrAddTenantUser: INSERT returned no row');
+    return { row: toCamel(created[0]), status: 'created' as const };
+  });
+}

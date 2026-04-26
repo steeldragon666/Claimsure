@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { sql, privilegedSql } from '@cpa/db/client';
-import { findOrCreateUser, lookupActiveTenant } from './users.js';
+import { findOrCreateUser, getOrAddTenantUser, lookupActiveTenant } from './users.js';
 
 const USER_NEW_EXTERNAL_ID = 'microsoft:test-t5-new-oid';
 const USER_EXISTING_EXTERNAL_ID = 'microsoft:test-t5-existing-oid';
@@ -14,8 +14,8 @@ before(async () => {
 
 after(async () => {
   await sql`DELETE FROM "user" WHERE external_id LIKE 'microsoft:test-t5-%'`;
-  await sql.end();
-  await privilegedSql.end();
+  // sql.end / privilegedSql.end deferred to the bottom-of-file after() so
+  // any later after()s (e.g. T4 cleanup) can still issue queries.
 });
 
 test('findOrCreateUser: creates a new user when external_id unseen', async () => {
@@ -144,4 +144,137 @@ test('lookupActiveTenant: returns nulls + empty array for user with no membershi
   } finally {
     await sql`DELETE FROM "user" WHERE id = ${FRESH}`;
   }
+});
+
+// ============================================================
+// W3 T4 — getOrAddTenantUser tests
+// ============================================================
+
+const T4_TENANT = '00000000-0000-4000-8000-0000000a0040';
+const T4_USER = '00000000-0000-4000-8000-0000000a0041';
+
+before(async () => {
+  // Idempotent seeds — survive prior-run leftovers without crashing the suite.
+  // The tenant_user rows for this pair get cleaned in each test's local cleanup.
+  await sql`DELETE FROM tenant_user WHERE tenant_id = ${T4_TENANT}`;
+  await sql`INSERT INTO tenant (id, name, slug, primary_idp)
+            VALUES (${T4_TENANT}, 'T4 Firm', 't4-firm-uniq-seed', 'mixed')
+            ON CONFLICT (id) DO NOTHING`;
+  await sql`INSERT INTO "user" (id, email, primary_idp, external_id)
+            VALUES (${T4_USER}, 't4-user-seed@example.com', 'microsoft', 'microsoft:t4-user-oid')
+            ON CONFLICT (id) DO NOTHING`;
+});
+
+after(async () => {
+  await sql`DELETE FROM tenant_user WHERE tenant_id = ${T4_TENANT}`;
+  await sql`DELETE FROM "user" WHERE id = ${T4_USER}`;
+  await sql`DELETE FROM tenant WHERE id = ${T4_TENANT}`;
+  // Final teardown — close pools after all other after() hooks have run.
+  await sql.end();
+  await privilegedSql.end();
+});
+
+test('getOrAddTenantUser: creates new row when none exists', async () => {
+  const result = await getOrAddTenantUser({
+    tenantId: T4_TENANT,
+    userId: T4_USER,
+    role: 'consultant',
+    isDefault: false,
+  });
+  assert.equal(result.status, 'created');
+  assert.equal(result.row.tenantId, T4_TENANT);
+  assert.equal(result.row.userId, T4_USER);
+  assert.equal(result.row.role, 'consultant');
+  assert.equal(result.row.isDefault, false);
+
+  // Cleanup for subsequent test
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${T4_TENANT} AND user_id = ${T4_USER}`;
+});
+
+test('getOrAddTenantUser: returns already_member when row exists & not deleted', async () => {
+  await getOrAddTenantUser({
+    tenantId: T4_TENANT,
+    userId: T4_USER,
+    role: 'consultant',
+    isDefault: false,
+  });
+  // Second call — same row exists
+  const result = await getOrAddTenantUser({
+    tenantId: T4_TENANT,
+    userId: T4_USER,
+    role: 'admin', // requested change is IGNORED on already_member path
+    isDefault: true,
+  });
+  assert.equal(result.status, 'already_member');
+  assert.equal(
+    result.row.role,
+    'consultant',
+    'existing role preserved (caller sees what is, not what was asked)',
+  );
+  assert.equal(result.row.isDefault, false);
+
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${T4_TENANT} AND user_id = ${T4_USER}`;
+});
+
+test('getOrAddTenantUser: undeletes + applies new role/isDefault when row exists & soft-deleted', async () => {
+  // Seed: insert + soft-delete
+  await getOrAddTenantUser({
+    tenantId: T4_TENANT,
+    userId: T4_USER,
+    role: 'viewer',
+    isDefault: false,
+  });
+  await privilegedSql`UPDATE tenant_user SET deleted_at = NOW() WHERE tenant_id = ${T4_TENANT} AND user_id = ${T4_USER}`;
+
+  const result = await getOrAddTenantUser({
+    tenantId: T4_TENANT,
+    userId: T4_USER,
+    role: 'admin',
+    isDefault: true,
+  });
+  assert.equal(result.status, 'undeleted');
+  assert.equal(result.row.role, 'admin', 'new role applied on undelete');
+  assert.equal(result.row.isDefault, true, 'new isDefault applied on undelete');
+
+  // Verify deleted_at really is NULL
+  const check = await privilegedSql<{ deleted_at: Date | null }[]>`
+    SELECT deleted_at FROM tenant_user WHERE tenant_id = ${T4_TENANT} AND user_id = ${T4_USER}
+  `;
+  assert.equal(check[0]?.deleted_at, null);
+
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${T4_TENANT} AND user_id = ${T4_USER}`;
+});
+
+test('getOrAddTenantUser: concurrent calls converge — only one row created (race-safe)', async () => {
+  const [a, b] = await Promise.all([
+    getOrAddTenantUser({
+      tenantId: T4_TENANT,
+      userId: T4_USER,
+      role: 'consultant',
+      isDefault: false,
+    }).catch((err) => ({ error: err as Error })),
+    getOrAddTenantUser({
+      tenantId: T4_TENANT,
+      userId: T4_USER,
+      role: 'consultant',
+      isDefault: false,
+    }).catch((err) => ({ error: err as Error })),
+  ]);
+
+  // Postgres serializable: one will succeed (created), the other will either
+  // succeed (already_member after the first commits) OR error with a
+  // unique-violation. Both outcomes are race-safe.
+  // What we MUST NOT see: two created rows. Verify with a count.
+  const count = await privilegedSql<{ n: string }[]>`
+    SELECT COUNT(*)::text AS n FROM tenant_user
+    WHERE tenant_id = ${T4_TENANT} AND user_id = ${T4_USER} AND deleted_at IS NULL
+  `;
+  assert.equal(count[0]?.n, '1', 'exactly one active membership row exists');
+
+  // At least one of a/b succeeded
+  const aOk = !('error' in a);
+  const bOk = !('error' in b);
+  assert.ok(aOk || bOk, 'at least one call succeeded');
+
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${T4_TENANT} AND user_id = ${T4_USER}`;
 });
