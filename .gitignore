@@ -9,6 +9,7 @@ node_modules/
 # build artefacts
 .turbo/
 dist/
+.next/
 *.tsbuildinfo
 
 # logs
