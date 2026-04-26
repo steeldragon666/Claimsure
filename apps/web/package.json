@@ -7,7 +7,7 @@
     "build": "next build",
     "dev": "next dev --port 5173",
     "start": "next start --port 5173",
-    "test": "cross-env LOG_LEVEL=silent tsx --env-file=../../.env --test --test-force-exit \"src/**/*.test.{ts,tsx}\"",
+    "test": "cross-env LOG_LEVEL=silent tsx --env-file-if-exists=../../.env --test --test-force-exit \"src/**/*.test.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "e2e": "playwright test",

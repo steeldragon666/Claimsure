@@ -32,7 +32,12 @@ jobs:
           --health-retries 10
 
     env:
+      # Migrations + privileged DB access (cpa role)
       DATABASE_URL: postgres://cpa:cpa@localhost:5432/cpa_dev
+      # Application runtime (cpa_app role; created by migration 0002)
+      DATABASE_URL_APP: postgres://cpa_app:cpa_app_dev_pwd@localhost:5432/cpa_dev
+      # Session JWT secret — used by W2/W3/W4 unit tests that sign JWTs
+      SESSION_JWT_SECRET: ci-test-32-bytes-of-entropy-padd!
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +58,7 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Migrate
+      - name: Migrate (creates cpa_app role + RLS policies)
         run: pnpm db:migrate
 
       - name: Typecheck
