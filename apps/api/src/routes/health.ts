@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { checkDb } from '../db.js';
+import { checkDb, defaultRunQuery } from '../db.js';
 
 const HealthResponse = z.object({
   status: z.literal('ok'),
@@ -45,7 +45,7 @@ export function healthRoutes(app: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const db = await checkDb(req.log);
+      const db = await checkDb(defaultRunQuery, req.log);
       const status = db.ok ? ('ready' as const) : ('degraded' as const);
       const code = db.ok ? 200 : 503;
       return reply.code(code).send({ status, checks: { db } });
