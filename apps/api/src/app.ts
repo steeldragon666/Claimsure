@@ -105,14 +105,16 @@ export function buildApp(): App {
   // Wrapped in app.register so Fastify resolves the instance type to
   // its plugin-default shape (which the helpers accept), avoiding the
   // pino-narrowed type leak from the outer buildApp scope.
-  app.register(async (instance) => {
+  app.register((instance, _opts, done) => {
     registerSignout(instance, {
       cookieName,
       cookieSecure: process.env['NODE_ENV'] === 'production',
     });
+    done();
   });
-  app.register(async (instance) => {
+  app.register((instance, _opts, done) => {
     registerWhoami(instance);
+    done();
   });
 
   // OIDC routes only register when both clientId AND clientSecret are
