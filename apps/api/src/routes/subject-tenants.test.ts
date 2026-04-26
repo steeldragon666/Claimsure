@@ -2,6 +2,7 @@ import { test, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { signSession } from '@cpa/auth';
 import { sql, privilegedSql } from '@cpa/db/client';
+import { insertEventWithChain } from '@cpa/db';
 import { buildApp } from '../app.js';
 
 const SESSION_SECRET = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
@@ -18,7 +19,9 @@ const SUBJECT_B1 = '00000000-0000-4000-8000-0000000c0023';
 const cleanup = async (): Promise<void> => {
   // Wipe in FK-safe order. Created subject_tenant_user rows live under the
   // seeded subject_tenants AND any rows created by the POST tests; cascade
-  // by tenant_id so every test-created acl is captured.
+  // by tenant_id so every test-created acl is captured. Events FK to both
+  // tenant + subject_tenant, so wipe them first.
+  await privilegedSql`DELETE FROM event WHERE tenant_id IN (${TENANT_A}, ${TENANT_B})`;
   await privilegedSql`DELETE FROM subject_tenant_user WHERE subject_tenant_id IN (
     SELECT id FROM subject_tenant WHERE tenant_id IN (${TENANT_A}, ${TENANT_B})
   )`;
@@ -47,6 +50,34 @@ before(async () => {
                        VALUES (${SUBJECT_A1}, ${TENANT_A}, 'Acme Co', 'claimant'),
                               (${SUBJECT_A2}, ${TENANT_A}, 'Beta Inc', 'claimant'),
                               (${SUBJECT_B1}, ${TENANT_B}, 'Other Corp', 'financier')`;
+
+  // Seed two events on SUBJECT_A1 so detail-test assertions on event_count /
+  // head_hash have something non-trivial to verify. Use the chain helper so
+  // the rows pass DB CHECK constraints.
+  await insertEventWithChain({
+    tenant_id: TENANT_A,
+    subject_tenant_id: SUBJECT_A1,
+    kind: 'HYPOTHESIS',
+    payload: { _v: 1, source: 'test-fixture', text: 'first' },
+    classification: null,
+    captured_at: new Date('2025-01-01T00:00:00Z'),
+    captured_by_user_id: ADMIN_USER,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  await insertEventWithChain({
+    tenant_id: TENANT_A,
+    subject_tenant_id: SUBJECT_A1,
+    kind: 'EXPERIMENT',
+    payload: { _v: 1, source: 'test-fixture', text: 'second' },
+    classification: null,
+    captured_at: new Date('2025-01-02T00:00:00Z'),
+    captured_by_user_id: ADMIN_USER,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
 });
 
 after(async () => {
@@ -177,5 +208,61 @@ test('POST /v1/subject-tenants: 400 on invalid body', async () => {
     payload: { name: '', kind: 'claimant' }, // empty name
   });
   assert.equal(res.statusCode, 400);
+  await app.close();
+});
+
+test('GET /v1/subject-tenants/:id: returns detail with event_count + head_hash', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/subject-tenants/${SUBJECT_A1}`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{
+    subject_tenant: { id: string; name: string };
+    event_count: number;
+    head_hash: string | null;
+  }>();
+  assert.equal(body.subject_tenant.id, SUBJECT_A1);
+  assert.equal(body.event_count, 2);
+  assert.ok(body.head_hash !== null);
+  assert.match(body.head_hash ?? '', /^[0-9a-f]{64}$/);
+  await app.close();
+});
+
+test('GET /v1/subject-tenants/:id: event_count=0 + head_hash=null when no events', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/subject-tenants/${SUBJECT_A2}`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ event_count: number; head_hash: string | null }>();
+  assert.equal(body.event_count, 0);
+  assert.equal(body.head_hash, null);
+  await app.close();
+});
+
+test('GET /v1/subject-tenants/:id: 404 unknown id', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/subject-tenants/00000000-0000-4000-8000-00000000dead',
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 404);
+  await app.close();
+});
+
+test('GET /v1/subject-tenants/:id: 404 cross-firm (RLS hides firm B row)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/subject-tenants/${SUBJECT_B1}`,
+    cookies: { cpa_session: await adminJwt() }, // session is in firm A
+  });
+  assert.equal(res.statusCode, 404);
   await app.close();
 });

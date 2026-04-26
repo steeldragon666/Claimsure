@@ -148,4 +148,51 @@ export function registerSubjectTenants(app: FastifyInstance): void {
       return reply.status(201).send({ subject_tenant: toApi(inserted[0]) });
     });
   });
+
+  app.get<{ Params: { id: string } }>(
+    '/v1/subject-tenants/:id',
+    { preHandler: requireSession },
+    async (req, reply) => {
+      const { id } = req.params;
+      const tenantId = req.user!.tenantId!;
+
+      return await sql.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
+
+        const rows = await tx<RawSubjectTenantRow[]>`
+          SELECT id, tenant_id, name, kind, created_at, updated_at
+            FROM subject_tenant
+           WHERE id = ${id} AND deleted_at IS NULL
+        `;
+        if (!rows[0]) {
+          return reply.status(404).send({
+            error: 'subject_tenant_not_found',
+            message: 'No subject_tenant with that id in this firm',
+            requestId: req.id,
+          });
+        }
+
+        // Aggregates: total events on this chain + the chain head hash
+        // (latest event ordered by captured_at, received_at, id — same key
+        // the chain helper uses). RLS confines both to the active firm.
+        const counts = await tx<{ event_count: string }[]>`
+          SELECT COUNT(*)::text AS event_count
+            FROM event
+           WHERE subject_tenant_id = ${id}
+        `;
+        const heads = await tx<{ hash: string }[]>`
+          SELECT hash FROM event
+           WHERE subject_tenant_id = ${id}
+           ORDER BY captured_at DESC, received_at DESC, id DESC
+           LIMIT 1
+        `;
+
+        return {
+          subject_tenant: toApi(rows[0]),
+          event_count: Number(counts[0]?.event_count ?? '0'),
+          head_hash: heads[0]?.hash ?? null,
+        };
+      });
+    },
+  );
 }
