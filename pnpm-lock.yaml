@@ -32,6 +32,9 @@ importers:
       '@cpa/agents':
         specifier: workspace:*
         version: link:../../packages/agents
+      '@cpa/audit-score':
+        specifier: workspace:*
+        version: link:../../packages/audit-score
       '@cpa/auth':
         specifier: workspace:*
         version: link:../../packages/auth
@@ -315,6 +318,25 @@ importers:
       nock:
         specifier: ^14.0.13
         version: 14.0.13
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/audit-score:
+    dependencies:
+      '@cpa/db':
+        specifier: workspace:*
+        version: link:../db
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.19.17
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
