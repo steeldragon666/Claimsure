@@ -70,9 +70,17 @@ test.describe('Users admin remove', () => {
     await page.getByRole('button', { name: /Remove from firm/i }).click();
     await page.getByRole('button', { name: /^Remove$/i }).click();
 
-    // Expect 409 toast — no redirect
-    await expect(page.getByText(/Cannot remove the only firm admin/i)).toBeVisible({
-      timeout: 5_000,
-    });
+    // Expect 409 toast — no redirect.
+    //
+    // Radix Toast renders the description twice: the visible
+    // ToastDescription div AND a hidden <span role="status"> notification
+    // sentinel (so SR announces title+description as one utterance).
+    // Using exact match scopes to the visible div (the sentinel
+    // concatenates "Notification" + title + description into one string).
+    await expect(
+      page.getByText('Cannot remove the only firm admin. Promote another user first.', {
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 5_000 });
   });
 });

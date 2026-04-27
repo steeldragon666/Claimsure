@@ -80,10 +80,21 @@ export function EditUserForm({ user }: { user: UserRef }) {
   const onRemove = () => {
     remove.mutate(undefined, {
       onSuccess: () => {
+        // Close the confirmation dialog before navigating. Leaving it open
+        // while router.push fires keeps Radix's focus-trap active and the
+        // overlay mounted, which delays the route transition (Playwright
+        // observed the navigation never landing within 10s). Closing the
+        // dialog first lets focus restore + overlay unmount synchronously.
+        setConfirmOpen(false);
         toast({ title: 'Removed from firm' });
         router.push('/users');
       },
       onError: (err) => {
+        // Close the dialog FIRST, then surface the toast. Radix's focus-
+        // trap + portal pattern keeps the visible toast occluded by the
+        // dialog overlay until the dialog unmounts; closing first ensures
+        // the toast is reachable for assistive tech and Playwright alike.
+        setConfirmOpen(false);
         if (err instanceof ConflictError) {
           toast({
             title: 'Cannot remove',
@@ -97,7 +108,6 @@ export function EditUserForm({ user }: { user: UserRef }) {
             variant: 'destructive',
           });
         }
-        setConfirmOpen(false);
       },
     });
   };
