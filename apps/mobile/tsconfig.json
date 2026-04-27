@@ -18,5 +18,5 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "expo-env.d.ts"],
-  "exclude": ["node_modules", ".expo", "dist"]
+  "exclude": ["node_modules", ".expo", "dist", "e2e"]
 }
