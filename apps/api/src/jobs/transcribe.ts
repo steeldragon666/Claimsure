@@ -151,8 +151,15 @@ export async function runTranscribeJob(input: TranscribeJobInput): Promise<void>
   // context. The event_id is the bind; cross-tenant leakage isn't a
   // risk because the id was created server-side in the same flow that
   // enqueued the job.
+  //
+  // No `::jsonb` cast — postgres-js's binary protocol treats
+  // `${string}::jsonb` as a jsonb-string-scalar and double-encodes,
+  // which leaves the column storing a JSON-string instead of an
+  // object. The column's declared jsonb type drives coercion of the
+  // raw JSON text we pass in. (Same fix pattern as audit-score-
+  // recompute and media finalize.)
   const updated = await privilegedSql<{ id: string }[]>`
-    UPDATE event SET payload = ${JSON.stringify(newPayload)}::jsonb
+    UPDATE event SET payload = ${JSON.stringify(newPayload)}
      WHERE id = ${input.event_id}
     RETURNING id
   `;

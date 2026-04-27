@@ -243,41 +243,12 @@ export function registerMobileEvents(app: FastifyInstance): void {
         };
     const eventClassification = isVoice ? null : buildHypothesisClassification();
 
-    // event.captured_by_user_id FKs to user.id, but the mobile principal
-    // is a subject_tenant_employee — there's no user row to point at.
-    // For mobile-employee captures we attribute the event to the firm's
-    // first admin user (the one who originally invited the employee in
-    // most cases), and stash the real employee_id inside the payload.
-    // The chain hash still binds employee identity via the payload.
-    const firmAdmin = await sql.begin(async (tx) => {
-      await tx`SELECT set_config('app.current_tenant_id', ${principal.tenantId}, true)`;
-      const rows = await tx<{ user_id: string }[]>`
-        SELECT user_id FROM tenant_user
-         WHERE tenant_id = ${principal.tenantId}
-           AND role = 'admin'
-           AND deleted_at IS NULL
-         ORDER BY created_at ASC
-         LIMIT 1
-      `;
-      return rows[0]?.user_id ?? null;
-    });
-    if (!firmAdmin) {
-      return reply
-        .status(500)
-        .send(
-          errEnvelope(
-            'NO_FIRM_ADMIN',
-            'firm has no admin user to attribute mobile capture against',
-            req.id,
-          ),
-        );
-    }
-
-    // Stash the real employee id on the payload so the audit chain
-    // captures who actually pressed the button. Both variants accept
-    // an extra jsonb field — `captured_by_employee_id`.
-    eventPayload.captured_by_employee_id = principal.employeeId;
-
+    // Mobile captures attribute to the employee, not a user. Migration
+    // 0011 added `captured_by_employee_id` FK + a CHECK constraint
+    // requiring exactly one of (captured_by_user_id, captured_by_employee_id)
+    // to be set. The chain canonicaliser conditionally includes the
+    // employee_id only when non-null, so existing P2 events
+    // (employee_id always null) keep their original hashes.
     let inserted: { id: string; hash: string };
     try {
       const result = await insertEventWithChain({
@@ -287,7 +258,8 @@ export function registerMobileEvents(app: FastifyInstance): void {
         payload: eventPayload,
         classification: eventClassification,
         captured_at: new Date(),
-        captured_by_user_id: firmAdmin,
+        captured_by_user_id: null,
+        captured_by_employee_id: principal.employeeId,
         override_of_event_id: null,
         override_new_kind: null,
         override_reason: null,

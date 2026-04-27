@@ -7,7 +7,14 @@ export type EventForHashing = {
   payload: unknown;
   classification: unknown;
   captured_at: Date;
-  captured_by_user_id: string;
+  // EITHER captured_by_user_id (consultant capture) OR
+  // captured_by_employee_id (mobile-employee capture); exactly one
+  // populated, enforced by the DB CHECK in migration 0011. The
+  // canonicaliser preserves backward compat for P2 events (which
+  // were always user_id) by conditionally OMITTING captured_by_employee_id
+  // when null/undefined — see canonicaliseEvent below.
+  captured_by_user_id: string | null;
+  captured_by_employee_id?: string | null;
   override_of_event_id: string | null;
   override_new_kind: string | null;
   override_reason: string | null;
@@ -29,6 +36,11 @@ function canonicalJsonStringify(value: unknown): string {
 }
 
 export function canonicaliseEvent(e: EventForHashing): string {
+  // captured_by_employee_id is conditionally included only when non-null
+  // so existing P2 events (which never had this field) produce the
+  // identical canonical bytes — and therefore the same SHA-256 hash —
+  // they had pre-migration. New mobile events (employee_id set,
+  // user_id null) get a different canonical shape; no collision.
   return canonicalJsonStringify({
     subject_tenant_id: e.subject_tenant_id,
     kind: e.kind,
@@ -36,6 +48,9 @@ export function canonicaliseEvent(e: EventForHashing): string {
     classification: e.classification,
     captured_at: e.captured_at.toISOString(),
     captured_by_user_id: e.captured_by_user_id,
+    ...(e.captured_by_employee_id != null
+      ? { captured_by_employee_id: e.captured_by_employee_id }
+      : {}),
     override_of_event_id: e.override_of_event_id ?? null,
     override_new_kind: e.override_new_kind ?? null,
     override_reason: e.override_reason ?? null,
@@ -97,7 +112,7 @@ export async function insertEventWithChain(input: InsertEventInput): Promise<Ins
         payload, classification,
         override_of_event_id, override_new_kind, override_reason,
         prev_hash, hash, idempotency_key,
-        captured_at, captured_by_user_id
+        captured_at, captured_by_user_id, captured_by_employee_id
       ) VALUES (
         ${id}, ${input.tenant_id}, ${input.subject_tenant_id},
         ${input.project_id ?? null}, ${input.milestone_id ?? null}, ${input.kind},
@@ -106,7 +121,9 @@ export async function insertEventWithChain(input: InsertEventInput): Promise<Ins
         ${input.override_new_kind ?? null},
         ${input.override_reason ?? null},
         ${prevHash}, ${newHash}, ${input.idempotency_key ?? null},
-        ${capturedAtIso}::timestamptz, ${input.captured_by_user_id}
+        ${capturedAtIso}::timestamptz,
+        ${input.captured_by_user_id ?? null},
+        ${input.captured_by_employee_id ?? null}
       )
     `;
     return { id, prev_hash: prevHash, hash: newHash };
@@ -137,7 +154,7 @@ export async function verifyChain(subjectTenantId: string): Promise<ChainStatus>
   >`
     SELECT
       id, subject_tenant_id, kind, payload, classification,
-      captured_at, captured_by_user_id, received_at,
+      captured_at, captured_by_user_id, captured_by_employee_id, received_at,
       override_of_event_id, override_new_kind, override_reason,
       prev_hash, hash
     FROM event
@@ -148,6 +165,13 @@ export async function verifyChain(subjectTenantId: string): Promise<ChainStatus>
   let head: string | null = null;
   for (let i = 0; i < rows.length; i++) {
     const e = rows[i]!;
+    // Pass captured_by_employee_id through so the canonicaliser's
+    // conditional include path stays consistent on re-hash; existing
+    // P2 events have null here, so the include branch doesn't fire
+    // and they hash identically to pre-migration values.
+    // `?? null` because exactOptionalPropertyTypes makes the optional
+    // `string | null` field reject `undefined` despite the SELECT
+    // typing — postgres-js delivers the column as null for non-mobile rows.
     const expected = hashEvent(prev, {
       subject_tenant_id: e.subject_tenant_id,
       kind: e.kind,
@@ -155,6 +179,7 @@ export async function verifyChain(subjectTenantId: string): Promise<ChainStatus>
       classification: e.classification,
       captured_at: new Date(e.captured_at),
       captured_by_user_id: e.captured_by_user_id,
+      captured_by_employee_id: e.captured_by_employee_id ?? null,
       override_of_event_id: e.override_of_event_id,
       override_new_kind: e.override_new_kind,
       override_reason: e.override_reason,

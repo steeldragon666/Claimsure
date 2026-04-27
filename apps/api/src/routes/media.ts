@@ -38,7 +38,12 @@ const errEnvelope = (
   requestId,
 });
 
-const isoOf = (v: Date | string): string => (typeof v === 'string' ? v : v.toISOString());
+// postgres-js may return timestamptz columns as either a Date object
+// or a postgres-native string ("2026-04-27 15:10:41.128715+00", with a
+// space separator instead of the ISO 8601 'T'). Normalise both to ISO
+// so API consumers see a single, regex-checkable format.
+const isoOf = (v: Date | string): string =>
+  typeof v === 'string' ? new Date(v).toISOString() : v.toISOString();
 
 interface RawMediaRow {
   id: string;
@@ -237,7 +242,7 @@ export function registerMedia(app: FastifyInstance): void {
             ${body.content_hash},
             ${body.mime_type},
             ${body.size_bytes},
-            ${body.exif ? JSON.stringify(body.exif) : null}::jsonb,
+            ${body.exif ? JSON.stringify(body.exif) : null},
             'pending',
             'pending'
           )

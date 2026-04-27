@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { test, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
@@ -353,11 +354,16 @@ async function seedMedia(args: {
   // requires the row exists, and we delete all media_artefact rows
   // in cleanup so leakage isn't an issue. The cross-firm test seed
   // still has correct (tenant, subject) for RLS coverage.
+  // Migration 0008 declares media_artefact.id PRIMARY KEY NOT NULL with
+  // no DB-level default — Drizzle's $defaultFn only fires for
+  // db.insert() paths, not raw SQL. Supply id explicitly here for the
+  // same reason routes/media.ts:226 does on the production INSERT.
   const rows = await privilegedSql<{ id: string }[]>`
     INSERT INTO media_artefact (
-      tenant_id, subject_tenant_id, uploaded_by_employee_id,
+      id, tenant_id, subject_tenant_id, uploaded_by_employee_id,
       s3_key, content_hash, mime_type, size_bytes
     ) VALUES (
+      ${crypto.randomUUID()},
       ${args.tenantId},
       ${args.subjectTenantId},
       ${EMPLOYEE_A},

@@ -143,9 +143,15 @@ test('POST /v1/mobile/events: 201 + event row + payload voice_pending', async ()
   assert.equal(j.event.subject_tenant_id, SUBJECT_A1);
 
   const rows = await privilegedSql<
-    { kind: string; payload: Record<string, unknown>; captured_by_user_id: string }[]
+    {
+      kind: string;
+      payload: Record<string, unknown>;
+      captured_by_user_id: string | null;
+      captured_by_employee_id: string | null;
+    }[]
   >`
-    SELECT kind, payload, captured_by_user_id FROM event WHERE id = ${j.event.id}
+    SELECT kind, payload, captured_by_user_id, captured_by_employee_id
+      FROM event WHERE id = ${j.event.id}
   `;
   assert.equal(rows[0]?.kind, 'SUPPORTING');
   assert.equal(rows[0]?.payload['source'], 'voice_pending');
@@ -153,7 +159,11 @@ test('POST /v1/mobile/events: 201 + event row + payload voice_pending', async ()
     rows[0]?.payload['audio_s3_key'],
     (body['payload'] as { audio_s3_key: string }).audio_s3_key,
   );
-  assert.equal(rows[0]?.captured_by_user_id, EMPLOYEE_A);
+  // Migration 0011: mobile captures populate captured_by_employee_id
+  // (FK to subject_tenant_employee), captured_by_user_id stays null —
+  // the CHECK constraint enforces exactly-one.
+  assert.equal(rows[0]?.captured_by_user_id, null);
+  assert.equal(rows[0]?.captured_by_employee_id, EMPLOYEE_A);
 
   await app.close();
 });

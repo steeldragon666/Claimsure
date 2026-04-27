@@ -32,7 +32,13 @@ interface DeltaRow {
   total_pts: number;
 }
 
-const isoOf = (v: Date | string): string => (typeof v === 'string' ? v : v.toISOString());
+// postgres-js may return timestamptz columns as either a Date object
+// (modern drivers + parse-as-date paths) OR a postgres-native string
+// like "2026-04-27 15:10:41.128715+00" (the latter is NOT ISO 8601 —
+// note the space separator instead of T). Normalise both to ISO so
+// API consumers see a single, regex-checkable format.
+const isoOf = (v: Date | string): string =>
+  typeof v === 'string' ? new Date(v).toISOString() : v.toISOString();
 
 export function registerAuditScore(app: FastifyInstance): void {
   app.get<{ Params: { claimant_id: string } }>(

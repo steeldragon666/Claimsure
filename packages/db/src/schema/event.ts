@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { subjectTenant } from './subject_tenant.js';
+import { subjectTenantEmployee } from './subject_tenant_employee.js';
 import { tenant } from './tenant.js';
 import { user } from './user.js';
 
@@ -86,9 +87,16 @@ export const event = pgTable(
     // index below enforces dedupe WHERE NOT NULL.
     idempotencyKey: text('idempotency_key'),
     capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
-    capturedByUserId: uuid('captured_by_user_id')
-      .notNull()
-      .references(() => user.id),
+    // Captured by EITHER a consultant `user` (firm-side) OR a claimant-side
+    // `subject_tenant_employee` (mobile flow) — never both. Migration 0011
+    // adds a CHECK constraint enforcing exactly one is set. The chain hash
+    // canonicaliser conditionally includes captured_by_employee_id only
+    // when non-null so existing P2 events (employee_id always null) keep
+    // their original hashes and pass verifyChain.
+    capturedByUserId: uuid('captured_by_user_id').references(() => user.id),
+    capturedByEmployeeId: uuid('captured_by_employee_id').references(
+      () => subjectTenantEmployee.id,
+    ),
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

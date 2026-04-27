@@ -100,8 +100,14 @@ export async function selectEligibleRecipients(): Promise<EligibleRecipient[]> {
        AND e.last_seen_at > NOW() - INTERVAL '30 days'
        AND e.deactivated_at IS NULL
        AND NOT EXISTS (
+         -- Mobile captures land with captured_by_employee_id set + user_id
+         -- null (migration 0011 + chain.ts dual-capturer model). Match the
+         -- claimant-side employee column so this exclusion correctly catches
+         -- "this employee already captured today" — the original
+         -- captured_by_user_id check would never match since user.id and
+         -- subject_tenant_employee.id live in disjoint namespaces.
          SELECT 1 FROM event ev
-          WHERE ev.captured_by_user_id = e.id
+          WHERE ev.captured_by_employee_id = e.id
             AND ev.captured_at::date = CURRENT_DATE
        )
   `;
