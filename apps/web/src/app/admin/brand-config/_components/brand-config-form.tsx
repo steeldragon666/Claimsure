@@ -1,20 +1,40 @@
 'use client';
-import { useQuery } from '@tanstack/react-query';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
 import type { BrandConfig } from '@cpa/schemas';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/hooks/use-toast';
 import { useWhoami } from '@/hooks/use-whoami';
-import { getBrandConfig } from '../_lib/api';
+import { getBrandConfig, updateBrandConfig } from '../_lib/api';
 import { LogoUpload } from './logo-upload';
 import { ThemePicker } from './theme-picker';
 
 /**
- * Brand-config form (T-C1 read-only scaffold).
+ * Brand-config form (T-C1 / T-C2 / T-C3 / T-C4).
  *
  * The page wraps this component in <AuthGuard> (matching P1+P2 — see
  * `apps/web/src/app/users/page.tsx`), so this component itself just
  * resolves the active tenant from /v1/whoami and fetches the public
- * brand_config via the unauthed by-tenant endpoint. C2 adds the logo
- * upload, C3 adds the theme picker, C4 adds the editable text fields.
+ * brand_config via the unauthed by-tenant endpoint.
+ *
+ * Layout (top to bottom):
+ *   1. Read-only summary of current settings.
+ *   2. <LogoUpload>         — pre-signed S3 PUT (C2).
+ *   3. <ThemePicker>        — primary + accent colors with preview (C3).
+ *   4. <DetailsForm>        — display_name, support_email, ToS URL (C4).
  */
 export function BrandConfigForm() {
   const whoami = useWhoami();
@@ -54,7 +74,7 @@ function BrandReadView({ tenantId }: { tenantId: string }) {
         <CardHeader>
           <CardTitle>Current settings</CardTitle>
           <CardDescription>
-            The theme picker (C3) and text fields (C4) land alongside this logo uploader.
+            Read-only snapshot of the active brand_config row.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -88,7 +108,130 @@ function BrandReadView({ tenantId }: { tenantId: string }) {
           />
         </CardContent>
       </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Details</CardTitle>
+          <CardDescription>
+            Display name shows in the mobile app header. Support email + terms-of-service link
+            appear in the claimant onboarding flow.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DetailsForm config={brand.data} />
+        </CardContent>
+      </Card>
     </div>
+  );
+}
+
+/**
+ * Editable text fields (T-C4): display_name, support_email,
+ * terms_of_service_url. Schema validates each field's shape; empty
+ * string is treated as "leave unset" by the submit handler, which
+ * filters those out before PATCH so the server's `.strict()`
+ * validator doesn't see optional fields the user didn't touch.
+ */
+const DetailsSchema = z.object({
+  display_name: z.string().min(1, 'Required').max(200),
+  support_email: z.union([z.literal(''), z.string().email('Must be a valid email')]),
+  terms_of_service_url: z.union([z.literal(''), z.string().url('Must be a valid URL')]),
+});
+type DetailsValues = z.infer<typeof DetailsSchema>;
+
+function DetailsForm({ config }: { config: BrandConfig }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+
+  const form = useForm<DetailsValues>({
+    resolver: zodResolver(DetailsSchema),
+    defaultValues: {
+      display_name: config.display_name,
+      support_email: config.support_email ?? '',
+      terms_of_service_url: config.terms_of_service_url ?? '',
+    },
+  });
+
+  const save = useMutation({
+    mutationFn: (values: DetailsValues) => {
+      // Empty strings stand in for "no change" — the server-side
+      // `.strict()` schema rejects unknown keys, but `support_email`
+      // and `terms_of_service_url` are optional, so omitting them when
+      // blank is the right move.
+      const patch: Parameters<typeof updateBrandConfig>[0] = {
+        display_name: values.display_name,
+      };
+      if (values.support_email !== '') patch.support_email = values.support_email;
+      if (values.terms_of_service_url !== '')
+        patch.terms_of_service_url = values.terms_of_service_url;
+      return updateBrandConfig(patch);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['brand-config'] });
+      toast({ title: 'Brand updated' });
+    },
+    onError: (e) =>
+      toast({
+        title: 'Save failed',
+        description: e instanceof Error ? e.message : 'Unknown error',
+        variant: 'destructive',
+      }),
+  });
+
+  return (
+    <Form {...form}>
+      <form
+        onSubmit={(e) => void form.handleSubmit((v) => save.mutate(v))(e)}
+        className="space-y-4"
+      >
+        <FormField
+          control={form.control}
+          name="display_name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Display name</FormLabel>
+              <FormControl>
+                <Input placeholder="Acme Tax Co." {...field} />
+              </FormControl>
+              <FormDescription>Shown in the mobile app header.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="support_email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Support email</FormLabel>
+              <FormControl>
+                <Input type="email" placeholder="help@acme.com" {...field} />
+              </FormControl>
+              <FormDescription>Where claimants email for help. Leave blank to omit.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="terms_of_service_url"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Terms of service URL</FormLabel>
+              <FormControl>
+                <Input type="url" placeholder="https://acme.com/tos" {...field} />
+              </FormControl>
+              <FormDescription>
+                Linked from the mobile sign-in screen. Leave blank to omit.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <Button type="submit" disabled={save.isPending}>
+          {save.isPending ? 'Saving…' : 'Save details'}
+        </Button>
+      </form>
+    </Form>
   );
 }
 
