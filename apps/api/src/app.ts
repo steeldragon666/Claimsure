@@ -14,6 +14,7 @@ import {
 } from 'fastify-type-provider-zod';
 import { createLogger } from '@cpa/observability';
 import { sessionPlugin } from '@cpa/auth';
+import { registerHostnameTenantResolver } from './middleware/hostname-tenant-resolver.js';
 import { registerGoogleAuth } from './routes/auth/google.js';
 import { registerMicrosoftAuth } from './routes/auth/microsoft.js';
 import { registerSignout } from './routes/auth/signout.js';
@@ -97,6 +98,16 @@ export function buildApp(): App {
   // own integrity via jose; cookies are just transport. Registered before
   // routes so session-aware handlers can read req.cookies.
   app.register(cookie);
+
+  // Hostname → tenant resolver (T-F4). Runs as a global preHandler so any
+  // route can read req.resolvedBrand. Registered BEFORE the session plugin
+  // so even unauthenticated routes (mobile-launch brand-config GET, magic-
+  // link redeem) get the resolution. The lookup goes via privilegedSql —
+  // see middleware/hostname-tenant-resolver.ts for the rationale.
+  app.register((instance, _opts, done) => {
+    registerHostnameTenantResolver(instance);
+    done();
+  });
 
   // Session middleware: verifies cpa_session cookie, attaches req.user,
   // sets app.current_tenant_id GUC for RLS-scoped queries.
