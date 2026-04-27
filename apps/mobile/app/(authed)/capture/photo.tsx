@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system';
 import { useCamera, type CapturedPhoto } from '../../../src/hooks/use-camera.js';
+import { uploadMedia } from '../../../src/api-client/media.js';
 
 /**
  * Photo capture screen (T-A5).
@@ -86,15 +88,24 @@ export default function PhotoCaptureScreen() {
 
   async function handleSubmit(): Promise<void> {
     if (state.kind !== 'previewing') return;
+    const photo = state.photo;
     setState({ kind: 'uploading' });
     try {
-      // A6 wires the actual upload here. For A5 we just transition the
-      // UI back to home — the captured photo lives in component state
-      // and is dropped on navigation, which is fine pre-A6.
+      // Stat the file for size_bytes; expo-camera doesn't include it
+      // on the CameraCapturedPicture object (it's a single getInfo
+      // round-trip and avoids guessing from JPEG dimensions).
+      const info = await FileSystem.getInfoAsync(photo.uri, { size: true });
+      const size_bytes = info.exists && 'size' in info ? info.size : 0;
+      await uploadMedia({
+        uri: photo.uri,
+        mime_type: 'image/jpeg',
+        size_bytes,
+        ...(photo.exif ? { exif: photo.exif } : {}),
+      });
       router.replace('/(authed)');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'upload failed');
-      setState({ kind: 'previewing', photo: state.photo });
+      setState({ kind: 'previewing', photo });
     }
   }
 

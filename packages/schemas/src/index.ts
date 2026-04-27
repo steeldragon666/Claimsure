@@ -7,3 +7,4 @@ export * from './employee.js';
 export * from './magic-link.js';
 export * from './mobile-session.js';
 export * from './brand-config.js';
+export * from './media.js';
