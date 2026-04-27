@@ -131,7 +131,8 @@ test('GET /v1/audit-score/:claimant_id: 200 + cold-start triggers recompute', as
 });
 
 test('GET /v1/audit-score/:claimant_id: 200 reads latest snapshot when present', async () => {
-  // Seed two snapshots; route must return the newer one.
+  // Seed two snapshots within the 7-day window; route must return the newer
+  // one and (per D4) report delta_7d = 0 since neither row is ≥ 7 days old.
   await privilegedSql`
     INSERT INTO audit_score_snapshot
       (id, tenant_id, subject_tenant_id, total_pts, max_pts, rule_breakdown, computed_at)
@@ -150,7 +151,7 @@ test('GET /v1/audit-score/:claimant_id: 200 reads latest snapshot when present',
   assert.equal(res.statusCode, 200);
   const body = res.json<{ total_pts: number; delta_7d: number }>();
   assert.equal(body.total_pts, 75);
-  // D3: delta_7d is hard-coded 0 — D4 wires up the real comparison.
+  // No 7-day baseline exists yet → delta_7d = 0.
   assert.equal(body.delta_7d, 0);
 
   // No new snapshot was written (route did NOT trigger recompute).
@@ -158,6 +159,65 @@ test('GET /v1/audit-score/:claimant_id: 200 reads latest snapshot when present',
     SELECT count(*)::int AS n FROM audit_score_snapshot WHERE subject_tenant_id = ${SUBJECT_A}
   `;
   assert.equal(rows[0]?.n, 2);
+
+  await app.close();
+});
+
+test('GET /v1/audit-score/:claimant_id: delta_7d = latest - most-recent-≥7d-old', async () => {
+  // Seed:
+  //   - 10 days ago: 30 pts (baseline)
+  //   -  8 days ago: 40 pts (older still — should NOT be picked over the 10d row… actually
+  //                          the 8d row IS more recent than 10d while still ≥ 7d old, so
+  //                          it's the right baseline)
+  //   -  2 days ago: 50 pts (inside the 7d window; ignored for baseline)
+  //   -  now      : 70 pts (latest)
+  // Expected: latest 70 - baseline 40 = 30.
+  await privilegedSql`
+    INSERT INTO audit_score_snapshot
+      (id, tenant_id, subject_tenant_id, total_pts, max_pts, rule_breakdown, computed_at)
+    VALUES
+      (gen_random_uuid(), ${TENANT_A}, ${SUBJECT_A}, 30, 100, '[]'::jsonb, NOW() - INTERVAL '10 days'),
+      (gen_random_uuid(), ${TENANT_A}, ${SUBJECT_A}, 40, 100, '[]'::jsonb, NOW() - INTERVAL '8 days'),
+      (gen_random_uuid(), ${TENANT_A}, ${SUBJECT_A}, 50, 100, '[]'::jsonb, NOW() - INTERVAL '2 days'),
+      (gen_random_uuid(), ${TENANT_A}, ${SUBJECT_A}, 70, 100, '[]'::jsonb, NOW())
+  `;
+
+  const app = buildApp();
+  const jwt = await adminAJwt();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/audit-score/${SUBJECT_A}`,
+    cookies: { cpa_session: jwt },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ total_pts: number; delta_7d: number }>();
+  assert.equal(body.total_pts, 70);
+  assert.equal(body.delta_7d, 30);
+
+  await app.close();
+});
+
+test('GET /v1/audit-score/:claimant_id: delta_7d can be negative when score regresses', async () => {
+  // Baseline 80 pts 10d ago, latest 60 pts now → delta_7d = -20.
+  await privilegedSql`
+    INSERT INTO audit_score_snapshot
+      (id, tenant_id, subject_tenant_id, total_pts, max_pts, rule_breakdown, computed_at)
+    VALUES
+      (gen_random_uuid(), ${TENANT_A}, ${SUBJECT_A}, 80, 100, '[]'::jsonb, NOW() - INTERVAL '10 days'),
+      (gen_random_uuid(), ${TENANT_A}, ${SUBJECT_A}, 60, 100, '[]'::jsonb, NOW())
+  `;
+
+  const app = buildApp();
+  const jwt = await adminAJwt();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/audit-score/${SUBJECT_A}`,
+    cookies: { cpa_session: jwt },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ total_pts: number; delta_7d: number }>();
+  assert.equal(body.total_pts, 60);
+  assert.equal(body.delta_7d, -20);
 
   await app.close();
 });
