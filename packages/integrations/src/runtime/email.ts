@@ -38,7 +38,6 @@ export interface EmailSender {
  */
 export const consoleEmailSender: EmailSender = {
   send(msg: EmailMessage): Promise<void> {
-    // eslint-disable-next-line no-console
     console.log(
       JSON.stringify({
         kind: 'email.console-stub',
