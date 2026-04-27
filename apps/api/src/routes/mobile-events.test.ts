@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { test, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
@@ -291,7 +292,14 @@ test('POST /v1/mobile/events: 404 when bound subject_tenant deleted', async () =
 test('POST /v1/mobile/events: Idempotency-Key returns existing row on duplicate', async () => {
   const app = buildApp();
   const body = validBody();
-  const idemKey = 'idem-test-' + Date.now();
+  // The event_idempotency_key_format CHECK constraint (migration 0006:98)
+  // requires 64-char lowercase hex. The mobile sync worker SHAs the local_id
+  // before sending it, so a hex-of-something is the canonical shape on the
+  // wire. Using a fresh SHA-256 per test run keeps each invocation isolated.
+  const idemKey = crypto
+    .createHash('sha256')
+    .update('idem-test-' + Date.now() + '-' + Math.random())
+    .digest('hex');
   const headers = {
     authorization: `Bearer ${await mobileToken({})}`,
     'idempotency-key': idemKey,

@@ -55,10 +55,10 @@ before(async () => {
       (${EMPLOYEE_A1}, ${SUBJECT_A1}, ${TENANT_A}, 'c12-jane@acme.com', 'Jane', ${ADMIN_USER})
   `;
   // Insert 6 events so we can verify "last 5" + ordering.
-  // No `::jsonb` cast on the payload — postgres-js's binary protocol
-  // double-encodes `${string}::jsonb`, leaving the column storing a
-  // JSON-string scalar instead of an object. The column's declared
-  // jsonb type drives coercion of the raw JSON text.
+  // Keep the explicit `::jsonb` cast — for OBJECT payloads this is the
+  // working pattern (matches chain.ts and is proven by P2). The
+  // double-encoding bug only manifests for ARRAY payloads (e.g.,
+  // audit_score_snapshot.rule_breakdown).
   for (let i = 0; i < 6; i++) {
     const id = crypto.randomUUID();
     const hash = crypto.randomBytes(32).toString('hex');
@@ -70,7 +70,7 @@ before(async () => {
         captured_at, captured_by_user_id
       ) VALUES (
         ${id}, ${TENANT_A}, ${SUBJECT_A1}, 'HYPOTHESIS',
-        ${JSON.stringify({ _v: 1, source: 'paste', raw_text: `Hypothesis number ${i} with extra padding text to test the 80-char snippet truncation behaviour properly.` })},
+        ${JSON.stringify({ _v: 1, source: 'paste', raw_text: `Hypothesis number ${i} with extra padding text to test the 80-char snippet truncation behaviour properly.` })}::jsonb,
         ${hash}, ${idempotency},
         ${captured}::timestamptz, ${ADMIN_USER}
       )
