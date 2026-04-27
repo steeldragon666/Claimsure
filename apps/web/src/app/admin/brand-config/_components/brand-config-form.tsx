@@ -1,31 +1,20 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import type { BrandConfig } from '@cpa/schemas';
-import { AuthGuard } from '@/components/auth-guard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useWhoami } from '@/hooks/use-whoami';
-import { getBrandConfig } from '../_lib/api.js';
+import { getBrandConfig } from '../_lib/api';
 
 /**
  * Brand-config form (T-C1 read-only scaffold).
  *
- * Resolves the active tenant from /v1/whoami (matching the P1 pattern
- * used by `/users` and `/users/[userId]`), then fetches the public
+ * The page wraps this component in <AuthGuard> (matching P1+P2 — see
+ * `apps/web/src/app/users/page.tsx`), so this component itself just
+ * resolves the active tenant from /v1/whoami and fetches the public
  * brand_config via the unauthed by-tenant endpoint. C2 adds the logo
  * upload, C3 adds the theme picker, C4 adds the editable text fields.
- *
- * Saving is intentionally disabled here — the form is a "read state +
- * placeholder for the editor" until the per-section components land.
  */
 export function BrandConfigForm() {
-  return (
-    <AuthGuard>
-      <Inner />
-    </AuthGuard>
-  );
-}
-
-function Inner() {
   const whoami = useWhoami();
 
   if (whoami.data?.user.role !== 'admin') {
