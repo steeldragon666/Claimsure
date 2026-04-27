@@ -40,6 +40,10 @@ jobs:
       SESSION_JWT_SECRET: ci-test-32-bytes-of-entropy-padd!
       # Classifier implementation — 'stub' uses deterministic regex fallback (no API key needed in CI)
       CLASSIFIER_IMPL: stub
+      # AES-256-GCM key for OAuth token encryption (B3). Static for CI; rotated in prod.
+      TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      # DocuSign webhook HMAC secret — fixture value for B5 webhook tests.
+      DOCUSIGN_WEBHOOK_HMAC_SECRET: ci-docusign-webhook-secret
 
     steps:
       - uses: actions/checkout@v4
@@ -106,6 +110,10 @@ jobs:
       SESSION_JWT_SECRET: ci-test-32-bytes-of-entropy-padd!
       # Classifier implementation — 'stub' uses deterministic regex fallback (no API key needed in CI)
       CLASSIFIER_IMPL: stub
+      # AES-256-GCM key for OAuth token encryption (B3); api boots may touch routes that read it.
+      TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      # DocuSign webhook HMAC secret — needed if any e2e exercises /v1/integrations/docusign/webhook.
+      DOCUSIGN_WEBHOOK_HMAC_SECRET: ci-docusign-webhook-secret
       # Override Playwright webServer URLs (default ports stand)
       NODE_ENV: test
 

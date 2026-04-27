@@ -49,7 +49,7 @@ export type CapturedPhoto = {
  * UI then has to re-rotate. Better to bake it in once.
  */
 export function useCamera(): {
-  cameraRef: React.RefObject<CameraView>;
+  cameraRef: React.RefObject<CameraView | null>;
   takePhoto: () => Promise<CapturedPhoto | null>;
 } {
   const ref = useRef<CameraView>(null);

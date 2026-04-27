@@ -47,7 +47,7 @@
   "devDependencies": {
     "@babel/core": "^7.20.0",
     "@types/node": "^22.10.0",
-    "@types/react": "~18.2.45",
+    "@types/react": "^19.0.0",
     "detox": "^20.30.0",
     "typescript": "^5.6.3",
     "tsx": "^4.19.2"
