@@ -22,6 +22,7 @@ import { healthRoutes } from './routes/health.js';
 import { registerBrandConfig } from './routes/brand-config.js';
 import { registerEmployees } from './routes/employees.js';
 import { registerMagicLinkRedeem } from './routes/magic-link.js';
+import { registerMobileEvents } from './routes/mobile-events.js';
 import { registerRefreshRoute } from './routes/mobile-session.js';
 import { registerEvents } from './routes/events.js';
 import { registerSubjectTenants } from './routes/subject-tenants.js';
@@ -179,6 +180,10 @@ export function buildApp(): App {
   });
   app.register((instance, _opts, done) => {
     registerRefreshRoute(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerMobileEvents(instance);
     done();
   });
   app.register((instance, _opts, done) => {
