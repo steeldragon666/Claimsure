@@ -1,4 +1,5 @@
 import { privilegedSql } from '@cpa/db/client';
+import { flagOverlappingManualEntries } from '../../runtime/time-entry-conflict.js';
 import { listTimesheets, type EmploymentHeroClientOptions } from './client.js';
 import type { SqlClient } from './employee-sync.js';
 
@@ -108,6 +109,18 @@ export async function pullTimesheets(opts: PullTimesheetsOpts): Promise<PullTime
       const wasInserted = result[0]?.inserted;
       if (wasInserted) inserted++;
       else updated++;
+
+      // T-B21: payroll wins. Flag any manual entry whose interval
+      // overlaps the just-upserted payroll row so the consultant
+      // resolves the duplicate during apportionment review.
+      await flagOverlappingManualEntries({
+        tenant_id: opts.tenant_id,
+        subject_tenant_id: opts.subject_tenant_id,
+        employee_id: emp.id,
+        period_start: t.start_time,
+        period_end: t.end_time,
+        sql_client: sql,
+      });
     }
 
     cursor = next_cursor;

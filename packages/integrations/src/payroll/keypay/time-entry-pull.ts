@@ -1,4 +1,5 @@
 import { privilegedSql } from '@cpa/db/client';
+import { flagOverlappingManualEntries } from '../../runtime/time-entry-conflict.js';
 import { listTimesheets } from './client.js';
 import type { KeypayClientOptions } from './types.js';
 import type { SqlClient } from './employee-sync.js';
@@ -117,6 +118,16 @@ export async function pullTimesheets(opts: PullTimesheetsOpts): Promise<PullTime
       const wasInserted = result[0]?.inserted;
       if (wasInserted) inserted++;
       else updated++;
+
+      // T-B21: payroll wins. Flag manual overlaps for review.
+      await flagOverlappingManualEntries({
+        tenant_id: opts.tenant_id,
+        subject_tenant_id: opts.subject_tenant_id,
+        employee_id: emp.id,
+        period_start: startedAt,
+        period_end: endedAt,
+        sql_client: sql,
+      });
     }
 
     cursor = next_cursor;

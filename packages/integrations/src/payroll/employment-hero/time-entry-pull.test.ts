@@ -9,12 +9,17 @@ const TENANT_ID = '00000000-0000-4000-8000-000000000bA1';
 const SUBJECT_ID = '00000000-0000-4000-8000-000000000bA2';
 
 /**
- * pullTimesheets issues two query shapes per timesheet:
+ * pullTimesheets issues three query shapes per timesheet (since T-B21):
  *   1. SELECT id FROM subject_tenant_employee … → returns a row when the
  *      employee is known, empty when unmatched.
  *   2. INSERT … ON CONFLICT … RETURNING (xmax = 0) AS inserted → returns
  *      `[{ inserted: true }]` for new rows, `[{ inserted: false }]` for
  *      conflict-driven updates.
+ *   3. UPDATE time_entry SET flagged_at = NOW() … → conflict resolution
+ *      (T-B21): flags any overlapping manual entries. The
+ *      `flagged_manual_ids` map seeds the RETURNING result so a test can
+ *      verify the flag-helper actually fires on the right (employee,
+ *      period) tuple.
  *
  * The stub looks at the rendered SQL string to route each call to the
  * appropriate canned response.
@@ -24,6 +29,15 @@ type StubConfig = {
   employee_lookup: Record<string, string>;
   /** Map of EH timesheet id → whether the upsert should report inserted=true. */
   upsert_inserted: Record<string, boolean>;
+  /**
+   * Map of local employee_id → array of manual-entry ids the flag UPDATE
+   * should pretend to flag. Keyed by employee because a single payroll
+   * batch can pull multiple timesheets for the same employee, and each
+   * triggers a flag UPDATE; we don't disambiguate per-period for
+   * tests — once seeded, every UPDATE for that employee returns the
+   * same canned ids. Missing key → flag UPDATE returns [] (no overlap).
+   */
+  flagged_manual_ids?: Record<string, string[]>;
 };
 
 type CapturedQuery = { sql: string; params: unknown[] };
@@ -46,6 +60,14 @@ function makeSqlStub(cfg: StubConfig): { sql: SqlClient; queries: CapturedQuery[
       const externalId = values[3] as string;
       const inserted = cfg.upsert_inserted[externalId] ?? true;
       return Promise.resolve([{ inserted }]);
+    }
+    if (rendered.includes('UPDATE time_entry') && rendered.includes('flagged_at')) {
+      // T-B21 flag UPDATE. Params: [subject_tenant_id, employee_id,
+      // period_start, period_end]. Look up the seeded manual ids by
+      // employee and return them as RETURNING rows.
+      const localEmpId = values[1] as string;
+      const ids = cfg.flagged_manual_ids?.[localEmpId] ?? [];
+      return Promise.resolve(ids.map((id) => ({ id })));
     }
     return Promise.resolve([]);
   }) as unknown as SqlClient;
@@ -115,8 +137,8 @@ test('pullTimesheets: 3 new timesheets → inserted=3, updated=0, skipped=0', as
   assert.equal(result.inserted, 3);
   assert.equal(result.updated, 0);
   assert.equal(result.skipped_unmatched, 0);
-  // 3 SELECTs + 3 INSERTs = 6 queries total.
-  assert.equal(queries.length, 6);
+  // 3 SELECTs + 3 INSERTs + 3 flag-UPDATEs = 9 queries total (T-B21).
+  assert.equal(queries.length, 9);
 });
 
 test('pullTimesheets: existing row → updated=1', async () => {
@@ -313,6 +335,52 @@ test('pullTimesheets: empty page → all counts zero', async () => {
   assert.equal(result.updated, 0);
   assert.equal(result.skipped_unmatched, 0);
   assert.equal(queries.length, 0);
+});
+
+test('pullTimesheets: T-B21 — manual entry overlapping payroll → flag UPDATE fires with the right (employee, period) tuple', async () => {
+  // Single payroll timesheet → expect 1 flag UPDATE keyed by the
+  // resolved employee id and the EH start/end window.
+  nock('https://api.employmenthero.com')
+    .get(`/api/v1/organisations/${ORG_ID}/timesheets`)
+    .reply(200, {
+      data: [
+        {
+          id: 'ts-conflict',
+          employee_id: 'eh-emp-1',
+          date: '2026-04-25',
+          start_time: '2026-04-25T09:00:00Z',
+          end_time: '2026-04-25T17:00:00Z',
+          duration_minutes: 480,
+          status: 'approved',
+        },
+      ],
+    });
+
+  const { sql, queries } = makeSqlStub({
+    employee_lookup: { 'eh-emp-1': 'local-emp-1' },
+    upsert_inserted: { 'ts-conflict': true },
+    flagged_manual_ids: { 'local-emp-1': ['manual-overlap-1'] },
+  });
+
+  await pullTimesheets({
+    access_token: 'fake',
+    organisation_id: ORG_ID,
+    tenant_id: TENANT_ID,
+    subject_tenant_id: SUBJECT_ID,
+    sql_client: sql,
+  });
+
+  // 1 SELECT + 1 INSERT + 1 flag-UPDATE.
+  assert.equal(queries.length, 3);
+  const flagQuery = queries[2];
+  assert.ok(flagQuery);
+  assert.ok(flagQuery.sql.includes('UPDATE time_entry'));
+  assert.ok(flagQuery.sql.includes('flagged_at'));
+  // Flag UPDATE params: [subject_tenant_id, employee_id, period_start, period_end].
+  assert.equal(flagQuery.params[0], SUBJECT_ID);
+  assert.equal(flagQuery.params[1], 'local-emp-1');
+  assert.equal(flagQuery.params[2], '2026-04-25T09:00:00Z');
+  assert.equal(flagQuery.params[3], '2026-04-25T17:00:00Z');
 });
 
 test('pullTimesheets: forwards changed_since + date filters to EH', async () => {

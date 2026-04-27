@@ -9,18 +9,22 @@ const TENANT_ID = '00000000-0000-4000-8000-000000000ca1';
 const SUBJECT_ID = '00000000-0000-4000-8000-000000000ca2';
 
 /**
- * pullTimesheets issues two query shapes per timesheet:
+ * pullTimesheets issues three query shapes per timesheet (since T-B21):
  *   1. SELECT id FROM subject_tenant_employee … → returns a row when
  *      the employee is known, empty when unmatched.
  *   2. INSERT … ON CONFLICT … RETURNING (xmax = 0) AS inserted →
  *      returns `[{ inserted: true }]` for new rows, `[{ inserted: false }]`
  *      for conflict-driven updates.
+ *   3. UPDATE time_entry SET flagged_at = NOW() … → conflict resolution
+ *      (T-B21): flags overlapping manual entries.
  */
 type StubConfig = {
   /** Map of stringified KeyPay employeeId → local subject_tenant_employee.id. */
   employee_lookup: Record<string, string>;
   /** Map of stringified KeyPay timesheet id → whether the upsert reports inserted=true. */
   upsert_inserted: Record<string, boolean>;
+  /** Optional: map of local employee_id → manual ids the flag UPDATE should report. */
+  flagged_manual_ids?: Record<string, string[]>;
 };
 
 type CapturedQuery = { sql: string; params: unknown[] };
@@ -43,6 +47,13 @@ function makeSqlStub(cfg: StubConfig): { sql: SqlClient; queries: CapturedQuery[
       const externalId = values[3] as string;
       const inserted = cfg.upsert_inserted[externalId] ?? true;
       return Promise.resolve([{ inserted }]);
+    }
+    if (rendered.includes('UPDATE time_entry') && rendered.includes('flagged_at')) {
+      // T-B21 flag UPDATE. Params: [subject_tenant_id, employee_id,
+      // period_start, period_end].
+      const localEmpId = values[1] as string;
+      const ids = cfg.flagged_manual_ids?.[localEmpId] ?? [];
+      return Promise.resolve(ids.map((id) => ({ id })));
     }
     return Promise.resolve([]);
   }) as unknown as SqlClient;
@@ -111,8 +122,8 @@ test('pullTimesheets: 3 new timesheets → inserted=3, updated=0, skipped=0', as
   assert.equal(result.inserted, 3);
   assert.equal(result.updated, 0);
   assert.equal(result.skipped_unmatched, 0);
-  // 3 SELECTs + 3 INSERTs.
-  assert.equal(queries.length, 6);
+  // 3 SELECTs + 3 INSERTs + 3 flag-UPDATEs (T-B21).
+  assert.equal(queries.length, 9);
 });
 
 test('pullTimesheets: composes ISO timestamps from date + HH:MM and converts units→minutes', async () => {
@@ -365,6 +376,49 @@ test('pullTimesheets: comments field maps to time_entry.notes', async () => {
   assert.ok(insertQuery);
   // notes is the last param in the INSERT.
   assert.equal(insertQuery.params[8], 'detailed lab notes');
+});
+
+test('pullTimesheets: T-B21 — manual entry overlapping payroll → flag UPDATE fires for the inserted row', async () => {
+  nock('https://api.yourpayroll.com.au')
+    .get(`/api/v2/business/${BUSINESS_ID}/timesheet`)
+    .query(true)
+    .reply(200, [
+      {
+        id: 9600,
+        employeeId: 1001,
+        date: '2026-04-25',
+        startTime: '09:00',
+        endTime: '17:00',
+        units: 8,
+        status: 'Approved',
+      },
+    ]);
+
+  const { sql, queries } = makeSqlStub({
+    employee_lookup: { '1001': 'local-emp-1' },
+    upsert_inserted: { '9600': true },
+    flagged_manual_ids: { 'local-emp-1': ['manual-overlap-1'] },
+  });
+
+  await pullTimesheets({
+    api_key: 'fake',
+    business_id: BUSINESS_ID,
+    tenant_id: TENANT_ID,
+    subject_tenant_id: SUBJECT_ID,
+    sql_client: sql,
+  });
+
+  // 1 SELECT + 1 INSERT + 1 flag-UPDATE.
+  assert.equal(queries.length, 3);
+  const flagQuery = queries[2];
+  assert.ok(flagQuery);
+  assert.ok(flagQuery.sql.includes('UPDATE time_entry'));
+  assert.ok(flagQuery.sql.includes('flagged_at'));
+  // Params: [subject_tenant_id, employee_id, period_start, period_end].
+  // KeyPay composes ISO timestamps from date + HH:MM strings.
+  assert.equal(flagQuery.params[1], 'local-emp-1');
+  assert.equal(flagQuery.params[2], '2026-04-25T09:00:00Z');
+  assert.equal(flagQuery.params[3], '2026-04-25T17:00:00Z');
 });
 
 test('pullTimesheets: forwards changed_since + date filters to KeyPay', async () => {

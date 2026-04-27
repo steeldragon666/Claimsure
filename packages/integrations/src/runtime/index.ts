@@ -5,3 +5,4 @@ export * from './retry.js';
 export { tryAcquire } from './rate-limit.js';
 export * from './email.js';
 export * from './crypto.js';
+export * from './time-entry-conflict.js';
