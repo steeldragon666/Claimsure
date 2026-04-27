@@ -80,34 +80,42 @@ export function EditUserForm({ user }: { user: UserRef }) {
   const onRemove = () => {
     remove.mutate(undefined, {
       onSuccess: () => {
-        // Close the confirmation dialog before navigating. Leaving it open
-        // while router.push fires keeps Radix's focus-trap active and the
-        // overlay mounted, which delays the route transition (Playwright
-        // observed the navigation never landing within 10s). Closing the
-        // dialog first lets focus restore + overlay unmount synchronously.
+        // Close the dialog FIRST, then defer toast + navigation to the
+        // next tick. Radix's modal Dialog applies aria-hidden to all
+        // sibling DOM (including the Toast portal) for screen-reader
+        // isolation; the cleanup runs in a useEffect after the dialog
+        // unmounts. Calling toast() and router.push() in the same tick
+        // as setConfirmOpen(false) renders both into a still-isolated
+        // DOM tree — Playwright sees a hidden toast and the navigation
+        // races with the dialog's exit animation.
+        // Deferring via setTimeout lets the dialog effect cycle complete
+        // first, so the toast is reachable and router.push lands cleanly.
         setConfirmOpen(false);
-        toast({ title: 'Removed from firm' });
-        router.push('/users');
+        setTimeout(() => {
+          toast({ title: 'Removed from firm' });
+          router.push('/users');
+        }, 0);
       },
       onError: (err) => {
-        // Close the dialog FIRST, then surface the toast. Radix's focus-
-        // trap + portal pattern keeps the visible toast occluded by the
-        // dialog overlay until the dialog unmounts; closing first ensures
-        // the toast is reachable for assistive tech and Playwright alike.
+        // Same dialog/aria-hidden coupling as onSuccess — close first,
+        // then surface the toast on the next tick so SR + Playwright
+        // can both reach it.
         setConfirmOpen(false);
-        if (err instanceof ConflictError) {
-          toast({
-            title: 'Cannot remove',
-            description: 'Cannot remove the only firm admin. Promote another user first.',
-            variant: 'destructive',
-          });
-        } else {
-          toast({
-            title: 'Remove failed',
-            description: err instanceof Error ? err.message : 'Unknown error',
-            variant: 'destructive',
-          });
-        }
+        setTimeout(() => {
+          if (err instanceof ConflictError) {
+            toast({
+              title: 'Cannot remove',
+              description: 'Cannot remove the only firm admin. Promote another user first.',
+              variant: 'destructive',
+            });
+          } else {
+            toast({
+              title: 'Remove failed',
+              description: err instanceof Error ? err.message : 'Unknown error',
+              variant: 'destructive',
+            });
+          }
+        }, 0);
       },
     });
   };
