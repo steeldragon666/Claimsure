@@ -1,6 +1,6 @@
 import { privilegedSql } from '@cpa/db/client';
 import { decryptToken, getTokenEncryptionKey } from '@cpa/integrations/runtime';
-import { employmentHero, keypay } from '@cpa/integrations/payroll';
+import { employmentHero, keypay, deputy } from '@cpa/integrations/payroll';
 
 /**
  * Employment Hero sync orchestrator (T-B11).
@@ -32,9 +32,15 @@ import { employmentHero, keypay } from '@cpa/integrations/payroll';
 
 export type SyncResult = {
   tenant_id: string;
-  provider: 'employment_hero' | 'keypay';
+  provider: 'employment_hero' | 'keypay' | 'deputy';
   employees: { upserted: number; deactivated: number };
-  timesheets: { inserted: number; updated: number; skipped_unmatched: number };
+  timesheets: {
+    inserted: number;
+    updated: number;
+    skipped_unmatched: number;
+    /** Deputy-only — surfaced for `provider === 'deputy'` only; absent for EH/KeyPay. */
+    skipped_discarded?: number;
+  };
   error?: string;
 };
 
@@ -54,11 +60,20 @@ export type KeypaySyncDeps = {
   pull_timesheets?: typeof keypay.pullTimesheets;
 };
 
+export type DeputySyncDeps = {
+  sql_client?: typeof privilegedSql;
+  decrypt?: (blob: string, key: string) => string;
+  get_encryption_key?: () => string;
+  sync_employees?: typeof deputy.syncEmployees;
+  pull_timesheets?: typeof deputy.pullTimesheets;
+};
+
 interface IntegrationConnectionRow {
   tenant_id: string;
   access_token_encrypted: string;
   external_account_id: string | null;
   last_synced_at: Date | null;
+  expires_at?: Date | null;
 }
 
 interface SubjectTenantRow {
@@ -339,6 +354,178 @@ export async function syncKeypay(
     return {
       tenant_id: conn.tenant_id,
       provider: 'keypay',
+      employees: { upserted: 0, deactivated: 0 },
+      timesheets: { inserted: 0, updated: 0, skipped_unmatched: 0 },
+      error: msg,
+    };
+  }
+}
+
+/**
+ * Deputy sync orchestrator (T-B17).
+ *
+ * Mirrors `syncEmploymentHero` (Deputy uses OAuth 2.0 like EH) with
+ * three notable differences:
+ *
+ *   1. `external_account_id` carries the customer's Deputy install URL
+ *      (e.g. 'https://acme.deputy.com'). Deputy is multi-tenant via
+ *      DNS — every install lives on its own subdomain — so the client
+ *      needs the URL on every call. We pass it through as
+ *      `install_url` rather than `organisation_id`.
+ *
+ *   2. Token-expiry handling: Deputy access tokens expire (typically 24h).
+ *      The OAuth helpers expose `refreshAccessToken`, but for v1 we
+ *      defer the auto-refresh-and-persist dance to a follow-up task —
+ *      if `expires_at` has passed we throw with a clear message so the
+ *      consultant can reconnect manually. (TODO: invoke
+ *      `deputy.refreshAccessToken`, encrypt the new tokens, UPDATE
+ *      access_token_encrypted + refresh_token_encrypted + expires_at
+ *      in-place, and continue. Tracked separately because the encrypt
+ *      helper isn't exported from runtime yet.)
+ *
+ *   3. Timesheet result includes `skipped_discarded` — Deputy's
+ *      soft-delete marker for cancelled shifts. We surface it on the
+ *      `SyncResult.timesheets` object so audit/observability can spot
+ *      drift between Deputy and our copy.
+ */
+export async function syncDeputy(
+  connectionId: string,
+  deps: DeputySyncDeps = {},
+): Promise<SyncResult> {
+  const sql = deps.sql_client ?? privilegedSql;
+  const decrypt = deps.decrypt ?? decryptToken;
+  const getKey = deps.get_encryption_key ?? getTokenEncryptionKey;
+  const syncEmployees = deps.sync_employees ?? deputy.syncEmployees;
+  const pullTimesheets = deps.pull_timesheets ?? deputy.pullTimesheets;
+
+  const connRows = (await sql`
+    SELECT tenant_id, access_token_encrypted, external_account_id, last_synced_at, expires_at
+      FROM integration_connection
+     WHERE id = ${connectionId}
+       AND provider = 'deputy'
+       AND sync_state <> 'failed'
+  `) as IntegrationConnectionRow[];
+  const conn = connRows[0];
+  if (!conn) {
+    throw new Error(`integration_connection not found or failed: ${connectionId}`);
+  }
+  if (!conn.external_account_id) {
+    await sql`
+      UPDATE integration_connection
+         SET sync_state = 'failed',
+             last_error = 'external_account_id (install_url) required'
+       WHERE id = ${connectionId}
+    `;
+    return {
+      tenant_id: conn.tenant_id,
+      provider: 'deputy',
+      employees: { upserted: 0, deactivated: 0 },
+      timesheets: { inserted: 0, updated: 0, skipped_unmatched: 0 },
+      error: 'external_account_id (install_url) required',
+    };
+  }
+
+  // Token-expiry guard: v1 surfaces an error rather than refreshing
+  // automatically. The DB column is non-null on all rows, but we treat
+  // a missing value defensively as "not expired" — the access call will
+  // surface the real 401 in that case.
+  if (conn.expires_at && conn.expires_at.getTime() <= Date.now()) {
+    const msg = 'deputy access token expired — reconnect required (auto-refresh TODO)';
+    await sql`
+      UPDATE integration_connection
+         SET sync_state = 'failed',
+             last_error = ${msg}
+       WHERE id = ${connectionId}
+    `;
+    return {
+      tenant_id: conn.tenant_id,
+      provider: 'deputy',
+      employees: { upserted: 0, deactivated: 0 },
+      timesheets: { inserted: 0, updated: 0, skipped_unmatched: 0 },
+      error: msg,
+    };
+  }
+
+  await sql`
+    UPDATE integration_connection
+       SET sync_state = 'syncing'
+     WHERE id = ${connectionId}
+  `;
+
+  try {
+    const accessToken = decrypt(conn.access_token_encrypted, getKey());
+
+    const subjRows = (await sql`
+      SELECT id FROM subject_tenant
+       WHERE tenant_id = ${conn.tenant_id}
+         AND kind = 'claimant'
+         AND deleted_at IS NULL
+       ORDER BY created_at
+       LIMIT 1
+    `) as SubjectTenantRow[];
+    const subj = subjRows[0];
+    if (!subj) {
+      throw new Error('no subject_tenant for this connection');
+    }
+
+    const adminRows = (await sql`
+      SELECT user_id FROM tenant_user
+       WHERE tenant_id = ${conn.tenant_id}
+         AND role = 'admin'
+         AND deleted_at IS NULL
+       ORDER BY created_at
+       LIMIT 1
+    `) as AdminUserRow[];
+    const admin = adminRows[0];
+    if (!admin) {
+      throw new Error('no admin user for this connection');
+    }
+
+    const sharedOpts = {
+      access_token: accessToken,
+      install_url: conn.external_account_id,
+      tenant_id: conn.tenant_id,
+      subject_tenant_id: subj.id,
+      ...(conn.last_synced_at ? { changed_since: conn.last_synced_at } : {}),
+      sql_client: sql,
+    };
+
+    const employees = await syncEmployees({
+      ...sharedOpts,
+      invited_by_user_id: admin.user_id,
+    });
+    const timesheets = await pullTimesheets(sharedOpts);
+
+    await sql`
+      UPDATE integration_connection
+         SET sync_state = 'idle',
+             last_synced_at = NOW(),
+             last_error = NULL
+       WHERE id = ${connectionId}
+    `;
+
+    return {
+      tenant_id: conn.tenant_id,
+      provider: 'deputy',
+      employees,
+      timesheets: {
+        inserted: timesheets.inserted,
+        updated: timesheets.updated,
+        skipped_unmatched: timesheets.skipped_unmatched,
+        skipped_discarded: timesheets.skipped_discarded,
+      },
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await sql`
+      UPDATE integration_connection
+         SET sync_state = 'failed',
+             last_error = ${msg}
+       WHERE id = ${connectionId}
+    `;
+    return {
+      tenant_id: conn.tenant_id,
+      provider: 'deputy',
       employees: { upserted: 0, deactivated: 0 },
       timesheets: { inserted: 0, updated: 0, skipped_unmatched: 0 },
       error: msg,

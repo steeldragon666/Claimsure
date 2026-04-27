@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   syncEmploymentHero,
   syncKeypay,
+  syncDeputy,
   type PayrollSyncDeps,
   type KeypaySyncDeps,
+  type DeputySyncDeps,
 } from './payroll-sync.js';
 
 const CONNECTION_ID = '00000000-0000-4000-8000-000000000bb1';
@@ -525,6 +527,258 @@ test('syncKeypay: missing connection row → throws', async () => {
   const { deps } = baseKeypayDeps({ integration_connection: [] });
   await assert.rejects(
     syncKeypay(KEYPAY_CONNECTION_ID, deps),
+    /integration_connection not found or failed/,
+  );
+});
+
+// =====================================================================
+// syncDeputy (T-B17) — mirrors syncEmploymentHero (Deputy uses OAuth 2.0)
+// with three adaptations:
+//   - external_account_id holds the customer's Deputy install URL
+//     (e.g. 'https://acme.deputy.com'); passed through as install_url.
+//   - For v1 we surface a clear error if the access token has expired
+//     (auto-refresh deferred to a follow-up task).
+//   - Timesheet result includes the Deputy-specific skipped_discarded
+//     counter for soft-deleted shifts.
+// =====================================================================
+
+const DEPUTY_CONNECTION_ID = '00000000-0000-4000-8000-000000000dd1';
+const FUTURE_EXPIRES_AT = new Date(Date.now() + 60 * 60 * 1000); // +1h
+const PAST_EXPIRES_AT = new Date(Date.now() - 60 * 1000); // -1m
+
+type DeputyStubRows = {
+  integration_connection?: Array<{
+    tenant_id: string;
+    access_token_encrypted: string;
+    external_account_id: string | null;
+    last_synced_at: Date | null;
+    expires_at?: Date | null;
+  }>;
+  subject_tenant?: Array<{ id: string }>;
+  tenant_user?: Array<{ user_id: string }>;
+};
+
+function makeDeputySqlStub(rows: DeputyStubRows): {
+  sql: DeputySyncDeps['sql_client'];
+  update_calls: Array<{ sql: string; params: unknown[] }>;
+} {
+  const update_calls: Array<{ sql: string; params: unknown[] }> = [];
+  const fn = ((strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]> => {
+    const rendered = strings.join('?');
+    if (rendered.includes('UPDATE integration_connection')) {
+      update_calls.push({ sql: rendered, params: values });
+      return Promise.resolve([]);
+    }
+    if (rendered.includes('FROM integration_connection')) {
+      return Promise.resolve(rows.integration_connection ?? []);
+    }
+    if (rendered.includes('FROM subject_tenant')) {
+      return Promise.resolve(rows.subject_tenant ?? []);
+    }
+    if (rendered.includes('FROM tenant_user')) {
+      return Promise.resolve(rows.tenant_user ?? []);
+    }
+    return Promise.resolve([]);
+  }) as unknown as DeputySyncDeps['sql_client'];
+  return { sql: fn, update_calls };
+}
+
+const baseDeputyDeps = (
+  rows: DeputyStubRows,
+  overrides: Partial<DeputySyncDeps> = {},
+): { deps: DeputySyncDeps; update_calls: Array<{ sql: string; params: unknown[] }> } => {
+  const { sql, update_calls } = makeDeputySqlStub(rows);
+  const deps: DeputySyncDeps = {
+    sql_client: sql,
+    decrypt: () => 'decrypted-access-token',
+    get_encryption_key: () => 'fake-key',
+    sync_employees: () => Promise.resolve({ upserted: 0, deactivated: 0 }),
+    pull_timesheets: () =>
+      Promise.resolve({ inserted: 0, updated: 0, skipped_unmatched: 0, skipped_discarded: 0 }),
+    ...overrides,
+  };
+  return { deps, update_calls };
+};
+
+test('syncDeputy: success path → idle + install_url forwarded + counts surfaced', async () => {
+  let observedSyncOpts:
+    | Parameters<NonNullable<DeputySyncDeps['sync_employees']>>[0]
+    | null = null;
+  let observedPullOpts:
+    | Parameters<NonNullable<DeputySyncDeps['pull_timesheets']>>[0]
+    | null = null;
+  const { deps, update_calls } = baseDeputyDeps(
+    {
+      integration_connection: [
+        {
+          tenant_id: TENANT_ID,
+          access_token_encrypted: 'enc.blob',
+          external_account_id: 'https://acme.deputy.com',
+          last_synced_at: null,
+          expires_at: FUTURE_EXPIRES_AT,
+        },
+      ],
+      subject_tenant: [{ id: SUBJECT_ID }],
+      tenant_user: [{ user_id: ADMIN_USER_ID }],
+    },
+    {
+      sync_employees: (opts) => {
+        observedSyncOpts = opts;
+        return Promise.resolve({ upserted: 9, deactivated: 2 });
+      },
+      pull_timesheets: (opts) => {
+        observedPullOpts = opts;
+        return Promise.resolve({
+          inserted: 11,
+          updated: 5,
+          skipped_unmatched: 1,
+          skipped_discarded: 3,
+        });
+      },
+    },
+  );
+
+  const result = await syncDeputy(DEPUTY_CONNECTION_ID, deps);
+
+  assert.equal(result.tenant_id, TENANT_ID);
+  assert.equal(result.provider, 'deputy');
+  assert.equal(result.employees.upserted, 9);
+  assert.equal(result.employees.deactivated, 2);
+  assert.equal(result.timesheets.inserted, 11);
+  assert.equal(result.timesheets.updated, 5);
+  assert.equal(result.timesheets.skipped_unmatched, 1);
+  assert.equal(result.timesheets.skipped_discarded, 3);
+  assert.equal(result.error, undefined);
+
+  // Verify the Deputy client receives install_url (not organisation_id).
+  assert.ok(observedSyncOpts);
+  assert.ok(observedPullOpts);
+  assert.equal(observedSyncOpts.access_token, 'decrypted-access-token');
+  assert.equal(observedSyncOpts.install_url, 'https://acme.deputy.com');
+  assert.equal(observedSyncOpts.tenant_id, TENANT_ID);
+  assert.equal(observedSyncOpts.subject_tenant_id, SUBJECT_ID);
+  assert.equal(observedSyncOpts.invited_by_user_id, ADMIN_USER_ID);
+  assert.equal(observedPullOpts.install_url, 'https://acme.deputy.com');
+
+  // 2 UPDATEs: 'syncing' followed by 'idle' (with last_synced_at).
+  assert.equal(update_calls.length, 2);
+  assert.ok(update_calls[0]?.sql.includes("sync_state = 'syncing'"));
+  assert.ok(update_calls[1]?.sql.includes("sync_state = 'idle'"));
+  assert.ok(update_calls[1]?.sql.includes('last_synced_at = NOW()'));
+});
+
+test('syncDeputy: decrypt failure → sync_state=failed + last_error set', async () => {
+  const { deps, update_calls } = baseDeputyDeps(
+    {
+      integration_connection: [
+        {
+          tenant_id: TENANT_ID,
+          access_token_encrypted: 'enc.blob',
+          external_account_id: 'https://acme.deputy.com',
+          last_synced_at: null,
+          expires_at: FUTURE_EXPIRES_AT,
+        },
+      ],
+      subject_tenant: [{ id: SUBJECT_ID }],
+      tenant_user: [{ user_id: ADMIN_USER_ID }],
+    },
+    {
+      decrypt: () => {
+        throw new Error('malformed encrypted access token');
+      },
+    },
+  );
+
+  const result = await syncDeputy(DEPUTY_CONNECTION_ID, deps);
+
+  assert.equal(result.error, 'malformed encrypted access token');
+  assert.equal(result.provider, 'deputy');
+  assert.equal(result.employees.upserted, 0);
+  assert.equal(result.timesheets.inserted, 0);
+
+  // 'syncing' then 'failed'.
+  assert.equal(update_calls.length, 2);
+  assert.ok(update_calls[0]?.sql.includes("sync_state = 'syncing'"));
+  assert.ok(update_calls[1]?.sql.includes("sync_state = 'failed'"));
+  assert.equal(update_calls[1]?.params[0], 'malformed encrypted access token');
+});
+
+test('syncDeputy: missing external_account_id (install_url) → fails fast without calling sub-functions', async () => {
+  let employeesCalled = false;
+  let timesheetsCalled = false;
+  const { deps, update_calls } = baseDeputyDeps(
+    {
+      integration_connection: [
+        {
+          tenant_id: TENANT_ID,
+          access_token_encrypted: 'enc.blob',
+          external_account_id: null,
+          last_synced_at: null,
+          expires_at: FUTURE_EXPIRES_AT,
+        },
+      ],
+    },
+    {
+      sync_employees: () => {
+        employeesCalled = true;
+        return Promise.resolve({ upserted: 0, deactivated: 0 });
+      },
+      pull_timesheets: () => {
+        timesheetsCalled = true;
+        return Promise.resolve({
+          inserted: 0,
+          updated: 0,
+          skipped_unmatched: 0,
+          skipped_discarded: 0,
+        });
+      },
+    },
+  );
+
+  const result = await syncDeputy(DEPUTY_CONNECTION_ID, deps);
+  assert.match(result.error ?? '', /install_url/);
+  assert.equal(employeesCalled, false);
+  assert.equal(timesheetsCalled, false);
+  // Single UPDATE — straight to 'failed' (no 'syncing' step).
+  assert.equal(update_calls.length, 1);
+  assert.ok(update_calls[0]?.sql.includes("sync_state = 'failed'"));
+});
+
+test('syncDeputy: expired access token → sync_state=failed with reconnect message, no client calls', async () => {
+  let employeesCalled = false;
+  const { deps, update_calls } = baseDeputyDeps(
+    {
+      integration_connection: [
+        {
+          tenant_id: TENANT_ID,
+          access_token_encrypted: 'enc.blob',
+          external_account_id: 'https://acme.deputy.com',
+          last_synced_at: null,
+          expires_at: PAST_EXPIRES_AT,
+        },
+      ],
+    },
+    {
+      sync_employees: () => {
+        employeesCalled = true;
+        return Promise.resolve({ upserted: 0, deactivated: 0 });
+      },
+    },
+  );
+
+  const result = await syncDeputy(DEPUTY_CONNECTION_ID, deps);
+  assert.match(result.error ?? '', /access token expired/);
+  assert.match(result.error ?? '', /reconnect required/);
+  assert.equal(employeesCalled, false);
+  // Single UPDATE — straight to 'failed' (no 'syncing' step).
+  assert.equal(update_calls.length, 1);
+  assert.ok(update_calls[0]?.sql.includes("sync_state = 'failed'"));
+});
+
+test('syncDeputy: missing connection row → throws', async () => {
+  const { deps } = baseDeputyDeps({ integration_connection: [] });
+  await assert.rejects(
+    syncDeputy(DEPUTY_CONNECTION_ID, deps),
     /integration_connection not found or failed/,
   );
 });
