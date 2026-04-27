@@ -57,6 +57,13 @@
       "when": 1777243200000,
       "tag": "0007_effective_kind_view",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777257414622,
+      "tag": "0008_funny_kid_colt",
+      "breakpoints": true
     }
   ]
 }
