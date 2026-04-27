@@ -5,7 +5,7 @@ export type EventForHashing = {
   subject_tenant_id: string;
   kind: string;
   payload: unknown;
-  classification: unknown | null;
+  classification: unknown;
   captured_at: Date;
   captured_by_user_id: string;
   override_of_event_id: string | null;
@@ -21,14 +21,12 @@ function canonicalJsonStringify(value: unknown): string {
   }
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return '[' + value.map(canonicalJsonStringify).join(',') + ']';
-  const keys = Object.keys(value as Record<string, unknown>).sort();
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
   return (
     '{' +
     keys
-      .map(
-        (k) =>
-          JSON.stringify(k) + ':' + canonicalJsonStringify((value as Record<string, unknown>)[k]),
-      )
+      .map((k) => JSON.stringify(k) + ':' + canonicalJsonStringify(obj[k]))
       .join(',') +
     '}'
   );
