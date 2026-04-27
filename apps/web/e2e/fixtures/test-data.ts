@@ -159,7 +159,7 @@ export async function seedEvent(input: SeedEventInput): Promise<{ id: string; ha
       captured_at, captured_by_user_id
     ) VALUES (
       ${id}, ${input.tenantId}, ${input.subjectTenantId}, ${input.kind},
-      ${input.payload as never}::jsonb, ${classification as never}::jsonb,
+      ${JSON.stringify(input.payload)}::jsonb, ${classification === null ? null : JSON.stringify(classification)}::jsonb,
       ${null}, ${null}, ${null},
       ${prevHash}, ${hash},
       ${capturedAt}, ${input.capturedByUserId}
