@@ -16,6 +16,7 @@
     "@cpa/agents": "workspace:*",
     "@cpa/auth": "workspace:*",
     "@cpa/db": "workspace:*",
+    "@cpa/integrations": "workspace:*",
     "@cpa/observability": "workspace:*",
     "@cpa/schemas": "workspace:*",
     "@fastify/cookie": "^11.0.2",
