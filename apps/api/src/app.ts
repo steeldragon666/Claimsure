@@ -27,6 +27,7 @@ import { registerEvents } from './routes/events.js';
 import { registerIntegrations } from './routes/integrations.js';
 import { registerSigning, registerDocuSignWebhookPlugin } from './routes/signing.js';
 import { registerSubjectTenants } from './routes/subject-tenants.js';
+import { registerTimeEntries } from './routes/time-entries.js';
 import { registerListTenants } from './routes/tenants/list.js';
 import { registerSwitchTenant } from './routes/tenants/switch.js';
 import { registerAddUser } from './routes/users/add.js';
@@ -169,6 +170,10 @@ export function buildApp(): App {
   });
   app.register((instance, _opts, done) => {
     registerEvents(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerTimeEntries(instance);
     done();
   });
   app.register((instance, _opts, done) => {
