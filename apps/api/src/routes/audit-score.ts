@@ -110,10 +110,21 @@ export function registerAuditScore(app: FastifyInstance): void {
       });
       const delta_7d = sevenDayOld ? latest.total_pts - sevenDayOld.total_pts : 0;
 
+      // Defensive parse: if a legacy INSERT path double-encoded the
+      // column (jsonb stored as a JSON-string scalar rather than an
+      // array), unwrap it here so the API contract holds. The recompute
+      // job's INSERT was fixed to drop the explicit ::jsonb cast (which
+      // is what triggered the double-encoding via postgres-js's binary
+      // protocol), so going forward this branch is a safety net for
+      // pre-fix snapshots. It can be removed once the snapshot table is
+      // backfilled or rewritten.
+      const rawBreakdown = latest.rule_breakdown;
+      const ruleBreakdown =
+        typeof rawBreakdown === 'string' ? (JSON.parse(rawBreakdown) as unknown) : rawBreakdown;
       return {
         total_pts: latest.total_pts,
         max_pts: latest.max_pts,
-        rule_breakdown: latest.rule_breakdown,
+        rule_breakdown: ruleBreakdown,
         delta_7d,
         computed_at: isoOf(latest.computed_at),
       };

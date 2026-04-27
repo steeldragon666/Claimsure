@@ -207,6 +207,9 @@ test('selectEligibleRecipients: excludes employee who has captured today', async
     expiresAt: futureExpiry(),
   });
   // Insert an event so the EXISTS subquery catches them.
+  // captured_by_user_id FKs to user.id, not subject_tenant_employee.id —
+  // mobile-employee captures are recorded against the firm's admin user
+  // (the one who invited them); the actual employee_id lives in the payload.
   await insertEventWithChain({
     tenant_id: TENANT,
     subject_tenant_id: SUBJECT,
@@ -216,10 +219,11 @@ test('selectEligibleRecipients: excludes employee who has captured today', async
       source: 'voice_pending',
       audio_s3_key: 's3://bucket/test',
       captured_at_local: Date.now(),
+      captured_by_employee_id: EMP_CAPTURED_TODAY,
     },
     classification: null,
     captured_at: new Date(),
-    captured_by_user_id: EMP_CAPTURED_TODAY,
+    captured_by_user_id: ADMIN_USER,
     override_of_event_id: null,
     override_new_kind: null,
     override_reason: null,

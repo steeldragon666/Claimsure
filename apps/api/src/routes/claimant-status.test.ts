@@ -8,13 +8,16 @@ import { buildApp } from '../app.js';
 const SESSION_SECRET = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
 process.env['SESSION_JWT_SECRET'] = SESSION_SECRET;
 
-const TENANT_A = '00000000-0000-4000-8000-00000000c1201';
-const TENANT_B = '00000000-0000-4000-8000-00000000c1202';
-const ADMIN_USER = '00000000-0000-4000-8000-00000000c1210';
-const SUBJECT_A1 = '00000000-0000-4000-8000-00000000c1221';
-const SUBJECT_A2 = '00000000-0000-4000-8000-00000000c1222';
-const SUBJECT_B1 = '00000000-0000-4000-8000-00000000c1223';
-const EMPLOYEE_A1 = '00000000-0000-4000-8000-00000000c1230';
+// UUIDs are 8-4-4-4-12 hex chars. Original c12 fixtures had 13 chars in the
+// last group (8 zeros + "c12xx" 5-char suffix); fixed to 7 zeros + 5-char
+// suffix to land on the canonical 12-char width.
+const TENANT_A = '00000000-0000-4000-8000-0000000c1201';
+const TENANT_B = '00000000-0000-4000-8000-0000000c1202';
+const ADMIN_USER = '00000000-0000-4000-8000-0000000c1210';
+const SUBJECT_A1 = '00000000-0000-4000-8000-0000000c1221';
+const SUBJECT_A2 = '00000000-0000-4000-8000-0000000c1222';
+const SUBJECT_B1 = '00000000-0000-4000-8000-0000000c1223';
+const EMPLOYEE_A1 = '00000000-0000-4000-8000-0000000c1230';
 
 const cleanup = async (): Promise<void> => {
   await privilegedSql`DELETE FROM event WHERE tenant_id IN (${TENANT_A}, ${TENANT_B})`;

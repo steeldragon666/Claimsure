@@ -24,15 +24,32 @@ export type TranscribeJobInput = {
  * lands with the rest of the media-upload pipeline; for v1 this throws
  * so unit tests can stub it out + route tests assert the job-not-yet-
  * runnable flow without booting a real S3.
- *
- * Exported so tests can monkey-patch it without DI plumbing — the
- * Node test runner's `mock.method` mechanism works on module exports.
  */
-export function getMediaBytes(_s3Key: string): Promise<Buffer> {
+function defaultGetMediaBytes(_s3Key: string): Promise<Buffer> {
   return Promise.reject(
     new Error('getMediaBytes: S3 fetch not implemented — wire S3 client in a follow-up task'),
   );
 }
+
+/**
+ * Test-overrideable provider for the S3-fetch dependency.
+ *
+ * Why an object holder: `mock.method()` from `node:test` reassigns the
+ * target property on the receiver. ESM module namespace bindings are
+ * non-configurable by spec, so `mock.method(transcribeMod, 'getMediaBytes')`
+ * fails after the first restore with "Cannot redefine property". Plain
+ * object properties (this `mediaProvider` is one) ARE configurable, so
+ * the same `mock.method(mediaProvider, 'getMediaBytes', stub)` pattern
+ * works and `stub.mock.restore()` cleanly reverts between tests.
+ */
+export const mediaProvider: { getMediaBytes: (s3Key: string) => Promise<Buffer> } = {
+  getMediaBytes: defaultGetMediaBytes,
+};
+
+// Re-export for any caller that imports the function directly. Production
+// code paths inside this module use `mediaProvider.getMediaBytes` so
+// test-time mocks take effect.
+export const getMediaBytes = defaultGetMediaBytes;
 
 /**
  * Resolve the Deepgram API key.
@@ -114,7 +131,9 @@ export function buildTranscribedPayload(args: {
  * in the events route).
  */
 export async function runTranscribeJob(input: TranscribeJobInput): Promise<void> {
-  const audio = await getMediaBytes(input.audio_s3_key);
+  // Use the mediaProvider holder rather than the bare function so tests
+  // can substitute a stub without hitting the ESM-binding limitation.
+  const audio = await mediaProvider.getMediaBytes(input.audio_s3_key);
   const transcript = await deepgramTranscribe(
     { api_key: deepgramApiKey() },
     audio,

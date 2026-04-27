@@ -8,11 +8,15 @@ import { buildApp } from '../app.js';
 const SESSION_SECRET = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
 process.env['SESSION_JWT_SECRET'] = SESSION_SECRET;
 
-const TENANT_A = '00000000-0000-4000-8000-00000000c1101';
-const ADMIN_USER = '00000000-0000-4000-8000-00000000c1110';
-const SUBJECT_A1 = '00000000-0000-4000-8000-00000000c1121';
-const EMPLOYEE_VALID = '00000000-0000-4000-8000-00000000c1130';
-const EMPLOYEE_DEACTIVATED = '00000000-0000-4000-8000-00000000c1131';
+// UUIDs are 8-4-4-4-12 hex chars. The original c11 fixtures had 13 chars in
+// the last group (8 zeros + "c1xxx" 5-char suffix); fixed to 7 zeros + 5-char
+// suffix to land on the canonical 12-char width, matching the a3/a6/a12
+// fixture convention elsewhere in the test suite.
+const TENANT_A = '00000000-0000-4000-8000-0000000c1101';
+const ADMIN_USER = '00000000-0000-4000-8000-0000000c1110';
+const SUBJECT_A1 = '00000000-0000-4000-8000-0000000c1121';
+const EMPLOYEE_VALID = '00000000-0000-4000-8000-0000000c1130';
+const EMPLOYEE_DEACTIVATED = '00000000-0000-4000-8000-0000000c1131';
 
 const cleanup = async (): Promise<void> => {
   await privilegedSql`

@@ -77,8 +77,14 @@ test('runRecomputeJob: inserts a snapshot row + returns id + total', async () =>
   assert.equal(rows.length, 1);
   assert.equal(rows[0]?.max_pts, 100);
   assert.equal(rows[0]?.total_pts, result.total_pts);
-  // rule_breakdown is a jsonb array of 10 objects.
-  const breakdown = rows[0]?.rule_breakdown as Array<{ id: string; max: number }>;
+  // rule_breakdown is a jsonb array of 10 objects. Tolerate both shapes
+  // (parsed-array from postgres-js auto-decode, OR string from a legacy
+  // double-encoded INSERT path) so a postgres-js encoding regression
+  // surfaces as a useful diff rather than `length === <bytecount>`.
+  const rawBreakdown = rows[0]?.rule_breakdown;
+  const breakdown = (
+    typeof rawBreakdown === 'string' ? JSON.parse(rawBreakdown) : rawBreakdown
+  ) as Array<{ id: string; max: number }>;
   assert.equal(breakdown.length, 10);
   assert.ok(breakdown.every((r) => typeof r.id === 'string' && typeof r.max === 'number'));
 });

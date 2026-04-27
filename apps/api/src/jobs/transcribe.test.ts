@@ -88,7 +88,7 @@ test('runTranscribeJob: patches event payload with deepgram transcript', async (
 
   // Stub getMediaBytes — the placeholder throws by design; tests
   // monkey-patch it via mock.method on the module export.
-  const stub = mock.method(transcribeMod, 'getMediaBytes', () =>
+  const stub = mock.method(transcribeMod.mediaProvider, 'getMediaBytes', () =>
     Promise.resolve(Buffer.from([0x00, 0x01, 0x02, 0x03])),
   );
 
@@ -131,7 +131,7 @@ test('runTranscribeJob: patches event payload with deepgram transcript', async (
 });
 
 test('runTranscribeJob: throws when event_id missing', async () => {
-  const stub = mock.method(transcribeMod, 'getMediaBytes', () =>
+  const stub = mock.method(transcribeMod.mediaProvider, 'getMediaBytes', () =>
     Promise.resolve(Buffer.from([0x00])),
   );
   nock('https://api.deepgram.com')
@@ -153,7 +153,7 @@ test('runTranscribeJob: throws when event_id missing', async () => {
 });
 
 test('runTranscribeJob: surfaces deepgram errors verbatim', async () => {
-  const stub = mock.method(transcribeMod, 'getMediaBytes', () =>
+  const stub = mock.method(transcribeMod.mediaProvider, 'getMediaBytes', () =>
     Promise.resolve(Buffer.from([0x00])),
   );
   nock('https://api.deepgram.com').post('/v1/listen').query(true).reply(401, 'unauthorized');

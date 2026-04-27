@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from '@cpa/auth';
 import { sql, privilegedSql } from '@cpa/db/client';
@@ -216,12 +217,18 @@ export function registerMedia(app: FastifyInstance): void {
     // RLS for the insert path. The SELECT below uses RLS to read
     // back the inserted row.
     try {
+      // The Drizzle schema's `id` column has `$defaultFn(() => crypto.randomUUID())`
+      // — a TS-side default that fires for `db.insert(mediaArtefact)` paths. The
+      // raw INSERT below bypasses that, so we must supply the uuid explicitly to
+      // avoid a not-null constraint violation. (Migration 0008 declares
+      // id PRIMARY KEY NOT NULL with no DB-level default.)
       const inserted = await privilegedSql<RawMediaRow[]>`
           INSERT INTO media_artefact (
-            tenant_id, subject_tenant_id, event_id, uploaded_by_employee_id,
+            id, tenant_id, subject_tenant_id, event_id, uploaded_by_employee_id,
             s3_key, content_hash, mime_type, size_bytes, exif,
             ocr_status, virus_scan_status
           ) VALUES (
+            ${crypto.randomUUID()},
             ${principal.tenantId},
             ${principal.subjectTenantId},
             ${body.event_id ?? null},

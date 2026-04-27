@@ -43,13 +43,20 @@ export async function runRecomputeJob(input: RecomputeJobInput): Promise<Recompu
     subject_tenant_id: input.subject_tenant_id,
   });
   const id = crypto.randomUUID();
+  // postgres-js binds `${string}::jsonb` via the binary protocol in a way
+  // that double-encodes (the JSON-stringified array gets wrapped in
+  // another JSON string layer, so the column ends up storing a jsonb
+  // *string* scalar rather than an array). Drop the explicit cast and
+  // rely on the column's declared jsonb type for coercion — postgres
+  // parses the text on insert into a real jsonb array.
+  const breakdownJson = JSON.stringify(result.rule_breakdown);
   await privilegedSql`
     INSERT INTO audit_score_snapshot
       (id, tenant_id, subject_tenant_id, total_pts, max_pts, rule_breakdown)
     VALUES
       (${id}, ${input.tenant_id}, ${input.subject_tenant_id},
        ${result.total_pts}, ${result.max_pts},
-       ${JSON.stringify(result.rule_breakdown)}::jsonb)
+       ${breakdownJson})
   `;
   return { snapshot_id: id, total_pts: result.total_pts };
 }
