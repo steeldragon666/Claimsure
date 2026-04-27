@@ -5,3 +5,4 @@ export * from './subject-tenant.js';
 export * from './event.js';
 export * from './employee.js';
 export * from './magic-link.js';
+export * from './mobile-session.js';
