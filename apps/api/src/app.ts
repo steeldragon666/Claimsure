@@ -14,10 +14,25 @@ import {
 } from 'fastify-type-provider-zod';
 import { createLogger } from '@cpa/observability';
 import { sessionPlugin } from '@cpa/auth';
+import { registerHostnameTenantResolver } from './middleware/hostname-tenant-resolver.js';
 import { registerGoogleAuth } from './routes/auth/google.js';
 import { registerMicrosoftAuth } from './routes/auth/microsoft.js';
 import { registerSignout } from './routes/auth/signout.js';
 import { healthRoutes } from './routes/health.js';
+import { registerAuditScore } from './routes/audit-score.js';
+import { registerBrandConfig } from './routes/brand-config.js';
+import { registerClaimantMagicLinkRedeem } from './routes/claimant-magic-link.js';
+import { registerClaimantStatus } from './routes/claimant-status.js';
+import { registerEmployees } from './routes/employees.js';
+import { registerMagicLinkRedeem } from './routes/magic-link.js';
+import { registerMedia } from './routes/media.js';
+import { registerMobileEvents } from './routes/mobile-events.js';
+import { registerRefreshRoute } from './routes/mobile-session.js';
+import { registerEvents } from './routes/events.js';
+import { registerIntegrations } from './routes/integrations.js';
+import { registerSigning, registerDocuSignWebhookPlugin } from './routes/signing.js';
+import { registerSubjectTenants } from './routes/subject-tenants.js';
+import { registerTimeEntries } from './routes/time-entries.js';
 import { registerListTenants } from './routes/tenants/list.js';
 import { registerSwitchTenant } from './routes/tenants/switch.js';
 import { registerAddUser } from './routes/users/add.js';
@@ -96,6 +111,16 @@ export function buildApp(): App {
   // routes so session-aware handlers can read req.cookies.
   app.register(cookie);
 
+  // Hostname → tenant resolver (T-F4). Runs as a global preHandler so any
+  // route can read req.resolvedBrand. Registered BEFORE the session plugin
+  // so even unauthenticated routes (mobile-launch brand-config GET, magic-
+  // link redeem) get the resolution. The lookup goes via privilegedSql —
+  // see middleware/hostname-tenant-resolver.ts for the rationale.
+  app.register((instance, _opts, done) => {
+    registerHostnameTenantResolver(instance);
+    done();
+  });
+
   // Session middleware: verifies cpa_session cookie, attaches req.user,
   // sets app.current_tenant_id GUC for RLS-scoped queries.
   // Production must set SESSION_JWT_SECRET (the dev default is a constant
@@ -142,6 +167,69 @@ export function buildApp(): App {
     registerAddUser(instance);
     registerUpdateUser(instance);
     registerRemoveUser(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerSubjectTenants(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerEvents(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerTimeEntries(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerEmployees(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerMagicLinkRedeem(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerClaimantMagicLinkRedeem(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerClaimantStatus(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerAuditScore(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerRefreshRoute(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerMobileEvents(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerMedia(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerBrandConfig(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerIntegrations(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerSigning(instance);
+    done();
+  });
+  // DocuSign Connect webhook is registered as its own plugin so the
+  // application/json content-type parser is encapsulated to that one
+  // route (the handler needs the raw Buffer to HMAC-verify).
+  app.register((instance, _opts, done) => {
+    registerDocuSignWebhookPlugin(instance);
     done();
   });
 

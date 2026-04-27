@@ -1,0 +1,110 @@
+import { sql } from 'drizzle-orm';
+import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { subjectTenant } from './subject_tenant.js';
+import { subjectTenantEmployee } from './subject_tenant_employee.js';
+import { tenant } from './tenant.js';
+import { user } from './user.js';
+
+/**
+ * Append-only, hash-chained evidence event per `subject_tenant`.
+ *
+ * The 13 kinds split 12 classifiable evidence categories + a special
+ * `OVERRIDE` kind that supersedes a prior event's classification. Override
+ * events carry `override_of_event_id` (self-reference, enforced in code —
+ * Drizzle self-FKs are awkward) plus optional `override_new_kind` /
+ * `override_reason` describing the reclassification.
+ *
+ * Hash chain: each event's `prev_hash` links to the previous event's `hash`
+ * within the same subject_tenant_id (ordered by captured_at). The first
+ * event has `prev_hash = NULL`. The chain is verified during the Assurance
+ * Report (P5) build.
+ *
+ * Idempotency: `idempotency_key` is a hex SHA-256 fingerprint of the paste
+ * payload; identical paste requests dedupe to the same row. Nullable for
+ * OVERRIDE events (which carry no idempotency-relevant payload), so the
+ * uniqueness constraint is a partial index `WHERE idempotency_key IS NOT
+ * NULL`.
+ *
+ * Forward compatibility: `project_id` and `milestone_id` are nullable
+ * uuid columns without FKs — the target tables arrive in P4 (project) and
+ * P7 (milestone). FKs will be added then.
+ *
+ * RLS-protected (Task 3 hand-authors the policy in this same migration):
+ *   tenant_id = current_setting('app.current_tenant_id', true)::uuid
+ *
+ * APPEND-ONLY: no deletedAt column. Errors are corrected via OVERRIDE
+ * events, never deletes — preserving the audit chain.
+ *
+ * Naming convention: camelCase TS / snake_case SQL (per T5/T6 chain
+ * 2aa8e18 → 1149b17). Imports alphabetical (per T6 precedent).
+ */
+export const EVIDENCE_KINDS = [
+  'HYPOTHESIS',
+  'DESIGN',
+  'EXPERIMENT',
+  'OBSERVATION',
+  'ITERATION',
+  'NEW_KNOWLEDGE',
+  'UNCERTAINTY',
+  'TIME_LOG',
+  'ASSOCIATE_FLAG',
+  'EXPENDITURE_NOTE',
+  'SUPPORTING',
+  'INELIGIBLE',
+  'OVERRIDE',
+] as const;
+export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
+
+export const event = pgTable(
+  'event',
+  {
+    id: uuid('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenant.id),
+    subjectTenantId: uuid('subject_tenant_id')
+      .notNull()
+      .references(() => subjectTenant.id),
+    // Nullable; FK target arrives in P4 (project table).
+    projectId: uuid('project_id'),
+    // Nullable; FK target arrives in P7 (milestone table).
+    milestoneId: uuid('milestone_id'),
+    kind: text('kind', { enum: EVIDENCE_KINDS }).notNull(),
+    payload: jsonb('payload').notNull(),
+    classification: jsonb('classification'),
+    // Self-FK omitted intentionally — Drizzle self-references are awkward;
+    // enforce in code (event chain helper, lands in T-chain).
+    overrideOfEventId: uuid('override_of_event_id'),
+    overrideNewKind: text('override_new_kind', { enum: EVIDENCE_KINDS }),
+    overrideReason: text('override_reason'),
+    // hex SHA-256; null for the first event in a subject_tenant chain.
+    prevHash: text('prev_hash'),
+    // hex SHA-256; globally unique (chain integrity guarantee).
+    hash: text('hash').notNull().unique(),
+    // hex SHA-256 fingerprint; null for OVERRIDE events. Partial unique
+    // index below enforces dedupe WHERE NOT NULL.
+    idempotencyKey: text('idempotency_key'),
+    capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
+    // Captured by EITHER a consultant `user` (firm-side) OR a claimant-side
+    // `subject_tenant_employee` (mobile flow) — never both. Migration 0011
+    // adds a CHECK constraint enforcing exactly one is set. The chain hash
+    // canonicaliser conditionally includes captured_by_employee_id only
+    // when non-null so existing P2 events (employee_id always null) keep
+    // their original hashes and pass verifyChain.
+    capturedByUserId: uuid('captured_by_user_id').references(() => user.id),
+    capturedByEmployeeId: uuid('captured_by_employee_id').references(
+      () => subjectTenantEmployee.id,
+    ),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    feedIdx: index('event_feed_idx').on(t.subjectTenantId, t.capturedAt.desc()),
+    kindIdx: index('event_kind_idx').on(t.subjectTenantId, t.kind),
+    overrideIdx: index('event_override_idx').on(t.overrideOfEventId),
+    idempotencyUnique: uniqueIndex('event_idempotency_unique')
+      .on(t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL`),
+  }),
+);

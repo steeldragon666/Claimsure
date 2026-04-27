@@ -1,0 +1,68 @@
+{
+  "name": "@cpa/integrations",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
+    },
+    "./email": {
+      "types": "./dist/runtime/email.d.ts",
+      "import": "./dist/runtime/email.js"
+    },
+    "./deepgram": {
+      "types": "./dist/deepgram/index.d.ts",
+      "import": "./dist/deepgram/index.js"
+    },
+    "./docusign": {
+      "types": "./dist/docusign/index.d.ts",
+      "import": "./dist/docusign/index.js"
+    },
+    "./payroll": {
+      "types": "./dist/payroll/index.d.ts",
+      "import": "./dist/payroll/index.js"
+    },
+    "./payroll/employment-hero": {
+      "types": "./dist/payroll/employment-hero/index.d.ts",
+      "import": "./dist/payroll/employment-hero/index.js"
+    },
+    "./payroll/keypay": {
+      "types": "./dist/payroll/keypay/index.d.ts",
+      "import": "./dist/payroll/keypay/index.js"
+    },
+    "./payroll/deputy": {
+      "types": "./dist/payroll/deputy/index.d.ts",
+      "import": "./dist/payroll/deputy/index.js"
+    },
+    "./payroll/xero-payroll": {
+      "types": "./dist/payroll/xero-payroll/index.d.ts",
+      "import": "./dist/payroll/xero-payroll/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "tsx --env-file-if-exists=../../.env --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@cpa/db": "workspace:*",
+    "@cpa/observability": "workspace:*",
+    "@cpa/schemas": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "nock": "^14.0.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

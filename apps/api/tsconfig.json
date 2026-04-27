@@ -9,7 +9,10 @@
     { "path": "../../packages/schemas" },
     { "path": "../../packages/db" },
     { "path": "../../packages/observability" },
-    { "path": "../../packages/auth" }
+    { "path": "../../packages/auth" },
+    { "path": "../../packages/agents" },
+    { "path": "../../packages/audit-score" },
+    { "path": "../../packages/integrations" }
   ],
   "include": ["src/**/*"],
   "exclude": ["src/**/*.test.ts", "dist", "node_modules"]

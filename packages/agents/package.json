@@ -1,0 +1,41 @@
+{
+  "name": "@cpa/agents",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
+    },
+    "./classifier": {
+      "types": "./dist/classifier/index.d.ts",
+      "import": "./dist/classifier/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "tsx --env-file-if-exists=../../.env --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@cpa/db": "workspace:*",
+    "@cpa/observability": "workspace:*",
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@opentelemetry/api": "^1.9.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "nock": "^14.0.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -43,6 +43,48 @@
       "when": 1777170300000,
       "tag": "0005_tenant_user_active_uniq",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777239950543,
+      "tag": "0006_fair_network",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777243200000,
+      "tag": "0007_effective_kind_view",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777257414622,
+      "tag": "0008_funny_kid_colt",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777257700750,
+      "tag": "0009_real_iron_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777285764087,
+      "tag": "0010_lyrical_the_stranger",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777372164087,
+      "tag": "0011_event_captured_by_employee",
+      "breakpoints": true
     }
   ]
 }

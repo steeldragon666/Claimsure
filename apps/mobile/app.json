@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "CPA Scribe",
+    "slug": "cpa-scribe",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "cpa-scribe",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cpa.scribe"
+    },
+    "android": {
+      "package": "com.cpa.scribe",
+      "adaptiveIcon": {
+        "backgroundColor": "#0066cc"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Capture R&D evidence (lab notes, prototypes, schematics)."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Record voice notes describing R&D activities."
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "extra": {
+      "apiUrl": "https://platform.com.au"
+    }
+  }
+}

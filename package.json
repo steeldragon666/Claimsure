@@ -7,6 +7,7 @@
     "pnpm": ">=10.0.0"
   },
   "scripts": {
+    "prepare": "husky",
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
@@ -21,9 +22,15 @@
   "devDependencies": {
     "eslint": "^9.16.0",
     "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.4.2",
     "turbo": "^2.3.0",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.18.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,md,yml,yaml}": "prettier --check",
+    "*.{ts,tsx,js,jsx}": "eslint --max-warnings=0"
   }
 }
