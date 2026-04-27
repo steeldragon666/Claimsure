@@ -19,6 +19,7 @@ import { registerGoogleAuth } from './routes/auth/google.js';
 import { registerMicrosoftAuth } from './routes/auth/microsoft.js';
 import { registerSignout } from './routes/auth/signout.js';
 import { healthRoutes } from './routes/health.js';
+import { registerBrandConfig } from './routes/brand-config.js';
 import { registerEmployees } from './routes/employees.js';
 import { registerMagicLinkRedeem } from './routes/magic-link.js';
 import { registerRefreshRoute } from './routes/mobile-session.js';
@@ -178,6 +179,10 @@ export function buildApp(): App {
   });
   app.register((instance, _opts, done) => {
     registerRefreshRoute(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerBrandConfig(instance);
     done();
   });
 
