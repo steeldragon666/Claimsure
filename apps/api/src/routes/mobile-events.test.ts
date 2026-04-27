@@ -83,10 +83,26 @@ const mobileToken = async (args: {
 };
 
 const validBody = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
-  audio_s3_key: 's3://bucket/abc-' + Date.now() + '.m4a',
-  audio_mime_type: 'audio/m4a',
-  duration_ms: 5000,
   captured_at_local: Date.now(),
+  payload: {
+    source: 'voice',
+    audio_s3_key: 's3://bucket/abc-' + Date.now() + '.m4a',
+    audio_mime_type: 'audio/m4a',
+    duration_ms: 5000,
+  },
+  ...overrides,
+});
+
+const validHypothesisBody = (
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  captured_at_local: Date.now(),
+  payload: {
+    source: 'hypothesis_prompt',
+    predicted_outcome: 'We expect the catalyst to lift conversion by 5%.',
+    success_criteria: 'Conversion >= 90% with no impurity above 0.5%.',
+    uncertainty: 'Whether the side-product profile changes at scale.',
+  },
   ...overrides,
 });
 
@@ -136,9 +152,101 @@ test('POST /v1/mobile/events: 201 + event row + payload voice_pending', async ()
   `;
   assert.equal(rows[0]?.kind, 'SUPPORTING');
   assert.equal(rows[0]?.payload['source'], 'voice_pending');
-  assert.equal(rows[0]?.payload['audio_s3_key'], body['audio_s3_key']);
+  assert.equal(
+    rows[0]?.payload['audio_s3_key'],
+    (body['payload'] as { audio_s3_key: string }).audio_s3_key,
+  );
   assert.equal(rows[0]?.captured_by_user_id, EMPLOYEE_A);
 
+  await app.close();
+});
+
+test('POST /v1/mobile/events: 201 hypothesis variant — kind=HYPOTHESIS + classification synthesised', async () => {
+  const app = buildApp();
+  const body = validHypothesisBody();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/mobile/events',
+    headers: { authorization: `Bearer ${await mobileToken({})}` },
+    payload: body,
+  });
+  assert.equal(res.statusCode, 201);
+  const j = res.json<{ event: { id: string } }>();
+
+  const rows = await privilegedSql<
+    {
+      kind: string;
+      payload: Record<string, unknown>;
+      classification: Record<string, unknown> | null;
+    }[]
+  >`
+    SELECT kind, payload, classification FROM event WHERE id = ${j.event.id}
+  `;
+  assert.equal(rows[0]?.kind, 'HYPOTHESIS');
+  assert.equal(rows[0]?.payload['source'], 'hypothesis_prompt');
+  assert.equal(
+    rows[0]?.payload['predicted_outcome'],
+    (body['payload'] as { predicted_outcome: string }).predicted_outcome,
+  );
+  assert.equal(
+    rows[0]?.payload['success_criteria'],
+    (body['payload'] as { success_criteria: string }).success_criteria,
+  );
+  assert.equal(
+    rows[0]?.payload['uncertainty'],
+    (body['payload'] as { uncertainty: string }).uncertainty,
+  );
+
+  // Synthesised classification — no LLM, but downstream views can still
+  // read the standard fields.
+  const cls = rows[0]?.classification;
+  assert.ok(cls !== null);
+  assert.equal(cls?.['kind'], 'HYPOTHESIS');
+  assert.equal(cls?.['confidence'], 1);
+  assert.equal(cls?.['statutory_anchor'], '§355-25(1)(a)');
+  assert.equal(cls?.['model'], 'mobile-hypothesis-form');
+  assert.equal(cls?.['prompt_version'], 'mobile@1.0.0');
+  assert.equal(cls?.['tokens_in'], 0);
+  assert.equal(cls?.['tokens_out'], 0);
+
+  await app.close();
+});
+
+test('POST /v1/mobile/events: 400 on invalid discriminator', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/mobile/events',
+    headers: { authorization: `Bearer ${await mobileToken({})}` },
+    payload: {
+      captured_at_local: Date.now(),
+      payload: {
+        source: 'unknown_variant',
+        whatever: 'x',
+      },
+    },
+  });
+  assert.equal(res.statusCode, 400);
+  await app.close();
+});
+
+test('POST /v1/mobile/events: 400 on hypothesis variant with empty fields', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/mobile/events',
+    headers: { authorization: `Bearer ${await mobileToken({})}` },
+    payload: {
+      captured_at_local: Date.now(),
+      payload: {
+        source: 'hypothesis_prompt',
+        predicted_outcome: '',
+        success_criteria: 'ok',
+        uncertainty: 'ok',
+      },
+    },
+  });
+  assert.equal(res.statusCode, 400);
   await app.close();
 });
 

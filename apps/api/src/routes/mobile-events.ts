@@ -1,38 +1,59 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { insertEventWithChain } from '@cpa/db';
 import { sql, privilegedSql } from '@cpa/db/client';
-import { Uuid } from '@cpa/schemas';
+import {
+  createMobileEventBody,
+  type CreateMobileEventBody,
+  type Classification,
+} from '@cpa/schemas';
 import { requireMobileSession } from '../middleware/mobile-jwt-verifier.js';
 import { runTranscribeJob } from '../jobs/transcribe.js';
 
 /**
- * Mobile voice-event ingest body (T-A4).
+ * POST /v1/mobile/events body (T-A4 + T-A11).
  *
- * `subject_tenant_id` is OPTIONAL — when omitted, we derive it from
- * `req.mobileUser.subject_tenant_id` (the employee's bound claimant).
- * Allowing the override is what lets a future "consultant test mode"
- * post on behalf of a different claimant without re-binding the
- * employee, but the typical employee flow leaves it unset.
+ * Discriminated-union body: `payload.source` selects the variant.
+ *   - voice              → existing flow (placeholder event + transcribe job)
+ *   - hypothesis_prompt  → kind forced to HYPOTHESIS + synthesised classification
  *
- * `audio_s3_key` is the object key the mobile client uploaded the bytes
- * to before calling this endpoint — the upload step itself lands with
- * the rest of the media-upload pipeline; for v1 the route trusts the
- * key and the transcribe job's getMediaBytes stub throws.
+ * `subject_tenant_id` is OPTIONAL — when omitted, derived from
+ * `req.mobileUser.subject_tenant_id`. `captured_at_local` is the
+ * device-clock ms epoch and goes verbatim into the payload (the
+ * canonical `event.captured_at` uses server NOW() for ingest order).
  *
- * `captured_at_local` is the device-clock ms epoch — server stores it
- * verbatim in the payload (NOT in `event.captured_at`, which uses
- * server NOW() for ingest ordering). Future backdate-detection work
- * can compare the two.
+ * See `@cpa/schemas/event` for the per-variant zod definitions.
  */
-const mobileEventBody = z.object({
-  subject_tenant_id: Uuid.optional(),
-  audio_s3_key: z.string().min(1).max(1024),
-  audio_mime_type: z.string().min(1).max(64),
-  duration_ms: z.number().int().nonnegative(),
-  captured_at_local: z.number().int().nonnegative(),
-});
-type MobileEventBody = z.infer<typeof mobileEventBody>;
+type MobileEventBody = CreateMobileEventBody;
+
+/**
+ * Hypothesis-form classification synthesis.
+ *
+ * The form IS the classification — no LLM call, no idempotency cache.
+ * We mint a classification row inline so downstream views (assurance
+ * report, ineligible filter) can still filter by `classification IS
+ * NOT NULL` without adding a special-case for HYPOTHESIS. The model
+ * name `mobile-hypothesis-form` is a deliberate non-LLM string so
+ * cost-tracking dashboards can exclude it from token spend.
+ *
+ * Confidence pinned at 1.0 — the consultant-confirmed pre-experiment
+ * framing is what makes this a HYPOTHESIS under §355-25(1)(a); the
+ * form's "pre-dating the hypothesis is what makes the activity
+ * systematic-experimental" prompt is the consent record.
+ */
+const HYPOTHESIS_PROMPT_VERSION = 'mobile@1.0.0';
+
+function buildHypothesisClassification(): Classification {
+  return {
+    kind: 'HYPOTHESIS',
+    confidence: 1.0,
+    rationale: 'consultant-confirmed pre-experiment hypothesis',
+    statutory_anchor: '§355-25(1)(a)',
+    model: 'mobile-hypothesis-form',
+    prompt_version: HYPOTHESIS_PROMPT_VERSION,
+    tokens_in: 0,
+    tokens_out: 0,
+  };
+}
 
 const errEnvelope = (
   code: string,
@@ -73,7 +94,7 @@ function enqueueTranscribeBestEffort(
 }
 
 /**
- * Register POST /v1/mobile/events (T-A4).
+ * Register POST /v1/mobile/events (T-A4 + T-A11).
  *
  * Auth: requireMobileSession — the route is for the employee app, not
  * the consultant portal. F5's mobile JWT carries tenant_id +
@@ -87,21 +108,29 @@ function enqueueTranscribeBestEffort(
  * retry" path safe: the network failure that dropped the original
  * response can't double-create.
  *
- * Effect: inserts an event with kind=SUPPORTING + payload =
- * {_v:1, source:'voice_pending', audio_s3_key, captured_at_local}.
- * The transcribe job patches payload to source='voice' once Deepgram
- * returns. SUPPORTING is a placeholder — the classifier will reclassify
- * downstream; OVERRIDE preserves the kind history if the placeholder
- * was wrong.
+ * Effect (variant-dependent):
+ *   - source: 'voice'
+ *     Inserts kind=SUPPORTING + payload = {_v:1, source:'voice_pending',
+ *     audio_s3_key, captured_at_local} with classification=null.
+ *     Best-effort enqueues the transcribe job, which patches payload
+ *     to source='voice' once Deepgram returns. SUPPORTING is a
+ *     placeholder — the classifier will reclassify downstream;
+ *     OVERRIDE preserves the kind history if the placeholder was wrong.
+ *
+ *   - source: 'hypothesis_prompt'
+ *     Inserts kind=HYPOTHESIS directly + classification synthesised
+ *     inline (no LLM round-trip — the form IS the classification).
+ *     statutory_anchor='§355-25(1)(a)' marks this as the systematic-
+ *     experimental anchor for the chain.
  */
 export function registerMobileEvents(app: FastifyInstance): void {
   app.post('/v1/mobile/events', { preHandler: requireMobileSession }, async (req, reply) => {
-    const parsed = mobileEventBody.safeParse(req.body);
+    const parsed = createMobileEventBody.safeParse(req.body);
     if (!parsed.success) {
       return reply.status(400).send(
         errEnvelope(
           'INVALID_BODY',
-          'Body must be { subject_tenant_id?, audio_s3_key, audio_mime_type, duration_ms, captured_at_local }',
+          'Body must be { subject_tenant_id?, captured_at_local, payload: { source: "voice" | "hypothesis_prompt", ... } }',
           req.id,
         ),
       );
@@ -185,22 +214,43 @@ export function registerMobileEvents(app: FastifyInstance): void {
       }
     }
 
-    // Insert the placeholder event. SUPPORTING kind acts as the
-    // pre-classification holding bay — once the transcribe job runs
-    // and the classifier reclassifies, it'll OVERRIDE this if needed.
+    // Branch on the discriminated-union variant. Voice → SUPPORTING
+    // placeholder + transcribe enqueue. Hypothesis → HYPOTHESIS kind
+    // + synthesised classification (no LLM round-trip).
+    //
+    // Both paths share the same row shape: kind, payload, classification.
+    // The chain hash captures all three at insert time, so an OVERRIDE
+    // event is required to change kind after the fact (audit invariant).
+    const variant = body.payload;
+    const isVoice = variant.source === 'voice';
+    const eventKind: 'SUPPORTING' | 'HYPOTHESIS' = isVoice
+      ? 'SUPPORTING'
+      : 'HYPOTHESIS';
+    const eventPayload: Record<string, unknown> = isVoice
+      ? {
+          _v: 1,
+          source: 'voice_pending',
+          audio_s3_key: variant.audio_s3_key,
+          captured_at_local: body.captured_at_local,
+        }
+      : {
+          _v: 1,
+          source: 'hypothesis_prompt',
+          predicted_outcome: variant.predicted_outcome,
+          success_criteria: variant.success_criteria,
+          uncertainty: variant.uncertainty,
+          captured_at_local: body.captured_at_local,
+        };
+    const eventClassification = isVoice ? null : buildHypothesisClassification();
+
     let inserted: { id: string; hash: string };
     try {
       const result = await insertEventWithChain({
         tenant_id: principal.tenantId,
         subject_tenant_id: subjectTenantId,
-        kind: 'SUPPORTING',
-        payload: {
-          _v: 1,
-          source: 'voice_pending',
-          audio_s3_key: body.audio_s3_key,
-          captured_at_local: body.captured_at_local,
-        },
-        classification: null,
+        kind: eventKind,
+        payload: eventPayload,
+        classification: eventClassification,
         captured_at: new Date(),
         captured_by_user_id: principal.employeeId,
         override_of_event_id: null,
@@ -249,14 +299,18 @@ export function registerMobileEvents(app: FastifyInstance): void {
       throw err;
     }
 
-    // Best-effort transcribe enqueue. The placeholder getMediaBytes
-    // stub throws today; once S3 lands the same call still works
-    // because the input shape is stable.
-    enqueueTranscribeBestEffort(app, {
-      audio_s3_key: body.audio_s3_key,
-      event_id: inserted.id,
-      audio_mime_type: body.audio_mime_type,
-    });
+    // Best-effort transcribe enqueue — voice variant only. The
+    // placeholder getMediaBytes stub throws today; once S3 lands the
+    // same call still works because the input shape is stable.
+    // Hypothesis variant has no transcript phase — kind is already
+    // HYPOTHESIS at insert time.
+    if (isVoice) {
+      enqueueTranscribeBestEffort(app, {
+        audio_s3_key: variant.audio_s3_key,
+        event_id: inserted.id,
+        audio_mime_type: variant.audio_mime_type,
+      });
+    }
 
     // Read back the inserted row's timestamps so the client can
     // populate its local cache without a follow-up GET. captured_at /

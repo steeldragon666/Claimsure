@@ -109,6 +109,79 @@ export const createEventBody = z.object({
 export type CreateEventBody = z.infer<typeof createEventBody>;
 
 /**
+ * Voice-event variant of POST /v1/mobile/events (T-A4 + T-A11).
+ *
+ * `source: 'voice'` selects the voice path: an `audio_s3_key` is
+ * already populated on S3 by the time the route is called; the route
+ * inserts a placeholder event (kind=SUPPORTING, payload.source=
+ * 'voice_pending') and best-effort enqueues the transcribe job.
+ *
+ * `audio_mime_type` and `duration_ms` are surfaced so the assurance
+ * report can render a "voice note: 12s" badge before the transcript
+ * comes back.
+ */
+export const mobileEventVoiceVariant = z.object({
+  source: z.literal('voice'),
+  audio_s3_key: z.string().min(1).max(1024),
+  audio_mime_type: z.string().min(1).max(64),
+  duration_ms: z.number().int().nonnegative(),
+});
+export type MobileEventVoiceVariant = z.infer<typeof mobileEventVoiceVariant>;
+
+/**
+ * Hypothesis-prompt variant of POST /v1/mobile/events (T-A10 + T-A11).
+ *
+ * `source: 'hypothesis_prompt'` selects the hypothesis path: the
+ * three free-text fields go straight into the event payload, kind is
+ * forced to HYPOTHESIS (no classifier round-trip — the form IS the
+ * classification), and the route synthesises a classification row
+ * with model='mobile-hypothesis-form' so downstream assurance views
+ * can still filter by `classification IS NOT NULL`.
+ *
+ * Length caps mirror the inputs the screen validates (non-empty +
+ * <= 2000 chars each).
+ */
+export const mobileEventHypothesisVariant = z.object({
+  source: z.literal('hypothesis_prompt'),
+  predicted_outcome: z.string().min(1).max(2000),
+  success_criteria: z.string().min(1).max(2000),
+  uncertainty: z.string().min(1).max(2000),
+});
+export type MobileEventHypothesisVariant = z.infer<typeof mobileEventHypothesisVariant>;
+
+/**
+ * Discriminated union of every payload variant POST /v1/mobile/events
+ * accepts. Add a new variant by appending to the discriminator —
+ * existing variants stay untouched, and zod's runtime + TS type
+ * narrowing both pick up the new branch automatically.
+ */
+export const mobileEventPayload = z.discriminatedUnion('source', [
+  mobileEventVoiceVariant,
+  mobileEventHypothesisVariant,
+]);
+export type MobileEventPayload = z.infer<typeof mobileEventPayload>;
+
+/**
+ * POST /v1/mobile/events body wrapper (T-A4 + T-A11).
+ *
+ * `subject_tenant_id` is OPTIONAL — when omitted the server derives
+ * it from the mobile JWT's bound claimant. `captured_at_local` is the
+ * device-clock ms epoch (number) — server stores it verbatim in the
+ * event payload alongside the canonical server-side captured_at.
+ *
+ * The discriminator on `payload.source` decides the variant: voice
+ * (existing path → SUPPORTING placeholder + transcribe job) vs.
+ * hypothesis_prompt (new in A11 → HYPOTHESIS kind, classifier
+ * synthesised inline).
+ */
+export const createMobileEventBody = z.object({
+  subject_tenant_id: Uuid.optional(),
+  captured_at_local: z.number().int().nonnegative(),
+  payload: mobileEventPayload,
+});
+export type CreateMobileEventBody = z.infer<typeof createMobileEventBody>;
+
+/**
  * GET /v1/events filter modes (per design doc §4):
  *
  *   - all: every visible event for the subject_tenant
