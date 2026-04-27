@@ -14,3 +14,4 @@ export * from './media_artefact.js';
 export * from './time_entry.js';
 export * from './signing_request.js';
 export * from './brand_config.js';
+export * from './integration_connection.js';
