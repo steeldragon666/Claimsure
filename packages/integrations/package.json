@@ -37,6 +37,10 @@
     "./payroll/keypay": {
       "types": "./dist/payroll/keypay/index.d.ts",
       "import": "./dist/payroll/keypay/index.js"
+    },
+    "./payroll/deputy": {
+      "types": "./dist/payroll/deputy/index.d.ts",
+      "import": "./dist/payroll/deputy/index.js"
     }
   },
   "scripts": {
