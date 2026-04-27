@@ -225,11 +225,9 @@ export function registerSubjectTenants(app: FastifyInstance): void {
         });
       }
 
-      // Set the session-scoped GUC on the pool before delegating to
-      // verifyChain (which uses the global `sql` client, not a transaction).
-      // This ensures the chain helper's SELECT runs RLS-scoped to the
-      // active firm even though it doesn't manage its own transaction.
-      await sql`SELECT set_config('app.current_tenant_id', ${tenantId}, false)`;
+      // verifyChain runs via privilegedSql (RLS-bypass) — auth boundary is
+      // the 404 visibility check above, not the GUC. No further set_config
+      // needed.
       const status = await verifyChain(id);
       return status;
     },
