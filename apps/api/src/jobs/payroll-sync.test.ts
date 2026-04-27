@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { syncEmploymentHero, type PayrollSyncDeps } from './payroll-sync.js';
+import {
+  syncEmploymentHero,
+  syncKeypay,
+  type PayrollSyncDeps,
+  type KeypaySyncDeps,
+} from './payroll-sync.js';
 
 const CONNECTION_ID = '00000000-0000-4000-8000-000000000bb1';
 const TENANT_ID = '00000000-0000-4000-8000-000000000bb2';
@@ -298,4 +303,228 @@ test('syncEmploymentHero: pulls call sub-functions with correct shared opts', as
   assert.equal(observedSyncOpts.invited_by_user_id, ADMIN_USER_ID);
   assert.equal(observedPullOpts.access_token, 'decrypted-access-token');
   assert.equal(observedPullOpts.organisation_id, 'eh-org-001');
+});
+
+// =====================================================================
+// syncKeypay (T-B14) — mirrors syncEmploymentHero with two adaptations:
+//   - Decrypted token is the KeyPay API key (not an OAuth access_token).
+//   - external_account_id is the KeyPay business_id (string in DB, parsed
+//     to number before invoking the KeyPay client).
+// =====================================================================
+
+const KEYPAY_CONNECTION_ID = '00000000-0000-4000-8000-000000000cc1';
+
+type KeypayStubRows = {
+  integration_connection?: Array<{
+    tenant_id: string;
+    access_token_encrypted: string;
+    external_account_id: string | null;
+    last_synced_at: Date | null;
+  }>;
+  subject_tenant?: Array<{ id: string }>;
+  tenant_user?: Array<{ user_id: string }>;
+};
+
+function makeKeypaySqlStub(rows: KeypayStubRows): {
+  sql: KeypaySyncDeps['sql_client'];
+  update_calls: Array<{ sql: string; params: unknown[] }>;
+} {
+  const update_calls: Array<{ sql: string; params: unknown[] }> = [];
+  const fn = ((strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]> => {
+    const rendered = strings.join('?');
+    if (rendered.includes('UPDATE integration_connection')) {
+      update_calls.push({ sql: rendered, params: values });
+      return Promise.resolve([]);
+    }
+    if (rendered.includes('FROM integration_connection')) {
+      return Promise.resolve(rows.integration_connection ?? []);
+    }
+    if (rendered.includes('FROM subject_tenant')) {
+      return Promise.resolve(rows.subject_tenant ?? []);
+    }
+    if (rendered.includes('FROM tenant_user')) {
+      return Promise.resolve(rows.tenant_user ?? []);
+    }
+    return Promise.resolve([]);
+  }) as unknown as KeypaySyncDeps['sql_client'];
+  return { sql: fn, update_calls };
+}
+
+const baseKeypayDeps = (
+  rows: KeypayStubRows,
+  overrides: Partial<KeypaySyncDeps> = {},
+): { deps: KeypaySyncDeps; update_calls: Array<{ sql: string; params: unknown[] }> } => {
+  const { sql, update_calls } = makeKeypaySqlStub(rows);
+  const deps: KeypaySyncDeps = {
+    sql_client: sql,
+    decrypt: () => 'decrypted-api-key',
+    get_encryption_key: () => 'fake-key',
+    sync_employees: () => Promise.resolve({ upserted: 0, deactivated: 0 }),
+    pull_timesheets: () =>
+      Promise.resolve({ inserted: 0, updated: 0, skipped_unmatched: 0 }),
+    ...overrides,
+  };
+  return { deps, update_calls };
+};
+
+test('syncKeypay: success path → idle + business_id parsed to number + counts surfaced', async () => {
+  let observedSyncOpts:
+    | Parameters<NonNullable<KeypaySyncDeps['sync_employees']>>[0]
+    | null = null;
+  const { deps, update_calls } = baseKeypayDeps(
+    {
+      integration_connection: [
+        {
+          tenant_id: TENANT_ID,
+          access_token_encrypted: 'enc.blob',
+          external_account_id: '4242',
+          last_synced_at: null,
+        },
+      ],
+      subject_tenant: [{ id: SUBJECT_ID }],
+      tenant_user: [{ user_id: ADMIN_USER_ID }],
+    },
+    {
+      sync_employees: (opts) => {
+        observedSyncOpts = opts;
+        return Promise.resolve({ upserted: 7, deactivated: 1 });
+      },
+      pull_timesheets: () =>
+        Promise.resolve({ inserted: 15, updated: 4, skipped_unmatched: 1 }),
+    },
+  );
+
+  const result = await syncKeypay(KEYPAY_CONNECTION_ID, deps);
+
+  assert.equal(result.tenant_id, TENANT_ID);
+  assert.equal(result.provider, 'keypay');
+  assert.equal(result.employees.upserted, 7);
+  assert.equal(result.employees.deactivated, 1);
+  assert.equal(result.timesheets.inserted, 15);
+  assert.equal(result.timesheets.updated, 4);
+  assert.equal(result.timesheets.skipped_unmatched, 1);
+  assert.equal(result.error, undefined);
+
+  // Verify the KeyPay client is called with the parsed numeric business_id.
+  assert.ok(observedSyncOpts);
+  assert.equal(observedSyncOpts.api_key, 'decrypted-api-key');
+  assert.equal(observedSyncOpts.business_id, 4242);
+  assert.equal(typeof observedSyncOpts.business_id, 'number');
+  assert.equal(observedSyncOpts.tenant_id, TENANT_ID);
+  assert.equal(observedSyncOpts.subject_tenant_id, SUBJECT_ID);
+  assert.equal(observedSyncOpts.invited_by_user_id, ADMIN_USER_ID);
+
+  // 2 UPDATEs: 'syncing' then 'idle' (with last_synced_at).
+  assert.equal(update_calls.length, 2);
+  assert.ok(update_calls[0]?.sql.includes("sync_state = 'syncing'"));
+  assert.ok(update_calls[1]?.sql.includes("sync_state = 'idle'"));
+  assert.ok(update_calls[1]?.sql.includes('last_synced_at = NOW()'));
+});
+
+test('syncKeypay: decrypt failure → sync_state=failed + last_error set', async () => {
+  const { deps, update_calls } = baseKeypayDeps(
+    {
+      integration_connection: [
+        {
+          tenant_id: TENANT_ID,
+          access_token_encrypted: 'enc.blob',
+          external_account_id: '4242',
+          last_synced_at: null,
+        },
+      ],
+      subject_tenant: [{ id: SUBJECT_ID }],
+      tenant_user: [{ user_id: ADMIN_USER_ID }],
+    },
+    {
+      decrypt: () => {
+        throw new Error('malformed encrypted api key');
+      },
+    },
+  );
+
+  const result = await syncKeypay(KEYPAY_CONNECTION_ID, deps);
+
+  assert.equal(result.error, 'malformed encrypted api key');
+  assert.equal(result.provider, 'keypay');
+  assert.equal(result.employees.upserted, 0);
+  assert.equal(result.timesheets.inserted, 0);
+
+  // 'syncing' then 'failed'.
+  assert.equal(update_calls.length, 2);
+  assert.ok(update_calls[0]?.sql.includes("sync_state = 'syncing'"));
+  assert.ok(update_calls[1]?.sql.includes("sync_state = 'failed'"));
+  assert.equal(update_calls[1]?.params[0], 'malformed encrypted api key');
+});
+
+test('syncKeypay: missing external_account_id → fails fast without calling sub-functions', async () => {
+  let employeesCalled = false;
+  let timesheetsCalled = false;
+  const { deps, update_calls } = baseKeypayDeps(
+    {
+      integration_connection: [
+        {
+          tenant_id: TENANT_ID,
+          access_token_encrypted: 'enc.blob',
+          external_account_id: null,
+          last_synced_at: null,
+        },
+      ],
+    },
+    {
+      sync_employees: () => {
+        employeesCalled = true;
+        return Promise.resolve({ upserted: 0, deactivated: 0 });
+      },
+      pull_timesheets: () => {
+        timesheetsCalled = true;
+        return Promise.resolve({ inserted: 0, updated: 0, skipped_unmatched: 0 });
+      },
+    },
+  );
+
+  const result = await syncKeypay(KEYPAY_CONNECTION_ID, deps);
+  assert.match(result.error ?? '', /business_id/);
+  assert.equal(employeesCalled, false);
+  assert.equal(timesheetsCalled, false);
+  // Single UPDATE — straight to 'failed' (no 'syncing' step).
+  assert.equal(update_calls.length, 1);
+  assert.ok(update_calls[0]?.sql.includes("sync_state = 'failed'"));
+});
+
+test('syncKeypay: non-numeric external_account_id → sync_state=failed, no client calls', async () => {
+  let employeesCalled = false;
+  const { deps, update_calls } = baseKeypayDeps(
+    {
+      integration_connection: [
+        {
+          tenant_id: TENANT_ID,
+          access_token_encrypted: 'enc.blob',
+          external_account_id: 'not-a-number',
+          last_synced_at: null,
+        },
+      ],
+    },
+    {
+      sync_employees: () => {
+        employeesCalled = true;
+        return Promise.resolve({ upserted: 0, deactivated: 0 });
+      },
+    },
+  );
+
+  const result = await syncKeypay(KEYPAY_CONNECTION_ID, deps);
+  assert.match(result.error ?? '', /must be a positive integer/);
+  assert.equal(employeesCalled, false);
+  // Single UPDATE — straight to 'failed' (no 'syncing' step).
+  assert.equal(update_calls.length, 1);
+  assert.ok(update_calls[0]?.sql.includes("sync_state = 'failed'"));
+  assert.ok(update_calls[0]?.sql.includes('positive integer'));
+});
+
+test('syncKeypay: missing connection row → throws', async () => {
+  const { deps } = baseKeypayDeps({ integration_connection: [] });
+  await assert.rejects(
+    syncKeypay(KEYPAY_CONNECTION_ID, deps),
+    /integration_connection not found or failed/,
+  );
 });
