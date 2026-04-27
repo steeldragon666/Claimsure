@@ -208,8 +208,9 @@ test('PATCH /v1/brand-config: 400 on extraneous (non-editable) field', async () 
     method: 'PATCH',
     url: '/v1/brand-config',
     cookies: { cpa_session: await adminJwt() },
-    // custom_subdomain is editable only via the C5-C9 wizard.
-    payload: { custom_subdomain: 'attacker-takes-over-firma' },
+    // custom_domain still goes through the dedicated wizard endpoint —
+    // the flat PATCH never touches the lifecycle columns.
+    payload: { custom_domain: 'attacker.example.com' },
   });
   assert.equal(res.statusCode, 400);
   await app.close();
@@ -224,5 +225,133 @@ test('PATCH /v1/brand-config: 400 on empty body', async () => {
     payload: {},
   });
   assert.equal(res.statusCode, 400);
+  await app.close();
+});
+
+test('PATCH /v1/brand-config: 200 admin sets custom_subdomain (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'PATCH',
+    url: '/v1/brand-config',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { custom_subdomain: 'firma-renamed' },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ brand_config: { custom_subdomain: string } }>();
+  assert.equal(body.brand_config.custom_subdomain, 'firma-renamed');
+
+  // Restore so the rest of the suite sees the seed slug.
+  await privilegedSql`
+    UPDATE brand_config SET custom_subdomain = 'firma' WHERE tenant_id = ${TENANT_A}
+  `;
+  await app.close();
+});
+
+test('PATCH /v1/brand-config: 400 on bad subdomain format (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'PATCH',
+    url: '/v1/brand-config',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { custom_subdomain: '-bad-leading-dash' },
+  });
+  assert.equal(res.statusCode, 400);
+  await app.close();
+});
+
+test('PATCH /v1/brand-config: 409 on reserved subdomain (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'PATCH',
+    url: '/v1/brand-config',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { custom_subdomain: 'admin' },
+  });
+  assert.equal(res.statusCode, 409);
+  await app.close();
+});
+
+test('PATCH /v1/brand-config: 409 on subdomain owned by another firm (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'PATCH',
+    url: '/v1/brand-config',
+    cookies: { cpa_session: await adminJwt() },
+    // 'firmb' belongs to TENANT_B.
+    payload: { custom_subdomain: 'firmb' },
+  });
+  assert.equal(res.statusCode, 409);
+  await app.close();
+});
+
+test('POST /v1/brand-config/custom-subdomain/check-availability: available for fresh slug (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/brand-config/custom-subdomain/check-availability',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { subdomain: 'never-seen-before' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json<{ available: boolean }>().available, true);
+  await app.close();
+});
+
+test('POST /v1/brand-config/custom-subdomain/check-availability: taken slug → reason=taken (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/brand-config/custom-subdomain/check-availability',
+    cookies: { cpa_session: await adminJwt() },
+    // 'firmb' is owned by TENANT_B, the admin caller is in TENANT_A.
+    payload: { subdomain: 'firmb' },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ available: boolean; reason?: string }>();
+  assert.equal(body.available, false);
+  assert.equal(body.reason, 'taken');
+  await app.close();
+});
+
+test('POST /v1/brand-config/custom-subdomain/check-availability: own slug → available (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/brand-config/custom-subdomain/check-availability',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { subdomain: 'firma' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json<{ available: boolean }>().available, true);
+  await app.close();
+});
+
+test('POST /v1/brand-config/custom-subdomain/check-availability: reserved → reason=reserved (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/brand-config/custom-subdomain/check-availability',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { subdomain: 'www' },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ available: boolean; reason?: string }>();
+  assert.equal(body.available, false);
+  assert.equal(body.reason, 'reserved');
+  await app.close();
+});
+
+test('POST /v1/brand-config/custom-subdomain/check-availability: invalid → reason=invalid_format (T-C5)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/brand-config/custom-subdomain/check-availability',
+    cookies: { cpa_session: await adminJwt() },
+    payload: { subdomain: '-bad' },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ available: boolean; reason?: string }>();
+  assert.equal(body.available, false);
+  assert.equal(body.reason, 'invalid_format');
   await app.close();
 });

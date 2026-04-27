@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { useWhoami } from '@/hooks/use-whoami';
 import { getBrandConfig, updateBrandConfig } from '../_lib/api';
+import { CustomSubdomainWizard } from './custom-subdomain-wizard';
 import { LogoUpload } from './logo-upload';
 import { ThemePicker } from './theme-picker';
 
@@ -118,6 +119,18 @@ function BrandReadView({ tenantId }: { tenantId: string }) {
         </CardHeader>
         <CardContent>
           <DetailsForm config={brand.data} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>White-label subdomain</CardTitle>
+          <CardDescription>
+            Pick a subdomain on platform.com.au. Mobile employees and claimants reach your firm
+            at <code>your-firm.platform.com.au</code>. 3-30 characters, lowercase letters / digits / dashes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <CustomSubdomainWizard currentSubdomain={brand.data.custom_subdomain} />
         </CardContent>
       </Card>
     </div>

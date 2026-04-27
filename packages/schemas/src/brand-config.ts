@@ -37,13 +37,26 @@ export const brandConfig = z.object({
 export type BrandConfig = z.infer<typeof brandConfig>;
 
 /**
- * PATCH body (T-F9).
+ * Subdomain regex (T-C5).
  *
- * Editable subset for the admin-PATCH route. Custom-domain editing
- * (`custom_subdomain` / `custom_domain`) goes through the C5-C9 wizard
- * not this endpoint — those fields ride along with a state machine
- * (DNS verify → ACM cert → CloudFront), so a flat PATCH would skip the
- * lifecycle.
+ * 3-30 chars, alphanumeric + dashes, no leading/trailing dash. The
+ * format is shared between the wizard's check-availability endpoint
+ * and the PATCH validator so a pasted slug from the URL bar can't
+ * sneak in via the flat PATCH route either.
+ */
+const CUSTOM_SUBDOMAIN = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?$/;
+export const customSubdomain = z
+  .string()
+  .regex(CUSTOM_SUBDOMAIN, 'must be 3-30 chars, lowercase alphanumeric + dashes (no leading/trailing dash)');
+
+/**
+ * PATCH body (T-F9 / T-C5).
+ *
+ * Editable subset for the admin-PATCH route. Custom-domain lifecycle
+ * (the CNAME / ACM / CloudFront state machine) goes through the
+ * dedicated POST endpoints in the C6-C9 wizard, not this PATCH —
+ * `custom_subdomain` is the one wizard field that's safe to flat-PATCH
+ * because it has no DNS / cert side effects, just a uniqueness check.
  *
  * `landing_page_config` is `unknown` — schema-on-read jsonb. Validation
  * of the shape inside happens at the landing-page renderer.
@@ -63,7 +76,29 @@ export const updateBrandConfigBody = z
     logo_s3_key: z.string().min(1).max(500).optional(),
     support_email: z.string().email().optional(),
     terms_of_service_url: z.string().url().optional(),
+    /**
+     * Set by the custom-subdomain wizard (T-C5). Format-validated here +
+     * uniqueness-checked server-side; a 409 surfaces back through the
+     * mutation if another firm grabbed the slug between availability
+     * check and save.
+     */
+    custom_subdomain: customSubdomain.optional(),
     landing_page_config: z.unknown().optional(),
   })
   .strict();
 export type UpdateBrandConfigBody = z.infer<typeof updateBrandConfigBody>;
+
+/**
+ * Check-availability body (T-C5).
+ *
+ * Wizard pings this on every keystroke (debounced 300ms). Reserved-word
+ * filtering happens server-side — the regex catches format issues, the
+ * RESERVED_SUBDOMAINS set catches names we own at the platform level
+ * (www, api, app, admin, …).
+ */
+export const checkSubdomainAvailabilityBody = z
+  .object({
+    subdomain: customSubdomain,
+  })
+  .strict();
+export type CheckSubdomainAvailabilityBody = z.infer<typeof checkSubdomainAvailabilityBody>;

@@ -60,3 +60,32 @@ export async function requestLogoUploadUrl(
     body: JSON.stringify(body),
   });
 }
+
+/**
+ * Custom subdomain wizard helpers (T-C5).
+ *
+ * `checkSubdomainAvailability` is the debounced live indicator's source;
+ * the server returns `{ available, reason? }` where `reason` is one of
+ * `invalid_format` / `reserved` / `taken` for client-side messaging.
+ *
+ * Saving uses the regular `updateBrandConfig` PATCH — `custom_subdomain`
+ * is whitelisted in `updateBrandConfigBody` and the server runs the
+ * uniqueness check inline (returns 409 on conflict).
+ */
+export type SubdomainAvailabilityReason = 'invalid_format' | 'reserved' | 'taken';
+export interface SubdomainAvailabilityResponse {
+  available: boolean;
+  reason?: SubdomainAvailabilityReason;
+}
+
+export async function checkSubdomainAvailability(
+  subdomain: string,
+): Promise<SubdomainAvailabilityResponse> {
+  return apiFetch<SubdomainAvailabilityResponse>(
+    '/v1/brand-config/custom-subdomain/check-availability',
+    {
+      method: 'POST',
+      body: JSON.stringify({ subdomain }),
+    },
+  );
+}
