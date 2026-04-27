@@ -25,6 +25,7 @@ import { registerMagicLinkRedeem } from './routes/magic-link.js';
 import { registerRefreshRoute } from './routes/mobile-session.js';
 import { registerEvents } from './routes/events.js';
 import { registerIntegrations } from './routes/integrations.js';
+import { registerSigning, registerDocuSignWebhookPlugin } from './routes/signing.js';
 import { registerSubjectTenants } from './routes/subject-tenants.js';
 import { registerListTenants } from './routes/tenants/list.js';
 import { registerSwitchTenant } from './routes/tenants/switch.js';
@@ -188,6 +189,17 @@ export function buildApp(): App {
   });
   app.register((instance, _opts, done) => {
     registerIntegrations(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerSigning(instance);
+    done();
+  });
+  // DocuSign Connect webhook is registered as its own plugin so the
+  // application/json content-type parser is encapsulated to that one
+  // route (the handler needs the raw Buffer to HMAC-verify).
+  app.register((instance, _opts, done) => {
+    registerDocuSignWebhookPlugin(instance);
     done();
   });
 
