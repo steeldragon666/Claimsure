@@ -9,3 +9,4 @@
 export * as employmentHero from './employment-hero/index.js';
 export * as keypay from './keypay/index.js';
 export * as deputy from './deputy/index.js';
+export * as xeroPayroll from './xero-payroll/index.js';

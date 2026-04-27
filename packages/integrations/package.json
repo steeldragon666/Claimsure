@@ -41,6 +41,10 @@
     "./payroll/deputy": {
       "types": "./dist/payroll/deputy/index.d.ts",
       "import": "./dist/payroll/deputy/index.js"
+    },
+    "./payroll/xero-payroll": {
+      "types": "./dist/payroll/xero-payroll/index.d.ts",
+      "import": "./dist/payroll/xero-payroll/index.js"
     }
   },
   "scripts": {
