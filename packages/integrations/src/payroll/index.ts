@@ -7,3 +7,4 @@
 // Per-provider deep imports also work via subpath exports declared in
 // `package.json` — e.g. `@cpa/integrations/payroll/employment-hero`.
 export * as employmentHero from './employment-hero/index.js';
+export * as keypay from './keypay/index.js';
