@@ -18,12 +18,13 @@ import { EXPENDITURE_SOURCES_LITERAL } from './expenditure.js';
  *
  * KEEP IN SYNC WITH:
  *   1. `EVIDENCE_KINDS` in `@cpa/db/schema/event.ts`
- *   2. The `event_kind_valid` CHECK in `migrations/0006_fair_network.sql`
- *      and `migrations/0014_p4_evidence_kinds.sql`
+ *   2. The `event_kind_valid` CHECK in `migrations/0006_fair_network.sql`,
+ *      `migrations/0014_p4_evidence_kinds.sql`, and
+ *      `migrations/0015_project_updated_kind.sql`
  *
  * Order matches `@cpa/db` byte-for-byte: the first 13 entries
  * (HYPOTHESIS through OVERRIDE) are R&D evidence classifications;
- * the 14 P4 entries are state-transition events (entity created,
+ * the 15 P4 entries are state-transition events (entity created,
  * claim advanced, etc.) and cannot be re-classified via OVERRIDE
  * (see {@link classifiableKind}, which is the override-eligible
  * subset and is unchanged from P0–P3).
@@ -43,7 +44,8 @@ export const evidenceKind = z.enum([
   'INELIGIBLE',
   'OVERRIDE',
   // P4 state-transition events (must match `EVIDENCE_KINDS` in
-  // @cpa/db/schema/event.ts and the CHECK in 0014_p4_evidence_kinds.sql)
+  // @cpa/db/schema/event.ts and the CHECK in 0014_p4_evidence_kinds.sql /
+  // 0015_project_updated_kind.sql)
   'ACTIVITY_CREATED',
   'ACTIVITY_UPDATED',
   'ACTIVITY_LOCKED',
@@ -58,6 +60,9 @@ export const evidenceKind = z.enum([
   'PROJECT_CREATED',
   'PROJECT_ARCHIVED',
   'DOCUMENT_GENERATED',
+  // Added in T-A1 (0015_project_updated_kind.sql) — emitted by
+  // PATCH /v1/projects/:id, mirrors ACTIVITY_UPDATED.
+  'PROJECT_UPDATED',
 ]);
 export type EvidenceKind = z.infer<typeof evidenceKind>;
 
@@ -456,6 +461,25 @@ export const ProjectArchivedPayload = z.object({
   reason: z.string().optional(),
 });
 export type ProjectArchivedPayload = z.infer<typeof ProjectArchivedPayload>;
+
+/**
+ * PROJECT_UPDATED — emitted by PATCH /v1/projects/:id. Mirrors
+ * `ActivityUpdatedPayload`: `fields_changed` is a heterogeneous record
+ * keyed by column name with `{from, to}` pairs carrying the previous
+ * and new values. Values are `unknown` because the columns vary in type
+ * (string, nullable string, ISO timestamp); the route layer is
+ * responsible for serialising sensibly.
+ *
+ * The kind sits alongside PROJECT_CREATED / PROJECT_ARCHIVED rather
+ * than reusing PROJECT_CREATED — the latter is meant to denote project
+ * inception (carrying `started_at` for timeline rendering) and would be
+ * misleading on a partial update.
+ */
+export const ProjectUpdatedPayload = z.object({
+  project_id: Uuid,
+  fields_changed: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })),
+});
+export type ProjectUpdatedPayload = z.infer<typeof ProjectUpdatedPayload>;
 
 /**
  * DOCUMENT_GENERATED — emitted by the document generator pipeline once
