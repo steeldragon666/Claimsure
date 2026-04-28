@@ -61,6 +61,14 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/.turbo/**',
       '**/*.tsbuildinfo',
+      // Playwright e2e specs run via Playwright's own ts loader, outside
+      // the Next/tsconfig.test.json project service — type-checked rules
+      // can't resolve them and lint-staged invocations from the workspace
+      // root would otherwise fail with a "not found by the project service"
+      // parsing error. apps/web/eslint.config.mjs already ignores e2e/**
+      // when eslint runs from there; this entry keeps the root invocation
+      // consistent.
+      '**/e2e/**',
     ],
   },
 );

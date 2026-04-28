@@ -96,8 +96,15 @@ test.describe('Chain verification badge', () => {
 
     // Step 1: well-formed chain → "Verified"
     await page.goto(`/subject-tenants/${subjectId}`);
-    await expect(page.getByText('e2e-T31-claimant')).toBeVisible();
-    await expect(page.getByText(/Verified \(/i)).toBeVisible({ timeout: 5_000 });
+    // Heading is server-rendered (or near-instant client hydration), but the
+    // ChainStatusBadge is a client-side useQuery that fires after hydration —
+    // the chain-verify route walks every event and rehashes them, which on
+    // a cold CI runner can exceed 5s for tenant-isolated DBs. 15s gives the
+    // query enough headroom while still failing loudly if the badge truly
+    // never renders. Use `getByRole('heading', ...)` for the claimant name
+    // because the toast/aria-live elements would otherwise collide.
+    await expect(page.getByRole('heading', { name: /e2e-T31-claimant/i })).toBeVisible();
+    await expect(page.getByText(/Verified \(/i)).toBeVisible({ timeout: 15_000 });
 
     // Step 2: corrupt the first event's hash (deadbeef + 56 chars of original
     // = 64 lowercase hex, satisfies the CHECK constraint event_hash_format).

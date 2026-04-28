@@ -31,6 +31,6 @@
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,json,md,yml,yaml}": "prettier --check",
-    "*.{ts,tsx,js,jsx}": "eslint --max-warnings=0"
+    "*.{ts,tsx,js,jsx}": "eslint --max-warnings=0 --no-warn-ignored"
   }
 }

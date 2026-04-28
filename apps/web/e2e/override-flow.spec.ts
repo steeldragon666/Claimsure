@@ -77,8 +77,13 @@ test.describe('Override flow', () => {
     // Step 4: feed now has BOTH the OVERRIDE row and the original (with
     // effective_kind bumped to OBSERVATION + an "overridden" badge on the
     // original card).
-    await expect(page.getByText('OVERRIDE')).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText('OBSERVATION')).toBeVisible();
+    //
+    // `{ exact: true }` matches only the KindChip text. Without it the
+    // locator also hits the "Overrides" tab label, the "Override" action
+    // button, the "Override saved" toast, and the toast aria-live status
+    // ("Notification Override saved") — strict-mode violation, 5 elements.
+    await expect(page.getByText('OVERRIDE', { exact: true })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('OBSERVATION', { exact: true })).toBeVisible();
     await expect(page.getByTestId('overridden-badge')).toBeVisible();
     await expect(
       page.getByText(/Re-reading, this is a measurement record not a hypothesis\./i),
@@ -86,9 +91,9 @@ test.describe('Override flow', () => {
 
     // Step 5: "Overrides" tab → only the OVERRIDE row (kind='OVERRIDE')
     await page.getByRole('tab', { name: /^Overrides/i }).click();
-    await expect(page.getByText('OVERRIDE')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('OVERRIDE', { exact: true })).toBeVisible({ timeout: 5_000 });
     // The original (kind=HYPOTHESIS / effective_kind=OBSERVATION) is filtered
     // out of the Overrides tab — its KindChip text shouldn't appear.
-    await expect(page.getByText('OBSERVATION')).not.toBeVisible();
+    await expect(page.getByText('OBSERVATION', { exact: true })).not.toBeVisible();
   });
 });

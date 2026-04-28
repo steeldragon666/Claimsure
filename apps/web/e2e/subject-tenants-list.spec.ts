@@ -62,7 +62,11 @@ test.describe('Subject tenants list', () => {
     // On success the modal closes and the router pushes to /subject-tenants/<uuid>
     await page.waitForURL(/\/subject-tenants\/[0-9a-f-]{36}$/i, { timeout: 10_000 });
 
-    // The new claimant's name should be visible in the detail header
-    await expect(page.getByText(claimantName)).toBeVisible({ timeout: 5_000 });
+    // The new claimant's name should be visible in the detail header.
+    // Use `getByRole('heading', ...)` because the post-create toast renders
+    // the same name in two additional elements ('Claimant "..." created'
+    // visible div + the aria-live status span), and `getByText` substring
+    // match would hit all three → strict-mode violation.
+    await expect(page.getByRole('heading', { name: claimantName })).toBeVisible({ timeout: 5_000 });
   });
 });

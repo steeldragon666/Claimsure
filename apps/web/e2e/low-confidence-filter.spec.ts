@@ -63,17 +63,22 @@ test.describe('Low-confidence filter (Needs Review)', () => {
       .fill('Random unrelated sentence with no R&D vocabulary.');
     await page.getByRole('button', { name: /^Classify$/i }).click();
 
-    // Confirm the classified event landed (default tab is "All")
-    await expect(page.getByText('SUPPORTING')).toBeVisible({ timeout: 10_000 });
+    // Confirm the classified event landed (default tab is "All").
+    // `{ exact: true }` matches the KindChip's `<span>SUPPORTING</span>` only;
+    // without it, the locator also hits the classifier rationale paragraph
+    // ("Stub: ...defaulting to SUPPORTING…"), the toast description ("Tagged
+    // as SUPPORTING."), and the toast's aria-live status element ("Notification
+    // ClassifiedTagged as SUPPORTING.") — strict-mode violation, 4 elements.
+    await expect(page.getByText('SUPPORTING', { exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(/50% \(review\)/i)).toBeVisible();
 
     // "Needs Review" tab → still visible
     await page.getByRole('tab', { name: /Needs Review/i }).click();
-    await expect(page.getByText('SUPPORTING')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('SUPPORTING', { exact: true })).toBeVisible({ timeout: 5_000 });
 
     // "All" tab → visible
     await page.getByRole('tab', { name: /^All/i }).click();
-    await expect(page.getByText('SUPPORTING')).toBeVisible();
+    await expect(page.getByText('SUPPORTING', { exact: true })).toBeVisible();
 
     // "Ineligible" tab → empty (event has effective_kind SUPPORTING, not INELIGIBLE)
     await page.getByRole('tab', { name: /^Ineligible/i }).click();
