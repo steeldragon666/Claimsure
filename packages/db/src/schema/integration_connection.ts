@@ -29,6 +29,7 @@ export const INTEGRATION_PROVIDERS = [
   'employment_hero',
   'keypay',
   'deputy',
+  'xero_accounting',
   'xero_payroll',
 ] as const;
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];

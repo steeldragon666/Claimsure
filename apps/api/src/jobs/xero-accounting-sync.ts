@@ -166,7 +166,7 @@ export type XeroAccountingSyncDeps = {
  * Caller is responsible for the advisory-lock dance — this function
  * assumes the lock has already been acquired.
  */
-async function runOneConnection(
+export async function runOneConnection(
   conn: IntegrationConnectionRow,
   deps: Required<
     Pick<
