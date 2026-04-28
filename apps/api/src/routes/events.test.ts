@@ -677,6 +677,48 @@ test('GET /v1/events: ?kind=NOT_A_KIND returns 400', async () => {
   await app.close();
 });
 
+test("GET /v1/events: ?kind=NOT_A_KIND surfaces Zod's 'Unknown event kind' message in body", async () => {
+  // Locks in the events.ts safeParse failure path (post A6 follow-up):
+  // the route now joins parsed.error.issues messages instead of
+  // returning a hardcoded blob. Regression on either the schema's
+  // ctx.addIssue text or the route's message-join would surface here.
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/events?subject_tenant_id=${SUBJECT_A1}&kind=NOT_A_KIND`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 400);
+  const body = res.json<{ error: string; message: string }>();
+  assert.equal(body.error, 'invalid_query');
+  assert.ok(
+    body.message.includes('Unknown event kind: NOT_A_KIND'),
+    `expected body.message to include the per-issue zod message; got: ${body.message}`,
+  );
+  await app.close();
+});
+
+test('GET /v1/events: missing both subject_tenant_id + activity_id surfaces the refine message', async () => {
+  // Locks in the listEventsQuery refine: at least one of the two
+  // scope params must be supplied. Pre-fix the route discarded this
+  // and returned a hardcoded "Query must include..." string; the fix
+  // now surfaces the schema's own refine message.
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/events',
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 400);
+  const body = res.json<{ error: string; message: string }>();
+  assert.equal(body.error, 'invalid_query');
+  assert.ok(
+    body.message.includes('Either subject_tenant_id or activity_id is required'),
+    `expected body.message to include the refine's message; got: ${body.message}`,
+  );
+  await app.close();
+});
+
 // =============================================================================
 // GET /v1/activities/:activity_id/artefacts (T-A6 follow-up)
 // =============================================================================

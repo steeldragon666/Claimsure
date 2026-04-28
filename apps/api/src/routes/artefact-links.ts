@@ -39,9 +39,12 @@ import { findLinkedEventForActivity, getActivityArtefacts } from '../lib/activit
 //     stale link does one trip instead of two helper folds + a SELECT.
 //     Beneficial when A5/A6 add more callers to activity-artefacts.ts.
 //   - Important #4: Add expression index on
-//     `(payload->>'activity_id') WHERE kind IN ('ARTEFACT_LINKED','ARTEFACT_UNLINKED')`
-//     before A6 (uncertainty register) lands; helper is currently full-scan
-//     on event-table for activity-link history.
+//     `(payload->>'activity_id') WHERE kind IN ('ARTEFACT_LINKED','ARTEFACT_UNLINKED', /* register kinds */)`
+//     — still deferred, now also blocking events.ts:330 (the A6 register
+//     feed's activity-scoped filter performs the same payload->>'activity_id'
+//     comparison). The companion TODO at events.ts:330 sketches the index DDL
+//     and the volume threshold (>5k events / tenant). Both callsites
+//     full-scan the event table today; pick this up together.
 //   - Minor #8: Add Zod Uuid.safeParse on URL params (event_id, activity_id)
 //     to surface 400 instead of relying on postgres cast errors for malformed
 //     UUIDs. Same gap exists across A1-A4 routes.

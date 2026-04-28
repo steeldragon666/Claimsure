@@ -229,10 +229,15 @@ export function registerEvents(app: FastifyInstance): void {
   app.get('/v1/events', { preHandler: requireSession }, async (req, reply) => {
     const parsed = listEventsQuery.safeParse(req.query);
     if (!parsed.success) {
+      // Surface Zod's per-issue messages so the caller learns WHICH constraint
+      // failed — the refine ('Either subject_tenant_id or activity_id is
+      // required') and the kind validator's per-token 'Unknown event kind: X'
+      // are the diagnostics consultants actually need. Joining with '; '
+      // keeps this single-line for log/UI consumption.
+      const message = parsed.error.issues.map((i) => i.message).join('; ') || 'Invalid query';
       return reply.status(400).send({
         error: 'invalid_query',
-        message:
-          'Query must include subject_tenant_id or activity_id; optional kind (CSV), filter, limit (1..200), cursor',
+        message,
         requestId: req.id,
       });
     }
@@ -326,6 +331,18 @@ export function registerEvents(app: FastifyInstance): void {
       // ACTIVITY_UPDATED + classified narrative events that the A6
       // register surfaces. Server-side filter so we don't ship
       // unrelated rows over the wire.
+      //
+      // TODO(perf): payload->>'activity_id' is a sequential scan on `event`.
+      // The companion TODO in artefact-links.ts (around line 41) flagged this
+      // before A6 landed — A6 deferred the work. Plan: add an expression index
+      // in migrations/0017_event_activity_id_index.sql (or whatever the next
+      // available migration number is when this is picked up) — likely:
+      //   CREATE INDEX event_payload_activity_id_idx ON event ((payload->>'activity_id'))
+      //     WHERE kind IN ('ARTEFACT_LINKED','ARTEFACT_UNLINKED',
+      //                    'HYPOTHESIS','UNCERTAINTY','EXPERIMENT',
+      //                    'OBSERVATION','ITERATION','NEW_KNOWLEDGE',
+      //                    'ACTIVITY_UPDATED');
+      // Volume threshold: re-evaluate when any single tenant has >5k events.
       const activityClause =
         activity_id !== undefined ? tx`AND payload ->> 'activity_id' = ${activity_id}` : tx``;
 

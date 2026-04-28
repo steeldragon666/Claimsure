@@ -64,16 +64,23 @@ const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'obj
 
 const asPastePayload = (p: unknown): PastePayloadShape | null => {
   if (!isObject(p)) return null;
-  // After the isObject narrow, `p` is `Record<string, unknown>` — the
-  // `PastePayloadShape` interface uses optional fields whose value
-  // types are subsets of `unknown`, so a structural assignment is
-  // sound here. We surface accesses through the typed shape.
-  return p;
+  // After the `isObject` narrow `p` is `Record<string, unknown>`, which
+  // is structurally assignable to `PastePayloadShape` (all-optional
+  // fields whose value types are subsets of `unknown`). The explicit
+  // cast is documentation rather than a runtime narrowing — it locks in
+  // the shape callers see, so a future required field on
+  // `PastePayloadShape` produces a compile error here instead of
+  // silently propagating a half-typed object. The eslint-disable is
+  // accepting the cost of that explicit assertion (TypeScript's own
+  // structural rule already accepts the bare return).
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+  return p as PastePayloadShape;
 };
 
 const asActivityUpdatedPayload = (p: unknown): ActivityUpdatedPayloadShape | null => {
   if (!isObject(p)) return null;
-  return p;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+  return p as ActivityUpdatedPayloadShape;
 };
 
 /**
