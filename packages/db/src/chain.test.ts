@@ -104,6 +104,80 @@ test('canonicaliseEvent rejects Infinity in payload', () => {
   );
 });
 
+// Test F6/1: P4 kinds produce stable canonical JSON.
+//
+// Snapshot of the exact canonical-JSON byte sequence for an ACTIVITY_CREATED
+// event. The string below is the regression anchor for the canonicaliser —
+// any subtle change (key order, classification handling, new field added
+// unconditionally) will fail this test loudly. Updating the snapshot is a
+// chain-breaking change requiring a migration plan.
+test('P4 kinds: canonicaliseEvent produces stable snapshot for ACTIVITY_CREATED', () => {
+  const e = canonicaliseEvent({
+    subject_tenant_id: '00000000-0000-4000-8000-0000c0002222',
+    kind: 'ACTIVITY_CREATED',
+    payload: {
+      activity_id: '00000000-0000-4000-8000-0000a0000001',
+      code: 'A1',
+      kind: 'core',
+      title: 'Activity One',
+      project_id: '00000000-0000-4000-8000-0000b0000001',
+      claim_id: '00000000-0000-4000-8000-0000d0000001',
+    },
+    classification: null,
+    captured_at: new Date('2026-04-27T00:00:00Z'),
+    captured_by_user_id: '00000000-0000-4000-8000-0000c0003333',
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  assert.equal(
+    e,
+    '{"captured_at":"2026-04-27T00:00:00.000Z","captured_by_user_id":"00000000-0000-4000-8000-0000c0003333","classification":null,"kind":"ACTIVITY_CREATED","override_new_kind":null,"override_of_event_id":null,"override_reason":null,"payload":{"activity_id":"00000000-0000-4000-8000-0000a0000001","claim_id":"00000000-0000-4000-8000-0000d0000001","code":"A1","kind":"core","project_id":"00000000-0000-4000-8000-0000b0000001","title":"Activity One"},"subject_tenant_id":"00000000-0000-4000-8000-0000c0002222"}',
+  );
+});
+
+// Test F6/2: pre-P4 hash regression guard.
+//
+// Locks the SHA-256 hash for a P2-shape HYPOTHESIS event with prev=null.
+// The previous test at line ~56 only asserts hex-format via regex — this
+// one asserts the exact 64-char hex value, so a future canonicaliser
+// change that breaks pre-P4 hash compatibility (e.g., changing how
+// captured_by_employee_id is conditionally omitted, reordering keys,
+// changing payload normalisation) fails here immediately rather than
+// silently invalidating every chain produced before P4.
+test('P4 regression guard: pre-P4 hash is byte-identical to P2 anchor', () => {
+  const h = hashEvent(null, {
+    subject_tenant_id: 'a',
+    kind: 'HYPOTHESIS',
+    payload: { _v: 1, source: 'paste', raw_text: 'hello' },
+    classification: null,
+    captured_at: new Date('2026-04-27T00:00:00Z'),
+    captured_by_user_id: 'u',
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  assert.equal(h, '49df527ffde03d6f89584b297842fbda49dd6121c8894405094c8e0c7e57beba');
+});
+
+// Test F6/4: EVIDENCE_KINDS parity guard (F5 reviewer recommendation).
+//
+// `evidenceKind` (Zod enum, wire format in @cpa/schemas) and `EVIDENCE_KINDS`
+// (Drizzle column type in @cpa/db) are dual sources of truth that must stay
+// byte-identical — same entries, same order. A drift here means the API
+// would accept a kind the DB rejects (or vice versa) and the mismatch
+// would only surface as an opaque CHECK violation at insert time. This
+// test catches it at CI time instead.
+test('EVIDENCE_KINDS parity: @cpa/db and @cpa/schemas stay in sync', async () => {
+  const { EVIDENCE_KINDS } = await import('./schema/event.js');
+  const { evidenceKind } = await import('@cpa/schemas');
+  assert.deepEqual(
+    [...evidenceKind.options],
+    [...EVIDENCE_KINDS],
+    'evidenceKind.options must match EVIDENCE_KINDS exactly (same order, same content)',
+  );
+});
+
 test('insertEventWithChain: first event has prev_hash=null', async () => {
   const e = await insertEventWithChain({
     tenant_id: TENANT_ID,
@@ -164,6 +238,89 @@ test('verifyChain: clean chain returns verified=true', async () => {
   assert.equal(status.verified, true);
   assert.ok((status.event_count ?? 0) > 0);
   assert.match(status.head_hash ?? '', /^[0-9a-f]{64}$/);
+});
+
+// Test F6/3: verifyChain across mixed P2 + P4 kinds.
+//
+// Inserts one classifiable evidence kind (P2-style) followed by three
+// state-transition kinds (P4) into the same subject_tenant chain, then
+// verifies the chain is intact. Confirms the canonicaliser handles the
+// new kinds identically to the old ones for hash-chain purposes
+// (verifyChain only checks hash linkage; payload-shape validation lives
+// elsewhere — but realistic P4 payloads are used per design doc §143-156).
+test('verifyChain: clean across mixed P2 + P4 kinds', async () => {
+  const before = await verifyChain(SUBJECT_ID);
+  const baseCount = before.event_count;
+  await insertEventWithChain({
+    tenant_id: TENANT_ID,
+    subject_tenant_id: SUBJECT_ID,
+    kind: 'OBSERVATION',
+    payload: { _v: 1, source: 'paste', raw_text: 'mixed-chain p2' },
+    classification: null,
+    captured_at: new Date(),
+    captured_by_user_id: USER_ID,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  await insertEventWithChain({
+    tenant_id: TENANT_ID,
+    subject_tenant_id: SUBJECT_ID,
+    kind: 'ACTIVITY_CREATED',
+    payload: {
+      activity_id: '00000000-0000-4000-8000-0000a0000001',
+      code: 'A1',
+      kind: 'core',
+      title: 'Activity One',
+      project_id: '00000000-0000-4000-8000-0000b0000001',
+      claim_id: '00000000-0000-4000-8000-0000d0000001',
+    },
+    classification: null,
+    captured_at: new Date(),
+    captured_by_user_id: USER_ID,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  await insertEventWithChain({
+    tenant_id: TENANT_ID,
+    subject_tenant_id: SUBJECT_ID,
+    kind: 'ARTEFACT_LINKED',
+    payload: {
+      activity_id: '00000000-0000-4000-8000-0000a0000001',
+      artefact_kind: 'event',
+      artefact_id: '00000000-0000-4000-8000-0000e0000001',
+      link_reason: 'mixed-chain test',
+    },
+    classification: null,
+    captured_at: new Date(),
+    captured_by_user_id: USER_ID,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  await insertEventWithChain({
+    tenant_id: TENANT_ID,
+    subject_tenant_id: SUBJECT_ID,
+    kind: 'EXPENDITURE_INGESTED',
+    payload: {
+      expenditure_id: '00000000-0000-4000-8000-0000f0000001',
+      source: 'manual',
+      vendor_name: 'Acme Co',
+      line_count: 3,
+    },
+    classification: null,
+    captured_at: new Date(),
+    captured_by_user_id: USER_ID,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  const after = await verifyChain(SUBJECT_ID);
+  assert.equal(after.verified, true);
+  assert.equal(after.event_count, baseCount + 4);
+  assert.match(after.head_hash ?? '', /^[0-9a-f]{64}$/);
+  assert.equal(after.first_break_at, null);
 });
 
 test('verifyChain: tampered hash detected', async () => {
