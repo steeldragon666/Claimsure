@@ -126,6 +126,27 @@ export function ExpenditureApportionDialog({
   const submitEnabled = useMemo(() => isValidAllocationSet(allocations), [allocations]);
   const sumOk = useMemo(() => sumIsValid(allocations), [allocations]);
 
+  // Activity ids that appear in more than one allocation row. Surfaced
+  // as a soft warning footer — submit stays enabled because the math is
+  // correct (60% + 40% to the same activity = 100% to that activity)
+  // and the controller chose to preserve user agency. The warning makes
+  // the redundancy visible without blocking. Empty rows (activity_id
+  // === '') are excluded; those are flagged separately by the
+  // submit-disabled gate.
+  const duplicateActivityIds = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const a of allocations) {
+      if (a.activity_id) {
+        seen.set(a.activity_id, (seen.get(a.activity_id) ?? 0) + 1);
+      }
+    }
+    const dupes: string[] = [];
+    for (const [id, count] of seen) {
+      if (count > 1) dupes.push(id);
+    }
+    return dupes;
+  }, [allocations]);
+
   // Add-row enabled when below the cap. The dialog never lets the user
   // cross MAX_ALLOCATIONS — disabling the button is the simplest UX
   // (alternative: hide the button at cap; disabled is more discoverable).
@@ -328,7 +349,14 @@ export function ExpenditureApportionDialog({
                     type="range"
                     min={0}
                     max={100}
-                    step={0.5}
+                    // Slider step matches the percentage input's step
+                    // (0.01) so dragging the slider after typing 33.33
+                    // doesn't snap the value to 33.5 — fine-grained
+                    // movement keeps the two inputs in lock-step. The
+                    // input remains the authoritative way to type
+                    // arbitrary values; the slider is for visual /
+                    // approximate adjustment.
+                    step={0.01}
                     value={a.percentage}
                     onChange={(e) => onSliderInput(i, e.target.value)}
                     className="h-8 w-full cursor-pointer accent-emerald-600"
@@ -388,6 +416,24 @@ export function ExpenditureApportionDialog({
               )}
             </div>
           </div>
+
+          {/* Soft warning when multiple rows target the same activity.
+              The math is correct (60% + 40% to the same activity = 100%
+              to that activity) and the controller chose to preserve user
+              agency, so submit stays enabled — this footer makes the
+              redundancy visible without blocking. */}
+          {duplicateActivityIds.length > 0 && (
+            <div
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="font-medium">Note:</span>{' '}
+              {duplicateActivityIds.length === 1
+                ? 'Multiple rows target the same activity. Consider consolidating into one row.'
+                : `Multiple rows target ${duplicateActivityIds.length} activities. Consider consolidating.`}
+            </div>
+          )}
         </div>
 
         <DialogFooter>

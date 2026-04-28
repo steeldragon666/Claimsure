@@ -82,7 +82,12 @@ export const TARGET_SUM = 100;
 export interface Allocation {
   /** Empty string = "no activity picked yet". Otherwise an Activity.id. */
   activity_id: string;
-  /** 0-100, may be fractional. Snap-to-int is a UX choice handled in the input. */
+  /**
+   * 0-100, may be fractional. The dialog renders both a number input
+   * (step 0.01) and a range slider (step 0.01) writing to this; the two
+   * step-values match deliberately so dragging the slider after typing
+   * a fractional value (e.g. 33.33) doesn't snap it to a coarser grid.
+   */
   percentage: number;
 }
 

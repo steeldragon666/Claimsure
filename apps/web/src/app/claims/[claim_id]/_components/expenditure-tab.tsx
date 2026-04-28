@@ -1,6 +1,6 @@
 'use client';
 import { useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Activity } from '@cpa/schemas';
 import { useToast } from '@/hooks/use-toast';
@@ -21,6 +21,18 @@ import { parseExpenditureFilter } from '../_lib/url-params';
 import { ExpenditureApportionDialog } from './expenditure-apportion-dialog';
 import { ExpenditureFilterChips } from './expenditure-filter';
 import { ExpenditureRowItem } from './expenditure-row';
+
+/**
+ * Captured state for an in-flight optimistic mutation, used to revert if
+ * the server-side call rejects. Tracks both `current_mapping` and
+ * `current_apportionment` because either field could change in a revert
+ * (the C5 onMap path also clears apportionment via
+ * `applyMappingOptimistic`, so reverting needs to restore both).
+ */
+type PriorState = {
+  current_mapping: ExpenditureRow['current_mapping'];
+  current_apportionment: ExpenditureRow['current_apportionment'];
+};
 
 /**
  * Expenditure tab — mapping UI for tying Xero expenditures (invoices,
@@ -99,6 +111,45 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
   // `apportioningRowId` (null = closed).
   const [apportioningRowId, setApportioningRowId] = useState<string | null>(null);
 
+  // If the apportioning row vanishes from the optimistic mirror (e.g. a
+  // filter switch + invalidation removed it while the dialog was open),
+  // close the dialog. This MUST run as an effect rather than inline in
+  // render — calling setApportioningRowId synchronously during the
+  // parent's render trips React's "Cannot update a component while
+  // rendering a different component" warning under StrictMode and is
+  // unsafe under React 18 concurrent rendering. The render-pass body
+  // below renders nothing when target is missing; the effect tidies up
+  // on the subsequent commit.
+  useEffect(() => {
+    if (apportioningRowId !== null) {
+      const targetExists = optimisticRows.some((r) => r.id === apportioningRowId);
+      if (!targetExists) {
+        setApportioningRowId(null);
+      }
+    }
+  }, [apportioningRowId, optimisticRows]);
+
+  // --- In-flight prior-state tracker ---
+  // Keyed by expenditure id. Holds the pre-mutation `current_mapping` /
+  // `current_apportionment` for any optimistic update currently awaiting
+  // its server confirmation. On rejection the entry is read out and
+  // applied to revert; on success or rejection it's deleted.
+  //
+  // Why a ref:
+  //   - Mutable; persists across renders without triggering re-renders.
+  //   - No closure capture — the success/failure handlers read the
+  //     current value rather than a value baked into the callback's
+  //     closure. This means useCallback can have an empty deps array
+  //     (refs are NEVER deps; React docs are explicit about this).
+  //   - Idempotent under StrictMode's double-invocation of functional
+  //     updaters: both runs write the same prior state to the same key.
+  //
+  // Replaces the previous `let snapshot; setOptimisticRows(prev => {
+  // snapshot = prev; ... })` pattern, which captures `snapshot` in the
+  // outer closure and races under concurrent rendering. Shared between
+  // onMap (C5 path) and onApportionSubmit (C6 path).
+  const inFlightPriorRef = useRef<Map<string, PriorState>>(new Map());
+
   const activitiesById = useMemo(() => {
     const m = new Map<string, Activity>();
     for (const a of activitiesQuery.data ?? []) m.set(a.id, a);
@@ -119,19 +170,25 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
         return;
       }
 
-      // Snapshot for revert. Captured INSIDE the functional updater so a
-      // rapid double-click (second mapping fired before the first
-      // resolves) can't roll back to a stale state — `prev` here is
-      // always the freshest React-tracked value.
-      let snapshot: ExpenditureRow[] = [];
       const mapping = {
         activity_id: activity.id,
         activity_code: activity.code,
         activity_title: activity.title,
         mapped_at: new Date().toISOString(),
       };
+      // Capture prior state into the ref atomically with the optimistic
+      // mutation. Done inside the functional updater so we read the
+      // freshest React-tracked value (rapid double-click safe), and
+      // because StrictMode invokes the updater twice in dev — writing
+      // the same prior to the same key both times is idempotent.
       setOptimisticRows((prev) => {
-        snapshot = prev;
+        const target = prev.find((r) => r.id === expenditureId);
+        if (target) {
+          inFlightPriorRef.current.set(expenditureId, {
+            current_mapping: target.current_mapping,
+            current_apportionment: target.current_apportionment,
+          });
+        }
         return applyMappingOptimistic(prev, expenditureId, mapping);
       });
       setPendingIds((prev) => {
@@ -160,7 +217,26 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
             console.error(`mapExpenditure failed for ${expenditureId}:`, r.reason);
           }
         }
-        setOptimisticRows(snapshot);
+        // Revert via the ref. Read the prior, restore exactly the two
+        // tracked fields on the matching row, then drop the entry. Other
+        // rows touched by other in-flight mutations stay in their
+        // optimistic state — important when two different rows are
+        // mid-flight at once.
+        const prior = inFlightPriorRef.current.get(expenditureId);
+        if (prior) {
+          setOptimisticRows((cur) =>
+            cur.map((r) =>
+              r.id === expenditureId
+                ? {
+                    ...r,
+                    current_mapping: prior.current_mapping,
+                    current_apportionment: prior.current_apportionment,
+                  }
+                : r,
+            ),
+          );
+          inFlightPriorRef.current.delete(expenditureId);
+        }
         toast({
           title: 'Mapping failed',
           description: `Could not map to ${activity.code}. Please try again.`,
@@ -169,6 +245,8 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
         return;
       }
 
+      // Success — drop the in-flight entry so memory doesn't leak.
+      inFlightPriorRef.current.delete(expenditureId);
       // Success toast — deliberately fires even though the row may
       // disappear from view (filter = "Unmapped" + the row just got
       // mapped). Without it the user has no acknowledgement that the
@@ -179,10 +257,9 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
         description: activity.title,
       });
     },
-    // `optimisticRows` is intentionally NOT a dep — the snapshot is
-    // captured inside `setOptimisticRows((prev) => ...)`, which always
-    // sees React's freshest value. Including it here would re-create
-    // the callback on every state change without affecting correctness.
+    // `optimisticRows` and `inFlightPriorRef` are intentionally NOT
+    // deps. The functional updater always sees React's freshest state,
+    // and refs are never deps (React docs are explicit about this).
     [activitiesById, toast],
   );
 
@@ -213,9 +290,17 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
         apportioned_at: new Date().toISOString(),
       };
 
-      let snapshot: ExpenditureRow[] = [];
+      // Capture prior state via the shared in-flight ref. Same pattern
+      // as onMap (above) — see that callback's JSDoc for the "why
+      // useRef" rationale.
       setOptimisticRows((prev) => {
-        snapshot = prev;
+        const target = prev.find((r) => r.id === expenditureId);
+        if (target) {
+          inFlightPriorRef.current.set(expenditureId, {
+            current_mapping: target.current_mapping,
+            current_apportionment: target.current_apportionment,
+          });
+        }
         return applyApportionmentOptimistic(prev, expenditureId, denormalised);
       });
       setPendingIds((prev) => {
@@ -241,7 +326,21 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
             console.error(`apportionExpenditure failed for ${expenditureId}:`, r.reason);
           }
         }
-        setOptimisticRows(snapshot);
+        const prior = inFlightPriorRef.current.get(expenditureId);
+        if (prior) {
+          setOptimisticRows((cur) =>
+            cur.map((r) =>
+              r.id === expenditureId
+                ? {
+                    ...r,
+                    current_mapping: prior.current_mapping,
+                    current_apportionment: prior.current_apportionment,
+                  }
+                : r,
+            ),
+          );
+          inFlightPriorRef.current.delete(expenditureId);
+        }
         toast({
           title: 'Apportionment failed',
           description: `Could not apportion this expenditure across ${allocations.length} activities. Please try again.`,
@@ -251,6 +350,8 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
         throw new Error('Apportionment failed');
       }
 
+      // Success — drop the in-flight entry so memory doesn't leak.
+      inFlightPriorRef.current.delete(expenditureId);
       toast({
         title: `Apportioned across ${allocations.length} activities`,
         description: denormalised.allocations
@@ -258,6 +359,8 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
           .join(' · '),
       });
     },
+    // Same dep rationale as onMap — refs and React state read inside
+    // functional updaters are not deps.
     [activitiesById, toast],
   );
 
@@ -325,8 +428,12 @@ export function ExpenditureTab({ claimId }: { claimId: string }) {
           const target = optimisticRows.find((r) => r.id === apportioningRowId);
           if (!target) {
             // Row was removed (filter switch + invalidation) while the
-            // dialog was open — close gracefully rather than crashing.
-            setApportioningRowId(null);
+            // dialog was open. Render nothing this pass — the
+            // `apportioningRowId` cleanup effect (above) will close the
+            // dialog on the subsequent commit. We deliberately do NOT
+            // call setApportioningRowId(null) here: setState during a
+            // parent's render trips React's StrictMode warning and is
+            // unsafe under React 18 concurrent rendering.
             return null;
           }
           return (

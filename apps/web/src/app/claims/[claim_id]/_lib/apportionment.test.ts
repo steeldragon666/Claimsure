@@ -238,6 +238,20 @@ test('computeNewRowDefault: pathological zero-sum at-target => 0%, no donor', ()
   assert.equal(out.percentage, 50);
 });
 
+test('computeNewRowDefault: single row at 99.999 (within tolerance) triggers donor split', () => {
+  // Lock in the behaviour at the sum-tolerance boundary. The check is
+  // `currentSum >= TARGET_SUM - SUM_TOLERANCE`, i.e. `>= 99.999`, so a
+  // single row at exactly 99.999 hits the donor branch (NOT the deficit
+  // branch). Donor's largest value (99.999) splits to half (49.9995) and
+  // the new row enters at the same. Without this test, the behaviour at
+  // the boundary is implicit and a future "tighten the tolerance" change
+  // could silently flip it into the deficit branch.
+  const out = computeNewRowDefault([alloc(A1, 99.999)]);
+  assert.equal(out.donor_index, 0);
+  assert.ok(Math.abs(out.percentage - 49.9995) < 1e-9);
+  assert.ok(Math.abs(out.donor_new_percentage - 49.9995) < 1e-9);
+});
+
 // computeAllocationAmount --------------------------------------------------
 
 test('computeAllocationAmount: 60% of $5,000 = $3,000', () => {
