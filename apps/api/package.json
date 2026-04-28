@@ -17,6 +17,7 @@
     "@cpa/audit-score": "workspace:*",
     "@cpa/auth": "workspace:*",
     "@cpa/db": "workspace:*",
+    "@cpa/documents": "workspace:*",
     "@cpa/integrations": "workspace:*",
     "@cpa/observability": "workspace:*",
     "@cpa/schemas": "workspace:*",

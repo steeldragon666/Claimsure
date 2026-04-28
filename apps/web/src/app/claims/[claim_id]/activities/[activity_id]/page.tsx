@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { use } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AuthGuard } from '@/components/auth-guard';
+import { Button } from '@/components/ui/button';
 import { getActivity, listActivityArtefacts } from '../_lib/api';
 import { ActivityEditor } from './_components/activity-editor';
 
@@ -97,6 +98,23 @@ function Inner({ claimId, activityId }: { claimId: string; activityId: string })
           <h1 className="text-2xl font-bold">{activity.title}</h1>
           <span className="font-mono text-sm rounded bg-muted px-2 py-0.5">{activity.code}</span>
           <span className="text-xs text-muted-foreground">{kindLabel}</span>
+          {/*
+            Download PDF button — links straight to the API path with the
+            `download` attribute so the browser saves the bytes rather
+            than navigating. Suggested filename is derived server-side
+            from `Content-Disposition: attachment; filename="..."`.
+            Wraps an <a> via shadcn's `asChild` slot so the button
+            styling is preserved.
+          */}
+          <Button asChild variant="outline" size="sm" className="ml-auto">
+            <a
+              href={`/v1/activities/${activityId}/application.pdf`}
+              download
+              data-testid="download-application-pdf"
+            >
+              Download PDF
+            </a>
+          </Button>
         </div>
       </div>
 

@@ -47,6 +47,9 @@ importers:
       '@cpa/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@cpa/documents':
+        specifier: workspace:*
+        version: link:../../packages/documents
       '@cpa/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
