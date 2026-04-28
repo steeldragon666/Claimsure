@@ -1,0 +1,40 @@
+{
+  "Contacts": [
+    {
+      "ContactID": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+      "ContactStatus": "ACTIVE",
+      "Name": "Cab Co",
+      "EmailAddress": "billing@cabco.example.com",
+      "IsSupplier": true,
+      "IsCustomer": false,
+      "UpdatedDateUTC": "/Date(1641000000000+0000)/"
+    },
+    {
+      "ContactID": "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
+      "ContactStatus": "ACTIVE",
+      "Name": "Conference Catering",
+      "EmailAddress": null,
+      "IsSupplier": true,
+      "IsCustomer": false,
+      "UpdatedDateUTC": "/Date(1641100000000+0000)/"
+    },
+    {
+      "ContactID": "cccccccc-3333-4333-8333-cccccccccccc",
+      "ContactStatus": "ACTIVE",
+      "Name": "Office Supplies Plus",
+      "EmailAddress": "sales@officesupplies.example.com",
+      "IsSupplier": true,
+      "IsCustomer": true,
+      "UpdatedDateUTC": "/Date(1641200000000+0000)/"
+    },
+    {
+      "ContactID": "dddddddd-4444-4444-8444-dddddddddddd",
+      "ContactStatus": "ARCHIVED",
+      "Name": "Retired Vendor",
+      "EmailAddress": "old@retired.example.com",
+      "IsSupplier": true,
+      "IsCustomer": false,
+      "UpdatedDateUTC": "/Date(1641300000000+0000)/"
+    }
+  ]
+}

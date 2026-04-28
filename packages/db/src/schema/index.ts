@@ -22,3 +22,5 @@ export * from './activity.js';
 export * from './expenditure.js';
 export * from './expenditure_line.js';
 export * from './expenditure_mapping_rule.js';
+export * from './xero_contact.js';
+export * from './xero_account.js';

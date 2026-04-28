@@ -33,6 +33,18 @@ export {
   type SyncReceiptsOptions,
   type SyncReceiptsResult,
 } from './sync-receipts.js';
+export {
+  syncContacts,
+  type SyncContactsConnection,
+  type SyncContactsOptions,
+  type SyncContactsResult,
+} from './sync-contacts.js';
+export {
+  syncAccounts,
+  type SyncAccountsConnection,
+  type SyncAccountsOptions,
+  type SyncAccountsResult,
+} from './sync-accounts.js';
 
 // TODO(p4-cleanup): post-swimlane integration follow-ups identified by
 // the B1 code-quality review:
