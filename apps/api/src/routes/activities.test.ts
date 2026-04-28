@@ -652,6 +652,56 @@ test('PATCH /v1/activities/:id: 200 same-value patch (title -> existing title) e
   }
 });
 
+test('PATCH /v1/activities/:id: 200 partial-same — fields_changed contains only changed keys', async () => {
+  // Mixed diff: one field changes, one stays identical. The `recordIfChanged`
+  // helper SHOULD only emit the actually-changed key in fields_changed —
+  // unchanged columns must not pollute the audit chain even when they
+  // appeared in the patch payload. A future refactor that accidentally
+  // includes unchanged fields would render false changes downstream
+  // (assurance report renderer reads this map verbatim).
+  const ACTIVITY_FOR_PARTIAL = '00000000-0000-4000-8000-0000000a3063';
+  await privilegedSql`
+    INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title, description)
+    VALUES (${ACTIVITY_FOR_PARTIAL}, ${TENANT_A}, ${PROJECT_A_OPEN}, ${CLAIM_A_OPEN},
+            'CA-52', 'core', 'Original', 'KeepThis')
+  `;
+  await privilegedSql`
+    DELETE FROM event WHERE payload ->> 'activity_id' = ${ACTIVITY_FOR_PARTIAL}
+  `;
+  try {
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/activities/${ACTIVITY_FOR_PARTIAL}`,
+      cookies: { cpa_session: await consultantJwt() },
+      payload: { title: 'Updated', description: 'KeepThis' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const eventRows = await privilegedSql<
+      {
+        payload: {
+          activity_id: string;
+          fields_changed: Record<string, { from: unknown; to: unknown }>;
+        };
+      }[]
+    >`
+      SELECT payload FROM event
+       WHERE kind = 'ACTIVITY_UPDATED'
+         AND payload ->> 'activity_id' = ${ACTIVITY_FOR_PARTIAL}
+    `;
+    assert.equal(eventRows.length, 1, 'exactly one ACTIVITY_UPDATED event');
+    const fieldsChanged = eventRows[0]!.payload.fields_changed;
+    // Lock the contract: only `title` is in fields_changed, NOT `description`.
+    assert.deepEqual(Object.keys(fieldsChanged).sort(), ['title']);
+    assert.deepEqual(fieldsChanged['title'], { from: 'Original', to: 'Updated' });
+    await app.close();
+  } finally {
+    await privilegedSql`DELETE FROM event WHERE payload ->> 'activity_id' = ${ACTIVITY_FOR_PARTIAL}`;
+    await privilegedSql`DELETE FROM activity WHERE id = ${ACTIVITY_FOR_PARTIAL}`;
+  }
+});
+
 test('PATCH /v1/activities/:id: 400 on extra unknown key (.strict())', async () => {
   const app = buildApp();
   const res = await app.inject({
