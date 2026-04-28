@@ -163,10 +163,28 @@ after(async () => {
     await tx`SELECT set_config('app.current_tenant_id', ${TENANT_B_ID}, true)`;
     await tx`DELETE FROM delegation_token WHERE id = ${TOK_B_ID}`;
   });
-  // Then subject_tenants (FK target of delegation_token). Including the
-  // smuggled-B id is a defensive belt-and-braces — if the WITH CHECK
-  // assertion above ever regresses and the insert succeeds, this DELETE
-  // will tidy up before the tenant DELETE so we don't leak orphan rows.
+  // audit_score_snapshot rows must be cleared before the parent
+  // subject_tenant. The recomputeAllActive() job in apps/api iterates
+  // every non-deleted claimant and writes a snapshot per claimant —
+  // when that test runs in parallel with this one (turbo's test scheduler
+  // is non-deterministic), it can land snapshots referencing our
+  // SUBJECT_*_ID rows mid-test, blocking the subject_tenant DELETE on
+  // FK `audit_score_snapshot_subject_tenant_id_subject_tenant_id_fk`.
+  // Defensive clear by subject_tenant_id keeps cleanup deterministic
+  // regardless of who else writes snapshots concurrently.
+  await sql.begin(async (tx) => {
+    await tx`SELECT set_config('app.current_tenant_id', ${TENANT_A_ID}, true)`;
+    await tx`DELETE FROM audit_score_snapshot WHERE subject_tenant_id = ${SUBJECT_A1_ID}`;
+  });
+  await sql.begin(async (tx) => {
+    await tx`SELECT set_config('app.current_tenant_id', ${TENANT_B_ID}, true)`;
+    await tx`DELETE FROM audit_score_snapshot WHERE subject_tenant_id IN (${SUBJECT_B1_ID}, ${SMUGGLED_ID})`;
+  });
+  // Then subject_tenants (FK target of delegation_token + audit_score_snapshot).
+  // Including the smuggled-B id is a defensive belt-and-braces — if the
+  // WITH CHECK assertion above ever regresses and the insert succeeds,
+  // this DELETE will tidy up before the tenant DELETE so we don't leak
+  // orphan rows.
   await sql.begin(async (tx) => {
     await tx`SELECT set_config('app.current_tenant_id', ${TENANT_A_ID}, true)`;
     await tx`DELETE FROM subject_tenant WHERE id = ${SUBJECT_A1_ID}`;
