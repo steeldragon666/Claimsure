@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Project } from '@cpa/schemas';
 import { KindChip } from '@/app/subject-tenants/[id]/_components/kind-chip';
+import { useWhoami } from '@/hooks/use-whoami';
 import { PROJECT_TIMELINE_KINDS, summariseEvent } from '@/lib/summarise-event';
 import { listProjectEvents } from '../../_lib/api';
 
@@ -46,14 +47,23 @@ export interface TimelineTabProps {
 }
 
 export function TimelineTab({ project }: TimelineTabProps) {
+  // Firm scope in the query key — see project-list.tsx for the longer
+  // rationale. Subject_tenant_id is always defined on the project here,
+  // so it's a fine fallback when whoami hasn't resolved yet.
+  const whoami = useWhoami();
+  const firmScope = whoami.data?.user.tenantId ?? project.subject_tenant_id;
+
   const feed = useQuery({
-    queryKey: ['project-timeline', project.id],
-    queryFn: () =>
-      listProjectEvents({
-        project,
-        kinds: [...PROJECT_TIMELINE_KINDS],
-        limit: 200,
-      }),
+    queryKey: ['project-timeline', firmScope, project.id],
+    queryFn: ({ signal }) =>
+      listProjectEvents(
+        {
+          project,
+          kinds: [...PROJECT_TIMELINE_KINDS],
+          limit: 200,
+        },
+        signal,
+      ),
   });
 
   if (feed.isPending) {

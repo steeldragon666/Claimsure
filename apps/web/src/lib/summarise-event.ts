@@ -86,43 +86,37 @@ interface ProjectArchivedPayloadShape {
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null;
 
+// The narrow returns are documentation: each shape interface is
+// structurally compatible with `Record<string, unknown>` (all fields
+// optional, value types are subsets of `unknown`), so TypeScript
+// accepts the bare return without a cast. Keeping these as named
+// helpers (rather than inlining `isObject(p) ? p : null`) localises any
+// future tightening of the shapes — add a required field on a shape
+// and the compile error lands at the helper, not at every call site.
+
 const asPastePayload = (p: unknown): PastePayloadShape | null => {
   if (!isObject(p)) return null;
-  // After the `isObject` narrow `p` is `Record<string, unknown>`, which
-  // is structurally assignable to `PastePayloadShape` (all-optional
-  // fields whose value types are subsets of `unknown`). The explicit
-  // cast is documentation rather than a runtime narrowing — it locks in
-  // the shape callers see, so a future required field on
-  // `PastePayloadShape` produces a compile error here instead of
-  // silently propagating a half-typed object. The eslint-disable is
-  // accepting the cost of that explicit assertion (TypeScript's own
-  // structural rule already accepts the bare return).
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-  return p as PastePayloadShape;
+  return p;
 };
 
 const asActivityUpdatedPayload = (p: unknown): ActivityUpdatedPayloadShape | null => {
   if (!isObject(p)) return null;
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-  return p as ActivityUpdatedPayloadShape;
+  return p;
 };
 
 const asProjectCreatedPayload = (p: unknown): ProjectCreatedPayloadShape | null => {
   if (!isObject(p)) return null;
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-  return p as ProjectCreatedPayloadShape;
+  return p;
 };
 
 const asProjectUpdatedPayload = (p: unknown): ProjectUpdatedPayloadShape | null => {
   if (!isObject(p)) return null;
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-  return p as ProjectUpdatedPayloadShape;
+  return p;
 };
 
 const asProjectArchivedPayload = (p: unknown): ProjectArchivedPayloadShape | null => {
   if (!isObject(p)) return null;
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-  return p as ProjectArchivedPayloadShape;
+  return p;
 };
 
 /**

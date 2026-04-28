@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Project } from '@cpa/schemas';
+import { useWhoami } from '@/hooks/use-whoami';
 import { cn } from '@/lib/utils';
 import { listProjects } from '../_lib/api';
 import {
@@ -49,14 +50,33 @@ const STATUSES: ReadonlyArray<ProjectListStatus> = ['active', 'archived', 'all']
 
 const SORTS: ReadonlyArray<ProjectListSort> = ['name', 'recent', 'claim_count'];
 
+/**
+ * Sort values that are wired through to a real ordering. `name` is
+ * fully implemented; `recent` and `claim_count` are accepted by the URL
+ * parser (so old links don't break) but the underlying signals aren't
+ * on the wire shape today, so the dropdown disables them with a
+ * "(coming soon)" suffix instead of silently falling back. See
+ * `_lib/url-params.ts#ProjectListSort` for the longer rationale.
+ */
+const IMPLEMENTED_SORTS: ReadonlySet<ProjectListSort> = new Set(['name']);
+
 export function ProjectList({ status, sort }: ProjectListProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // Firm scope in the query key prevents cached project lists from
+  // leaking across tenant switches. `tenantId` may be null on first
+  // whoami load — use 'unknown' as a stable placeholder. The actual
+  // /v1/projects fetch is gated by AuthGuard upstream, so by the time
+  // this query runs whoami has resolved and the placeholder is
+  // effectively never the real key.
+  const whoami = useWhoami();
+  const firmScope = whoami.data?.user.tenantId ?? 'unknown';
+
   const projects = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => listProjects(),
+    queryKey: ['projects', firmScope],
+    queryFn: ({ signal }) => listProjects(undefined, signal),
   });
 
   const onSelectStatus = useCallback(
@@ -141,7 +161,11 @@ export function ProjectList({ status, sort }: ProjectListProps) {
 
       {/* Sort selector — small label + native <select> rather than a custom
           dropdown, since shadcn Select is forbidden by the brief and the
-          choice space is tiny (3 values). */}
+          choice space is tiny (3 values). Unimplemented options render
+          as `disabled` with a "(coming soon)" suffix; the URL parser
+          still accepts them so old `?sort=...` links don't break, but
+          the UI surface stops the user from selecting them and lets
+          the placeholder fallback (started_at DESC) run silently. */}
       <div className="flex items-center gap-2 text-sm">
         <label htmlFor="project-sort" className="text-muted-foreground">
           Sort:
@@ -152,11 +176,17 @@ export function ProjectList({ status, sort }: ProjectListProps) {
           onChange={(e) => onSelectSort(e.target.value as ProjectListSort)}
           className="border rounded px-2 py-1 text-sm bg-background"
         >
-          {SORTS.map((s) => (
-            <option key={s} value={s}>
-              {PROJECT_LIST_SORT_LABELS[s]}
-            </option>
-          ))}
+          {SORTS.map((s) => {
+            const isImplemented = IMPLEMENTED_SORTS.has(s);
+            const label = isImplemented
+              ? PROJECT_LIST_SORT_LABELS[s]
+              : `${PROJECT_LIST_SORT_LABELS[s]} (coming soon)`;
+            return (
+              <option key={s} value={s} disabled={!isImplemented}>
+                {label}
+              </option>
+            );
+          })}
         </select>
       </div>
 
@@ -225,10 +255,10 @@ function EmptyState({ status }: { status: ProjectListStatus }) {
   if (status === 'all') {
     return (
       <div className="border border-dashed rounded-md py-10 px-4 text-center space-y-2">
-        <p className="text-sm font-medium">No projects</p>
+        <p className="text-sm font-medium">No projects yet for this firm</p>
         <p className="text-xs text-muted-foreground">
-          Once the API exposes archived projects this view will combine active and archived; for now
-          it shows the same set as the Active tab.
+          When the API exposes archived projects, this view will combine active and archived. Until
+          then, the Active and Archived tabs are the only places to see your projects.
         </p>
       </div>
     );

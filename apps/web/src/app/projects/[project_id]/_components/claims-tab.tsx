@@ -2,7 +2,8 @@
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { Project } from '@cpa/schemas';
-import { listProjectClaims } from '../../_lib/api';
+import { useWhoami } from '@/hooks/use-whoami';
+import { MAX_CLAIMS_FANOUT, listProjectClaims } from '../../_lib/api';
 
 /**
  * Project-detail Claims tab (T-A7).
@@ -47,9 +48,16 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 export function ClaimsTab({ project }: ClaimsTabProps) {
+  // Firm scope in the query key keeps cached results from leaking across
+  // tenant switches. `tenantId` may be null on first whoami load — fall
+  // back to the project's subject_tenant_id (always present here) so the
+  // key is stable and never undefined.
+  const whoami = useWhoami();
+  const firmScope = whoami.data?.user.tenantId ?? project.subject_tenant_id;
+
   const claims = useQuery({
-    queryKey: ['project-claims', project.id],
-    queryFn: () => listProjectClaims(project),
+    queryKey: ['project-claims', firmScope, project.id],
+    queryFn: ({ signal }) => listProjectClaims(project, signal),
   });
 
   if (claims.isPending) {
@@ -63,7 +71,7 @@ export function ClaimsTab({ project }: ClaimsTabProps) {
       </p>
     );
   }
-  if (claims.data.length === 0) {
+  if (claims.data.claims.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
         No claims under this project yet. A claim is created from the pipeline once the consultant
@@ -73,29 +81,39 @@ export function ClaimsTab({ project }: ClaimsTabProps) {
   }
 
   return (
-    <ul className="space-y-2">
-      {claims.data.map((claim) => (
-        <li key={claim.id}>
-          <Link
-            href={`/claims/${claim.id}`}
-            className="block border rounded-md px-4 py-3 hover:bg-muted transition-colors"
-          >
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="font-medium">FY{claim.fiscal_year}</span>
-              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700">
-                {STAGE_LABEL[claim.stage] ?? claim.stage}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {claim.project_activity_count}{' '}
-                {claim.project_activity_count === 1 ? 'activity' : 'activities'}
-              </span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                Created {new Date(claim.created_at).toLocaleDateString()}
-              </span>
-            </div>
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-3">
+      {claims.data.truncated ? (
+        <p
+          role="status"
+          className="text-xs rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800"
+        >
+          Showing first {MAX_CLAIMS_FANOUT} claims of {claims.data.total_claims_seen} — truncated.
+        </p>
+      ) : null}
+      <ul className="space-y-2">
+        {claims.data.claims.map((claim) => (
+          <li key={claim.id}>
+            <Link
+              href={`/claims/${claim.id}`}
+              className="block border rounded-md px-4 py-3 hover:bg-muted transition-colors"
+            >
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-medium">FY{claim.fiscal_year}</span>
+                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700">
+                  {STAGE_LABEL[claim.stage] ?? claim.stage}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {claim.project_activity_count}{' '}
+                  {claim.project_activity_count === 1 ? 'activity' : 'activities'}
+                </span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  Created {new Date(claim.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

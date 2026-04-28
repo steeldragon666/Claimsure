@@ -62,17 +62,20 @@ export interface ListProjectsOptions {
  * accepted here so the page can pass it through unchanged once the
  * server-side filter lands.
  */
-export async function listProjects(opts?: ListProjectsOptions): Promise<Project[]> {
+export async function listProjects(
+  opts?: ListProjectsOptions,
+  signal?: AbortSignal,
+): Promise<Project[]> {
   const qs = new URLSearchParams();
   if (opts?.subject_tenant_id) qs.set('subject_tenant_id', opts.subject_tenant_id);
   const suffix = qs.toString();
   const path = suffix ? `/v1/projects?${suffix}` : '/v1/projects';
-  const body = await apiFetch<{ projects: Project[] }>(path);
+  const body = await apiFetch<{ projects: Project[] }>(path, { signal });
   return body.projects;
 }
 
-export async function getProject(id: string): Promise<Project> {
-  const body = await apiFetch<{ project: Project }>(`/v1/projects/${id}`);
+export async function getProject(id: string, signal?: AbortSignal): Promise<Project> {
+  const body = await apiFetch<{ project: Project }>(`/v1/projects/${id}`, { signal });
   return body.project;
 }
 
@@ -95,6 +98,37 @@ export interface ProjectClaim extends Claim {
   project_activity_count: number;
 }
 
+export interface ListProjectClaimsResponse {
+  claims: ProjectClaim[];
+  /**
+   * `true` when the firm has more than {@link MAX_CLAIMS_FANOUT} claims
+   * under the project's subject tenant. The first
+   * {@link MAX_CLAIMS_FANOUT} claims (in the API's `fiscal_year DESC,
+   * created_at DESC` order) are returned; the rest are dropped to keep
+   * round-trips bounded. The Claims tab renders a banner when this is
+   * set so the consultant knows the list isn't exhaustive.
+   */
+  truncated: boolean;
+  /**
+   * Total number of pre-filter claims under the subject tenant — i.e.
+   * the count returned by /v1/claims before we fanned out into per-claim
+   * activity probes. Useful for the truncation banner ("Showing first
+   * 100 claims of 137").
+   */
+  total_claims_seen: number;
+}
+
+/**
+ * Hard cap on the per-project claims fan-out. With one round-trip per
+ * claim to /v1/activities, going beyond ~100 starts to feel slow even
+ * on a fast network and increases the chance of a stuck "Loading
+ * claims" state on refetch. At P4 scale (≤ 10 claims per claimant) this
+ * is well above the realistic ceiling; the cap exists to put a
+ * deterministic upper bound on round-trips rather than to gate normal
+ * use.
+ */
+export const MAX_CLAIMS_FANOUT = 100;
+
 /**
  * Lists claims belonging to a project.
  *
@@ -115,24 +149,35 @@ export interface ProjectClaim extends Claim {
  * `project_id` to ListClaimsQuery and join against activity in the
  * route handler.
  *
+ * Caps the fan-out at {@link MAX_CLAIMS_FANOUT} claims to bound the
+ * round-trip count; threads `signal` through every leg so React
+ * Query's auto-cancellation on unmount/refetch propagates to the
+ * in-flight fetches and they don't pin the loading state.
+ *
  * TODO(p4-a-followup): extend GET /v1/claims with `project_id` so this
  * fan-out becomes a single round-trip. Out of scope for A7 (no
  * back-end edits per the brief).
  */
 export async function listProjectClaims(
   project: Pick<Project, 'id' | 'subject_tenant_id'>,
-): Promise<ProjectClaim[]> {
+  signal?: AbortSignal,
+): Promise<ListProjectClaimsResponse> {
   const claimsResp = await apiFetch<{ claims: Claim[] }>(
     `/v1/claims?subject_tenant_id=${encodeURIComponent(project.subject_tenant_id)}`,
+    { signal },
   );
   const allClaims = claimsResp.claims;
+  const totalClaimsSeen = allClaims.length;
+  const truncated = totalClaimsSeen > MAX_CLAIMS_FANOUT;
+  const claimsToProbe = truncated ? allClaims.slice(0, MAX_CLAIMS_FANOUT) : allClaims;
 
   // For each claim, fetch its activities and count the ones belonging to
   // this project. Run in parallel — at P4 scale this is a small fan-out.
   const enriched = await Promise.all(
-    allClaims.map(async (claim) => {
+    claimsToProbe.map(async (claim) => {
       const actsResp = await apiFetch<{ activities: Activity[] }>(
         `/v1/activities?claim_id=${encodeURIComponent(claim.id)}`,
+        { signal },
       );
       const matching = actsResp.activities.filter((a) => a.project_id === project.id);
       return matching.length > 0
@@ -144,7 +189,8 @@ export async function listProjectClaims(
   // Filter out claims that don't touch this project. The order from
   // /v1/claims is `fiscal_year DESC, created_at DESC` (A2 route handler);
   // preserve that.
-  return enriched.filter((c): c is ProjectClaim => c !== null);
+  const claims = enriched.filter((c): c is ProjectClaim => c !== null);
+  return { claims, truncated, total_claims_seen: totalClaimsSeen };
 }
 
 // =====================================================================
@@ -195,6 +241,7 @@ export interface ListProjectEventsResponse {
  */
 export async function listProjectEvents(
   opts: ListProjectEventsOptions,
+  signal?: AbortSignal,
 ): Promise<ListProjectEventsResponse> {
   const { project, kinds, limit = 200 } = opts;
   const qs = new URLSearchParams();
@@ -203,6 +250,7 @@ export async function listProjectEvents(
   qs.set('limit', String(limit));
   const body = await apiFetch<{ events: ApiEvent[]; next_cursor: string | null }>(
     `/v1/events?${qs.toString()}`,
+    { signal },
   );
 
   // Client-side narrow to the project. Two ways an event is "for" the
