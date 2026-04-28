@@ -44,6 +44,11 @@ jobs:
       TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       # DocuSign webhook HMAC secret — fixture value for B5 webhook tests.
       DOCUSIGN_WEBHOOK_HMAC_SECRET: ci-docusign-webhook-secret
+      # Xero accounting OAuth — stubbed for CI; real values in production secrets
+      XERO_ACCOUNTING_CLIENT_ID: ci-test-client-id
+      XERO_ACCOUNTING_CLIENT_SECRET: ci-test-client-secret
+      XERO_ACCOUNTING_REDIRECT_URI: http://localhost:3000/v1/integrations/xero-accounting/callback
+      XERO_IMPL: stub
 
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +119,11 @@ jobs:
       TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       # DocuSign webhook HMAC secret — needed if any e2e exercises /v1/integrations/docusign/webhook.
       DOCUSIGN_WEBHOOK_HMAC_SECRET: ci-docusign-webhook-secret
+      # Xero accounting OAuth — stubbed for CI; real values in production secrets
+      XERO_ACCOUNTING_CLIENT_ID: ci-test-client-id
+      XERO_ACCOUNTING_CLIENT_SECRET: ci-test-client-secret
+      XERO_ACCOUNTING_REDIRECT_URI: http://localhost:3000/v1/integrations/xero-accounting/callback
+      XERO_IMPL: stub
       # Override Playwright webServer URLs (default ports stand)
       NODE_ENV: test
 
