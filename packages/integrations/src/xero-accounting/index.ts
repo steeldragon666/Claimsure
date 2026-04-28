@@ -27,6 +27,12 @@ export {
   type SyncBankTransactionsOptions,
   type SyncBankTransactionsResult,
 } from './sync-bank-tx.js';
+export {
+  syncReceipts,
+  type SyncReceiptsConnection,
+  type SyncReceiptsOptions,
+  type SyncReceiptsResult,
+} from './sync-receipts.js';
 
 // TODO(p4-cleanup): post-swimlane integration follow-ups identified by
 // the B1 code-quality review:

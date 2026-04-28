@@ -1,0 +1,136 @@
+{
+  "Receipts": [
+    {
+      "ReceiptID": "11111111-1111-4111-8111-111111111111",
+      "Status": "AUTHORISED",
+      "Date": "/Date(1640995200000+0000)/",
+      "UpdatedDateUTC": "/Date(1641000000000+0000)/",
+      "Contact": {
+        "ContactID": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+        "Name": "Cab Co"
+      },
+      "User": {
+        "UserID": "f1f1f1f1-1111-4111-8111-f1f1f1f1f1f1",
+        "Email": "consultant@firm-a.example.com",
+        "FirstName": "Alice",
+        "LastName": "Consultant"
+      },
+      "Reference": "Conference travel",
+      "CurrencyCode": "AUD",
+      "Total": "85.50",
+      "SubTotal": "77.73",
+      "TotalTax": "7.77",
+      "LineItems": [
+        {
+          "LineItemID": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+          "Description": "Taxi to airport",
+          "Quantity": 1,
+          "UnitAmount": "85.50",
+          "LineAmount": "85.50",
+          "AccountCode": "453"
+        }
+      ]
+    },
+    {
+      "ReceiptID": "22222222-2222-4222-8222-222222222222",
+      "Status": "AUTHORISED",
+      "Date": "/Date(1641081600000+0000)/",
+      "UpdatedDateUTC": "/Date(1641100000000+0000)/",
+      "Contact": {
+        "ContactID": "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
+        "Name": "Conference Catering"
+      },
+      "User": {
+        "UserID": "f2f2f2f2-2222-4222-8222-f2f2f2f2f2f2",
+        "Email": "external-stranger@other-firm.example.com",
+        "FirstName": "Bob",
+        "LastName": "Outsider"
+      },
+      "Reference": "Conference lunch",
+      "CurrencyCode": "AUD",
+      "Total": "120.00",
+      "SubTotal": "109.09",
+      "TotalTax": "10.91",
+      "LineItems": [
+        {
+          "LineItemID": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+          "Description": "Lunch x4",
+          "Quantity": 4,
+          "UnitAmount": "30.00",
+          "LineAmount": "120.00",
+          "AccountCode": "420"
+        }
+      ]
+    },
+    {
+      "ReceiptID": "33333333-3333-4333-8333-333333333333",
+      "Status": "AUTHORISED",
+      "Date": "/Date(1641168000000+0000)/",
+      "UpdatedDateUTC": "/Date(1641200000000+0000)/",
+      "Contact": {
+        "ContactID": "cccccccc-3333-4333-8333-cccccccccccc",
+        "Name": "Office Supplies Plus"
+      },
+      "User": {
+        "UserID": "f3f3f3f3-3333-4333-8333-f3f3f3f3f3f3",
+        "Email": "consultant-other-tenant@firm-b.example.com",
+        "FirstName": "Carol",
+        "LastName": "OtherFirm"
+      },
+      "Reference": "Notebooks and pens",
+      "CurrencyCode": "AUD",
+      "Total": "47.30",
+      "SubTotal": "43.00",
+      "TotalTax": "4.30",
+      "LineItems": [
+        {
+          "LineItemID": "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
+          "Description": "Notebooks",
+          "Quantity": 5,
+          "UnitAmount": "5.00",
+          "LineAmount": "25.00",
+          "AccountCode": "453"
+        },
+        {
+          "LineItemID": "cccccccc-cccc-4ccc-8ccc-ccccccccccc2",
+          "Description": "Pens",
+          "Quantity": 10,
+          "UnitAmount": "2.23",
+          "LineAmount": "22.30",
+          "AccountCode": "453"
+        }
+      ]
+    },
+    {
+      "ReceiptID": "99999999-9999-4999-8999-999999999999",
+      "Status": "DRAFT",
+      "Date": "/Date(1641254400000+0000)/",
+      "UpdatedDateUTC": "/Date(1641300000000+0000)/",
+      "Contact": {
+        "ContactID": "dddddddd-9999-4999-8999-dddddddddddd",
+        "Name": "Pending Coffee"
+      },
+      "User": {
+        "UserID": "f4f4f4f4-4444-4444-8444-f4f4f4f4f4f4",
+        "Email": "draft@firm-a.example.com",
+        "FirstName": "Dave",
+        "LastName": "Draft"
+      },
+      "Reference": "Coffee — still being approved",
+      "CurrencyCode": "AUD",
+      "Total": "12.50",
+      "SubTotal": "11.36",
+      "TotalTax": "1.14",
+      "LineItems": [
+        {
+          "LineItemID": "dddddddd-dddd-4ddd-8ddd-ddddddddddd1",
+          "Description": "Coffee — must be filtered out (DRAFT)",
+          "Quantity": 1,
+          "UnitAmount": "12.50",
+          "LineAmount": "12.50",
+          "AccountCode": "420"
+        }
+      ]
+    }
+  ]
+}
