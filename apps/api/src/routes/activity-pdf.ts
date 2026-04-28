@@ -214,6 +214,8 @@ export function registerActivityPdf(app: FastifyInstance): void {
       const input: ActivityApplicationInput = {
         firm: {
           name: loaded.activity.tenant_name,
+          // TODO(P4-followup): schema gap — `firm.abn` column does not exist;
+          // rendering "ABN not on file" placeholder until migration lands.
           // ABN is not yet a column on the tenant table; surface null so
           // the renderer prints "ABN not on file". Schema work to add the
           // column is tracked separately (out of scope for A8).
@@ -221,6 +223,8 @@ export function registerActivityPdf(app: FastifyInstance): void {
         },
         subject_tenant: {
           name: loaded.activity.subject_tenant_name,
+          // TODO(P4-followup): schema gap — `subject_tenant.abn` column does not exist;
+          // rendering "ABN not on file" placeholder until migration lands.
           abn: null,
         },
         project: {
@@ -241,6 +245,8 @@ export function registerActivityPdf(app: FastifyInstance): void {
           title: loaded.activity.title,
           kind: loaded.activity.kind === 'core' ? 'CORE' : 'SUPPORTING',
           description: loaded.activity.description,
+          // TODO(P4-followup): schema gap — `activity.objective` column does not exist;
+          // bridging from `expected_outcome` until migration lands.
           // The activity table doesn't yet have separate `objective` and
           // `new_knowledge` columns — `expected_outcome` is the closest
           // analogue and the consultant portal treats it as the
@@ -249,7 +255,12 @@ export function registerActivityPdf(app: FastifyInstance): void {
           objective: loaded.activity.expected_outcome,
           hypothesis: loaded.activity.hypothesis,
           technical_uncertainty: loaded.activity.technical_uncertainty,
+          // TODO(P4-followup): schema gap — `activity.new_knowledge` column does not exist;
+          // bridging from `actual_outcome` until migration lands.
           new_knowledge: loaded.activity.actual_outcome,
+          // TODO(P4-followup): schema gap — `activity.activity_started_at` /
+          // `activity.activity_ended_at` columns do not exist; rendering null +
+          // "Not yet captured" placeholder until migration lands.
           // Activity-level start/end dates are not yet schema fields —
           // null until they are.
           activity_started_at: null,
@@ -262,11 +273,22 @@ export function registerActivityPdf(app: FastifyInstance): void {
 
       const pdf = await renderActivityApplicationPdf(input);
 
-      const filename = `activity-${loaded.activity.code}-${loaded.activity.claim_fiscal_year}.pdf`;
+      // Defense against CWE-93 / response-splitting: even though activity.code is
+      // constrained to [CS]A-NNN today, sanitize at the use site so future
+      // constraint relaxation can't introduce a header-injection vector.
+      const safeCode = loaded.activity.code.replace(/[^A-Za-z0-9._-]/g, '_');
+      const safeYear = String(loaded.activity.claim_fiscal_year).replace(/[^0-9]/g, '');
+      const filename = `activity-${safeCode}-${safeYear}.pdf`;
       reply.header('Content-Type', 'application/pdf');
       reply.header('Content-Disposition', `attachment; filename="${filename}"`);
       reply.header('Cache-Control', 'private, no-store');
       reply.header('Content-Length', pdf.byteLength.toString());
+      // renderToBuffer materializes the full PDF before send. Fine for current
+      // payloads (5-30 KB typical, 100 KB worst case with 50+ artefacts).
+      // If a future activity has hundreds of artefacts and the buffered PDF
+      // approaches 5 MB, switch to renderToStream + reply.send(stream).
+      // See @react-pdf/renderer docs: renderToStream returns a Node Readable.
+      //
       // Send as Buffer — Fastify will pass it through verbatim. We expose
       // Uint8Array on the documents package surface; convert to Buffer
       // here so downstream pipeline (Fastify serializer guard, content-

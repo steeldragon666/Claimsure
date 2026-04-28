@@ -77,6 +77,17 @@ export interface ActivityApplicationInput {
  * @react-pdf re-creates the renderer on every call and there's no win to
  * memoising at module-init time.
  */
+// Font: Helvetica is one of @react-pdf's 14 built-in PDF standard fonts.
+// Coverage: Latin-1 only (ASCII + Western European accents + § symbol used
+// in statutory_anchor). Non-Latin characters (Cyrillic, Greek, Asian
+// scripts, emoji) will silently strip during rendering — they do NOT throw.
+//
+// To support non-Latin characters: register a TTF/OTF font with @react-pdf's
+// Font.register() (e.g. NotoSans-Regular.ttf provides multi-script coverage).
+// This will increase PDF size from ~5 KB to ~200 KB.
+//
+// TODO(P4-followup): font coverage — evaluate Unicode font registration
+// once we have a real customer with non-Latin activity titles.
 const styles = StyleSheet.create({
   page: { padding: 40, paddingBottom: 60, fontFamily: 'Helvetica', fontSize: 10, color: '#111827' },
   header: {
