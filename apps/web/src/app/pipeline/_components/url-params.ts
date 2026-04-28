@@ -20,6 +20,21 @@ export type PipelineView = 'kanban' | 'table';
 
 const VIEW_VALUES = new Set<PipelineView>(['kanban', 'table']);
 
+/**
+ * Human-readable labels for each `ClaimStage`. Single source of truth for
+ * pipeline UI surfaces (filter chips, kanban column headers, table cells)
+ * so we don't fork the mapping per component.
+ */
+export const STAGE_LABELS: Record<ClaimStage, string> = {
+  engagement: 'Engagement',
+  activity_capture: 'Activity capture',
+  narrative_drafting: 'Narrative drafting',
+  expenditure_schedule: 'Expenditure schedule',
+  review: 'Review',
+  submitted: 'Submitted',
+  audit_defence: 'Audit defence',
+};
+
 export function parseView(raw: string | null): PipelineView {
   return raw && VIEW_VALUES.has(raw as PipelineView) ? (raw as PipelineView) : 'table';
 }

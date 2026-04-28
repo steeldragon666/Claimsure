@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Claim } from '@cpa/schemas';
 import { AuthGuard } from '@/components/auth-guard';
 import { PipelineFilters, type ConsultantOption } from './_components/pipeline-filters';
+import { PipelineKanban } from './_components/pipeline-kanban';
 import {
   currentFiscalYear,
   parseFiscalYear,
@@ -14,6 +15,7 @@ import {
   type PipelineView,
 } from './_components/url-params';
 import { useUsers } from '@/hooks/use-users';
+import { useWhoami } from '@/hooks/use-whoami';
 
 /**
  * /pipeline — Swimlane C entry point. Renders a filter bar + a view
@@ -66,7 +68,7 @@ function Inner() {
       }));
   }, [usersQuery.data]);
 
-  // TODO(C2/A2): replace with `listClaims({ stages, consultantId, fiscalYear, sector })`
+  // TODO(A2): replace with `listClaims({ stages, consultantId, fiscalYear, sector })`
   // once Swimlane A's GET /v1/claims endpoint ships. Until then we render
   // an empty list so the page shell + filter wiring is exercisable. The
   // query key intentionally mirrors what the real fetch will use, so
@@ -75,6 +77,13 @@ function Inner() {
     queryKey: ['claims', { stages, consultantId, fiscalYear, sector }] as const,
     queryFn: (): Promise<Claim[]> => Promise.resolve([]),
   });
+
+  // Role drives admin-only affordances inside the kanban (revert via
+  // context-menu, backward drag-drop, bulk-revert). AuthGuard guarantees
+  // `whoami` data is loaded before children render, so the optional chain
+  // here is just a TS courtesy — the value will be present.
+  const whoami = useWhoami();
+  const role = whoami.data?.user.role ?? 'viewer';
 
   return (
     <main className="container mx-auto space-y-6 px-4 py-8">
@@ -100,24 +109,26 @@ function Inner() {
         consultants={consultants}
       />
 
-      <ViewPlaceholder
+      <ViewBody
         view={view}
         isPending={claimsQuery.isPending}
         error={claimsQuery.error}
-        claimCount={claimsQuery.data?.length ?? 0}
+        claims={claimsQuery.data ?? []}
+        role={role}
       />
     </main>
   );
 }
 
-interface ViewPlaceholderProps {
+interface ViewBodyProps {
   view: PipelineView;
   isPending: boolean;
   error: unknown;
-  claimCount: number;
+  claims: Claim[];
+  role: 'admin' | 'consultant' | 'viewer';
 }
 
-function ViewPlaceholder({ view, isPending, error, claimCount }: ViewPlaceholderProps) {
+function ViewBody({ view, isPending, error, claims, role }: ViewBodyProps) {
   if (isPending) {
     return <p className="text-sm text-muted-foreground">Loading claims…</p>;
   }
@@ -128,35 +139,23 @@ function ViewPlaceholder({ view, isPending, error, claimCount }: ViewPlaceholder
       </p>
     );
   }
-  // C2 (kanban) and C3 (table) swap their concrete views in here. The
-  // copy below is intentionally specific so a viewer can see at a glance
-  // which task they're waiting on. claimCount is rendered so the empty
-  // state stays accurate once A2 ships before C2/C3.
+  if (view === 'kanban') {
+    return <PipelineKanban claims={claims} role={role} />;
+  }
+  // C3 (table view) lands the tabular view. Until then, the dashed
+  // placeholder communicates the wait.
   return (
     <section
       role="region"
-      aria-label={view === 'kanban' ? 'Kanban view' : 'Table view'}
+      aria-label="Table view"
       className="rounded-md border border-dashed p-12 text-center"
     >
-      {view === 'kanban' ? (
-        <>
-          <p className="font-medium">Kanban view coming in C2</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {claimCount === 0
-              ? 'No claims match the current filters.'
-              : `${claimCount} claim${claimCount === 1 ? '' : 's'} ready to render.`}
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="font-medium">Table view coming in C3</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {claimCount === 0
-              ? 'No claims match the current filters.'
-              : `${claimCount} claim${claimCount === 1 ? '' : 's'} ready to render.`}
-          </p>
-        </>
-      )}
+      <p className="font-medium">Table view coming in C3</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {claims.length === 0
+          ? 'No claims match the current filters.'
+          : `${claims.length} claim${claims.length === 1 ? '' : 's'} ready to render.`}
+      </p>
     </section>
   );
 }

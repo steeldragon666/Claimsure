@@ -5,7 +5,7 @@ import { CLAIM_STAGES_LITERAL, type ClaimStage } from '@cpa/schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { type PipelineView } from './url-params.js';
+import { STAGE_LABELS, type PipelineView } from './url-params';
 
 /**
  * Filter + view-toggle bar for /pipeline.
@@ -38,16 +38,6 @@ export interface PipelineFiltersProps {
   sector: string;
   consultants: ConsultantOption[];
 }
-
-const STAGE_LABELS: Record<ClaimStage, string> = {
-  engagement: 'Engagement',
-  activity_capture: 'Activity capture',
-  narrative_drafting: 'Narrative drafting',
-  expenditure_schedule: 'Expenditure schedule',
-  review: 'Review',
-  submitted: 'Submitted',
-  audit_defence: 'Audit defence',
-};
 
 const DEBOUNCE_MS = 250;
 
