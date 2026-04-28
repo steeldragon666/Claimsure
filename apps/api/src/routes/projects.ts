@@ -7,9 +7,28 @@ import {
   ArchiveProjectBody,
   CreateProjectBody,
   ListProjectsQuery,
+  ProjectArchivedPayload,
+  ProjectCreatedPayload,
+  ProjectUpdatedPayload,
   UpdateProjectBody,
   type Project,
 } from '@cpa/schemas';
+
+// TODO(p4-a-cleanup): post-A1 review-flagged refactors deferred to a separate
+// cross-cutting task after the swimlanes merge:
+//
+//   1. PATCH SET-list template fragments use implicit trailing-comma discipline
+//      that's fragile to add new fields. Refactor to a `setIfDefined` helper
+//      that builds the SET clause from a definition list.
+//      See: A1 quality review 2026-04-28, Important #1.
+//
+//   2. Event-write (`insertEventWithChain`) runs AFTER the row-mutation
+//      transaction commits. On a chain-write failure between the two awaits,
+//      the row is mutated but no event lands — chain becomes inconsistent
+//      with canonical state. Fix: extend `insertEventWithChain` to accept an
+//      optional `tx` parameter so callers compose row+event in one tx.
+//      Affects all routes that emit chain events.
+//      See: A1 quality review 2026-04-28, Important #3.
 
 /**
  * Raw project row as stored in postgres. Columns are snake_case to match
@@ -141,17 +160,21 @@ export function registerProjects(app: FastifyInstance): void {
 
     // Extend the chain with PROJECT_CREATED. captured_at = now() so
     // the timeline reflects creation order; payload mirrors
-    // `ProjectCreatedPayload` in @cpa/schemas.
+    // `ProjectCreatedPayload` in @cpa/schemas — we `parse()` here so a
+    // future refactor that drifts the payload shape blows up at the
+    // boundary (programming error) rather than landing a malformed
+    // event on the chain.
+    const createdPayload = ProjectCreatedPayload.parse({
+      project_id: inserted.id,
+      name: inserted.name,
+      started_at: isoOf(inserted.started_at),
+    });
     await insertEventWithChain({
       tenant_id: tenantId,
       subject_tenant_id,
       project_id: inserted.id,
       kind: 'PROJECT_CREATED',
-      payload: {
-        project_id: inserted.id,
-        name: inserted.name,
-        started_at: isoOf(inserted.started_at),
-      },
+      payload: createdPayload,
       classification: null,
       captured_at: new Date(),
       captured_by_user_id: userId,
@@ -291,6 +314,23 @@ export function registerProjects(app: FastifyInstance): void {
           return { kind: 'noop' as const, row: prev };
         }
 
+        // Cross-field date validation server-side. The schema's `.refine()`
+        // catches the both-fields-in-patch case, but a PATCH that supplies
+        // only `started_at` (with the existing `ended_at` already on the
+        // row) or only `ended_at` (with the existing `started_at`) needs
+        // the combined value to validate. Compute the resulting pair and
+        // reject inverted ranges with a 400.
+        const resultingStartedAt =
+          patch.started_at !== undefined ? patch.started_at : isoOf(prev.started_at);
+        const resultingEndedAt =
+          patch.ended_at !== undefined ? patch.ended_at : isoOrNull(prev.ended_at);
+        if (
+          resultingEndedAt !== null &&
+          new Date(resultingStartedAt) > new Date(resultingEndedAt)
+        ) {
+          return { kind: 'invalid_range' as const };
+        }
+
         // Per-column conditional UPDATE — postgres-js supports
         // `column = COALESCE($newOrSentinel, column)` style updates, but
         // the cleanest path that preserves null-vs-undefined semantics
@@ -341,6 +381,13 @@ export function registerProjects(app: FastifyInstance): void {
           requestId: req.id,
         });
       }
+      if (result.kind === 'invalid_range') {
+        return reply.status(400).send({
+          error: 'invalid_range',
+          message: 'ended_at must be on or after started_at',
+          requestId: req.id,
+        });
+      }
       if (result.kind === 'noop') {
         return reply.status(200).send({ project: toApi(result.row) });
       }
@@ -375,17 +422,21 @@ export function registerProjects(app: FastifyInstance): void {
         recordIfChanged('ended_at', result.prev.ended_at, result.row.ended_at);
       }
 
-      // Skip the event write when nothing actually changed.
+      // Skip the event write when nothing actually changed. Validate the
+      // payload via Zod before insert — same rationale as POST: a future
+      // refactor that drifts the `fields_changed` shape blows up at the
+      // boundary rather than landing a malformed event.
       if (Object.keys(fieldsChanged).length > 0) {
+        const updatedPayload = ProjectUpdatedPayload.parse({
+          project_id: result.row.id,
+          fields_changed: fieldsChanged,
+        });
         await insertEventWithChain({
           tenant_id: tenantId,
           subject_tenant_id: result.row.subject_tenant_id,
           project_id: result.row.id,
           kind: 'PROJECT_UPDATED',
-          payload: {
-            project_id: result.row.id,
-            fields_changed: fieldsChanged,
-          },
+          payload: updatedPayload,
           classification: null,
           captured_at: new Date(),
           captured_by_user_id: userId,
@@ -474,17 +525,19 @@ export function registerProjects(app: FastifyInstance): void {
         return reply.status(200).send({ project: toApi(result.row) });
       }
 
-      // First-time archive — extend the chain.
+      // First-time archive — extend the chain. Same Zod-parse-at-boundary
+      // pattern as POST/PATCH so a malformed payload fails fast.
+      const archivedPayload = ProjectArchivedPayload.parse({
+        project_id: result.row.id,
+        archived_by_user_id: userId,
+        ...(reason !== undefined ? { reason } : {}),
+      });
       await insertEventWithChain({
         tenant_id: tenantId,
         subject_tenant_id: result.row.subject_tenant_id,
         project_id: result.row.id,
         kind: 'PROJECT_ARCHIVED',
-        payload: {
-          project_id: result.row.id,
-          archived_by_user_id: userId,
-          ...(reason !== undefined ? { reason } : {}),
-        },
+        payload: archivedPayload,
         classification: null,
         captured_at: new Date(),
         captured_by_user_id: userId,
