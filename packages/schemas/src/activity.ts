@@ -95,3 +95,14 @@ export const UpdateActivityBody = z
   })
   .strict();
 export type UpdateActivityBody = z.infer<typeof UpdateActivityBody>;
+
+/**
+ * GET /v1/activities query. `claim_id` scopes the list to a single claim
+ * (the canonical caller is the consultant portal's claim-detail page,
+ * which always has a claim_id in scope). Optional so callers can list
+ * every activity visible under RLS — useful for cross-claim dashboards.
+ */
+export const ListActivitiesQuery = z.object({
+  claim_id: Uuid.optional(),
+});
+export type ListActivitiesQuery = z.infer<typeof ListActivitiesQuery>;
