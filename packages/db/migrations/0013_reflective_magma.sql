@@ -1,3 +1,23 @@
+-- DO NOT REGENERATE THIS MIGRATION VIA `pnpm --filter @cpa/db generate`.
+-- The block at the bottom is hand-authored: 5 CHECK constraints, 2 RLS
+-- policies, and 3 GRANTs to cpa_app. drizzle-kit will silently regenerate
+-- this file and clobber them. If you need to change a P4 table's shape,
+-- write a new migration.
+--
+-- Three new tables: expenditure, expenditure_line, expenditure_mapping_rule (P4 F3).
+--
+-- `expenditure_line` deliberately gets a GRANT but NO direct RLS / FORCE /
+-- policy: it has no `tenant_id` column (per F3 design — see JSDoc on
+-- `expenditure_line.ts`). Postgres RLS doesn't walk FKs, so isolation here
+-- is enforced by the route layer (which always joins through `expenditure`,
+-- which IS RLS-protected) plus GRANT scoping, not row-level security on
+-- the child table.
+--
+-- The partial unique index `expenditure_source_external_unique`
+-- (tenant_id, source, source_external_id WHERE source_external_id IS NOT
+-- NULL) is emitted by drizzle-kit from the schema (declared in
+-- `expenditure.ts`); it is NOT hand-authored in the appended block.
+
 CREATE TABLE "expenditure_line" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"expenditure_id" uuid NOT NULL,
@@ -51,3 +71,53 @@ CREATE INDEX "expenditure_tenant_idx" ON "expenditure" USING btree ("tenant_id")
 CREATE INDEX "expenditure_subject_tenant_idx" ON "expenditure" USING btree ("subject_tenant_id");--> statement-breakpoint
 CREATE INDEX "expenditure_source_idx" ON "expenditure" USING btree ("source");--> statement-breakpoint
 CREATE UNIQUE INDEX "expenditure_source_external_unique" ON "expenditure" USING btree ("tenant_id","source","source_external_id") WHERE "expenditure"."source_external_id" IS NOT NULL;
+--> statement-breakpoint
+-- ============================================================
+-- DB-level CHECK constraints
+-- ============================================================
+
+-- The `source` literal list MUST match `EXPENDITURE_SOURCES` const in
+-- `packages/db/src/schema/expenditure.ts`. Same order, same content.
+-- Drift would surface as a runtime constraint violation on insert/update.
+ALTER TABLE "expenditure" ADD CONSTRAINT expenditure_source_valid
+  CHECK (source IN ('xero_invoice', 'xero_bank_tx', 'xero_receipt', 'manual'));
+
+ALTER TABLE "expenditure" ADD CONSTRAINT expenditure_currency_aud
+  CHECK (currency = 'AUD');
+
+ALTER TABLE "expenditure_line" ADD CONSTRAINT expenditure_line_rd_percent_range
+  CHECK (rd_percent IS NULL OR (rd_percent >= 0 AND rd_percent <= 100));
+
+ALTER TABLE "expenditure_mapping_rule" ADD CONSTRAINT mapping_rule_rd_percent_range
+  CHECK (rd_percent >= 0 AND rd_percent <= 100);
+
+-- NULL-as-wildcard semantics for mapping_rule.source: a rule with NULL
+-- source applies to any source classification. Mirror the same literal
+-- list as `expenditure_source_valid` (must match `EXPENDITURE_SOURCES`).
+ALTER TABLE "expenditure_mapping_rule" ADD CONSTRAINT mapping_rule_source_valid
+  CHECK (source IS NULL OR source IN ('xero_invoice', 'xero_bank_tx', 'xero_receipt', 'manual'));
+
+--> statement-breakpoint
+-- ============================================================
+-- RLS — same FORCE + USING + WITH CHECK pattern as 0002 / 0006 / 0008 / 0009 / 0010 / 0012
+--
+-- `expenditure_line` is intentionally omitted: no tenant_id column, isolation
+-- is enforced by the route layer joining through `expenditure` (which IS
+-- RLS-protected) plus GRANT scoping. See JSDoc on expenditure_line.ts.
+-- ============================================================
+
+ALTER TABLE "expenditure" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "expenditure" FORCE ROW LEVEL SECURITY;
+CREATE POLICY "expenditure_tenant_isolation" ON "expenditure"
+  USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE "expenditure_mapping_rule" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "expenditure_mapping_rule" FORCE ROW LEVEL SECURITY;
+CREATE POLICY "expenditure_mapping_rule_tenant_isolation" ON "expenditure_mapping_rule"
+  USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON "expenditure" TO cpa_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON "expenditure_line" TO cpa_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON "expenditure_mapping_rule" TO cpa_app;
