@@ -34,7 +34,26 @@ import type { OAuthTokens } from '../runtime/types.js';
  * `state` is supplied by the caller — same pattern as the payroll
  * counterpart. We keep this module DB-agnostic; persistence is the
  * route's job.
+ *
+ * **SECURITY — plaintext-token boundary**: `exchangeCode` and
+ * `refreshAccessToken` return `OAuthTokens` with PLAINTEXT
+ * `access_token` and `refresh_token` strings. Callers MUST encrypt
+ * these with `encryptToken()` from `@cpa/integrations/runtime` before
+ * persisting to `integration_connection.encrypted_credentials_blob`.
+ * The route layer (e.g. `apps/api/src/routes/integrations.ts`) owns
+ * that encryption step — this module never touches the DB.
  */
+
+/**
+ * Subtracted from token expiry to account for clock skew + network
+ * latency between Xero's auth server and our app servers. 60 seconds is
+ * conventional for short-lived OAuth tokens; matches the tolerance Xero
+ * recommends in their auth-flow guide. Applied uniformly in both
+ * `exchangeCode` and `refreshAccessToken` so the persisted `expires_at`
+ * is always slightly earlier than Xero's view, prompting an early
+ * refresh rather than a 401 mid-request.
+ */
+const SKEW_BUFFER_MS = 60_000;
 
 export function buildAuthUrl(
   opts: XeroAccountingAuthConfig & { state: string; pkce_challenge: string },
@@ -58,6 +77,20 @@ type XeroTokenResponse = {
   token_type?: string;
 };
 
+/**
+ * Exchange an authorization code for OAuth tokens (PKCE flow).
+ *
+ * SECURITY: The returned `OAuthTokens` contain PLAINTEXT access and
+ * refresh tokens. Caller MUST encrypt with `encryptToken()` from
+ * `@cpa/integrations/runtime` before persisting to
+ * `integration_connection.encrypted_credentials_blob`. The route layer
+ * (e.g. `apps/api/src/routes/integrations.ts`) is responsible for this
+ * — this module never touches the DB.
+ *
+ * The returned `expires_at` already accounts for `SKEW_BUFFER_MS` of
+ * clock-skew tolerance, so callers can treat it as the wall-clock
+ * deadline to refresh by.
+ */
 export async function exchangeCode(
   opts: XeroAccountingAuthConfig & { code: string; pkce_verifier: string },
 ): Promise<OAuthTokens> {
@@ -81,7 +114,7 @@ export async function exchangeCode(
   const data = (await res.json()) as XeroTokenResponse;
   const tokens: OAuthTokens = {
     access_token: data.access_token,
-    expires_at: new Date(Date.now() + data.expires_in * 1000),
+    expires_at: new Date(Date.now() + data.expires_in * 1000 - SKEW_BUFFER_MS),
   };
   if (data.refresh_token !== undefined) tokens.refresh_token = data.refresh_token;
   if (data.scope !== undefined) tokens.scopes = data.scope.split(' ');
@@ -93,9 +126,19 @@ export async function exchangeCode(
  * (RFC 6749 §6). Xero rotates refresh tokens on every refresh — the
  * caller MUST persist the new refresh_token (do not keep the old one).
  *
+ * SECURITY: The returned `OAuthTokens` contain PLAINTEXT access and
+ * refresh tokens. Caller MUST encrypt with `encryptToken()` from
+ * `@cpa/integrations/runtime` before persisting to
+ * `integration_connection.encrypted_credentials_blob`. The route layer
+ * (e.g. `apps/api/src/routes/integrations.ts`) is responsible for this
+ * — this module never touches the DB.
+ *
  * Note: refresh does NOT re-issue the `tenantId` set — once granted,
  * the user's authorized tenant list is stable for the life of the
  * connection. The orchestrator keeps the `external_account_id` as-is.
+ *
+ * The returned `expires_at` already accounts for `SKEW_BUFFER_MS` of
+ * clock-skew tolerance.
  */
 export async function refreshAccessToken(
   opts: XeroAccountingAuthConfig & { refresh_token: string },
@@ -118,7 +161,7 @@ export async function refreshAccessToken(
   const data = (await res.json()) as XeroTokenResponse;
   const tokens: OAuthTokens = {
     access_token: data.access_token,
-    expires_at: new Date(Date.now() + data.expires_in * 1000),
+    expires_at: new Date(Date.now() + data.expires_in * 1000 - SKEW_BUFFER_MS),
   };
   if (data.refresh_token !== undefined) tokens.refresh_token = data.refresh_token;
   if (data.scope !== undefined) tokens.scopes = data.scope.split(' ');

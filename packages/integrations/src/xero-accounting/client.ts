@@ -51,7 +51,10 @@ export type XeroAccountingClientOptions = {
  */
 export function parseXeroDate(d: string | undefined | null): Date | null {
   if (!d) return null;
-  const m = /\/Date\((\d+)([+-]\d{4})?\)\//.exec(d);
+  // Anchored with ^...$ so a substring match (e.g. "Prefix/Date(123)/Suffix")
+  // does NOT silently parse — those are malformed inputs and must fall through
+  // to the generic Date parse, which then returns null for non-ISO strings.
+  const m = /^\/Date\((\d+)([+-]\d{4})?\)\/$/.exec(d);
   if (m && m[1] !== undefined) {
     return new Date(parseInt(m[1], 10));
   }

@@ -175,10 +175,13 @@ test('exchangeCode: happy path includes code_verifier in form body', async () =>
     'accounting.settings',
     'offline_access',
   ]);
-  // expires_at ~= now + 1800s
+  // expires_at ~= now + 1800s − SKEW_BUFFER_MS (60s) = now + 1740s.
+  // The 60s skew buffer is subtracted in oauth.ts so the persisted
+  // deadline is slightly earlier than Xero's view, prompting an early
+  // refresh rather than a 401 mid-request.
   const expiresMs = tokens.expires_at.getTime();
-  assert.ok(expiresMs >= before + 1800 * 1000 - 50);
-  assert.ok(expiresMs <= afterTs + 1800 * 1000 + 50);
+  assert.ok(expiresMs >= before + 1740 * 1000 - 50);
+  assert.ok(expiresMs <= afterTs + 1740 * 1000 + 50);
 
   assert.ok(capturedBody, 'body captured');
   const parsed = new URLSearchParams(capturedBody);
