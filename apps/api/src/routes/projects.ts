@@ -211,11 +211,29 @@ export function registerProjects(app: FastifyInstance): void {
     // future refactor that drifts the payload shape blows up at the
     // boundary (programming error) rather than landing a malformed
     // event on the chain.
-    const createdPayload = ProjectCreatedPayload.parse({
-      project_id: inserted.id,
-      name: inserted.name,
-      started_at: isoOf(inserted.started_at),
-    });
+    let createdPayload;
+    try {
+      createdPayload = ProjectCreatedPayload.parse({
+        project_id: inserted.id,
+        name: inserted.name,
+        started_at: isoOf(inserted.started_at),
+      });
+    } catch (e) {
+      const err = e as Error;
+      console.error('[POST /v1/projects ProjectCreatedPayload.parse FAILED]', {
+        name: err.name,
+        message: err.message,
+        stack: err.stack?.split('\n').slice(0, 8).join('\n'),
+        // Don't dump full inserted object; show shape:
+        inserted_id_type: typeof inserted.id,
+        inserted_id: inserted.id,
+        inserted_name_type: typeof inserted.name,
+        inserted_name: inserted.name,
+        inserted_started_at_type: typeof inserted.started_at,
+        inserted_started_at: inserted.started_at,
+      });
+      throw e;
+    }
     try {
       await insertEventWithChain({
         tenant_id: tenantId,

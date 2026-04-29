@@ -902,6 +902,13 @@ test('helper getActivityArtefacts: events for a different activity are excluded'
   await clearLinkEvents(ACTIVITY_A_OPEN);
   await clearLinkEvents(ACTIVITY_A_LOCKED);
   const FIXTURE_LINKED_FOR_LOCKED = '00000000-0000-4000-8000-0000000a4082';
+  // NOTE: pass the object directly to postgres-js (no JSON.stringify, no
+  // ::jsonb cast). postgres-js auto-encodes objects as JSON when the
+  // target column is jsonb. The previous form `${JSON.stringify(obj)}::jsonb`
+  // double-encoded — the JSON-string was bound as a TEXT param, then ::jsonb
+  // cast it as a jsonb scalar STRING (not an OBJECT). `payload->>'activity_id'`
+  // then returned NULL because `->>'key'` only extracts from objects.
+  // Confirmed via PR #4 CI diagnostic on test #153 (run 25126567751).
   await privilegedSql`
     INSERT INTO event (
       id, tenant_id, subject_tenant_id, project_id, kind, payload,
@@ -909,11 +916,11 @@ test('helper getActivityArtefacts: events for a different activity are excluded'
     ) VALUES (
       ${FIXTURE_LINKED_FOR_LOCKED}, ${TENANT_A}, ${SUBJECT_A1}, ${PROJECT_A_OPEN},
       'ARTEFACT_LINKED',
-      ${JSON.stringify({
+      ${{
         activity_id: ACTIVITY_A_LOCKED,
         artefact_kind: 'media',
         artefact_id: MEDIA_A,
-      })}::jsonb,
+      }},
       NULL, ${'a4'.padEnd(64, 'd')},
       '2026-04-01T12:00:00Z'::timestamptz, ${ADMIN_USER}
     )
