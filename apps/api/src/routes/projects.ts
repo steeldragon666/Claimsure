@@ -183,6 +183,18 @@ export function registerProjects(app: FastifyInstance): void {
       throw e;
     }
     if (!inserted) {
+      // Diagnostic: this branch fires when RETURNING returns 0 rows even
+      // though INSERT succeeded — typically because the RLS USING policy
+      // can't see the just-inserted row (e.g. GUC unset, NULLIF-resolved
+      // to NULL on the comparison side). The new-row IS in the table; the
+      // route just can't read it back. Surfacing in CI.
+      console.error('[POST /v1/projects RETURNING returned 0 rows]', {
+        tenantId,
+        subject_tenant_id,
+        started_at,
+        ended_at: ended_at ?? null,
+        note: 'INSERT likely succeeded; RLS USING policy filtered RETURNING — verify GUC is propagated within the sql.begin transaction',
+      });
       throw new Error('POST /v1/projects: INSERT returned no row');
     }
 
