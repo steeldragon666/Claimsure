@@ -361,6 +361,11 @@ const P4_KIND_FIXTURES: Array<{ kind: string; payload: Record<string, unknown> }
       line_count: 3,
     },
   },
+  // TODO(B9-emission): when EXPENDITURE_MAPPED, EXPENDITURE_APPORTIONED, and
+  // MAPPING_RULE_{CREATED,UPDATED,ARCHIVED} are added to evidenceKind +
+  // event_kind_valid CHECK, add their canonical-shape fixtures here. The
+  // engine and route layers (B8/B9) already handle them — only the chain
+  // round-trip is gated on the schema enum.
 ];
 
 for (const { kind, payload } of P4_KIND_FIXTURES) {
