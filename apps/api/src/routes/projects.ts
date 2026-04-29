@@ -169,19 +169,37 @@ export function registerProjects(app: FastifyInstance): void {
       name: inserted.name,
       started_at: isoOf(inserted.started_at),
     });
-    await insertEventWithChain({
-      tenant_id: tenantId,
-      subject_tenant_id,
-      project_id: inserted.id,
-      kind: 'PROJECT_CREATED',
-      payload: createdPayload,
-      classification: null,
-      captured_at: new Date(),
-      captured_by_user_id: userId,
-      override_of_event_id: null,
-      override_new_kind: null,
-      override_reason: null,
-    });
+    try {
+      await insertEventWithChain({
+        tenant_id: tenantId,
+        subject_tenant_id,
+        project_id: inserted.id,
+        kind: 'PROJECT_CREATED',
+        payload: createdPayload,
+        classification: null,
+        captured_at: new Date(),
+        captured_by_user_id: userId,
+        override_of_event_id: null,
+        override_new_kind: null,
+        override_reason: null,
+      });
+    } catch (e) {
+      // Temporary diagnostic: surface the underlying error to the client so
+      // CI test output captures the root cause for PR #4 test #337. Will be
+      // reverted once the issue is identified and fixed.
+      const err = e as Error;
+      // Use console.error directly (LOG_LEVEL=silent in CI suppresses pino).
+      console.error('[PROJECT_CREATED chain insert FAILED]', {
+        name: err.name,
+        message: err.message,
+        stack: err.stack?.split('\n').slice(0, 10).join('\n'),
+        payload: createdPayload,
+        tenant_id: tenantId,
+        subject_tenant_id,
+        project_id: inserted.id,
+      });
+      throw e;
+    }
 
     return reply.status(201).send({ project: toApi(inserted) });
   });

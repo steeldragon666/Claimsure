@@ -57,7 +57,7 @@ export async function getActivityArtefacts(
     if (options?.tenantId) {
       await tx`SELECT set_config('app.current_tenant_id', ${options.tenantId}, true)`;
     }
-    return await tx<
+    const result = await tx<
       {
         id: string;
         kind: 'ARTEFACT_LINKED' | 'ARTEFACT_UNLINKED';
@@ -77,6 +77,25 @@ export async function getActivityArtefacts(
          AND payload ->> 'activity_id' = ${activityId}
        ORDER BY captured_at ASC, received_at ASC, id ASC
     `;
+    // Temporary diagnostic for PR #4 test #153 — when zero rows match,
+    // also count via privilegedSql (RLS bypassed) to disambiguate "no rows
+    // exist" from "RLS filtered them out".
+    if (result.length === 0) {
+      const { privilegedSql } = await import('@cpa/db/client');
+      const bypass = await privilegedSql<{ count: string; tenant_id: string }[]>`
+        SELECT COUNT(*)::text AS count, MAX(tenant_id::text) AS tenant_id
+          FROM event
+         WHERE kind IN ('ARTEFACT_LINKED', 'ARTEFACT_UNLINKED')
+           AND payload ->> 'activity_id' = ${activityId}
+      `;
+      console.error('[getActivityArtefacts ZERO_ROWS]', {
+        activityId,
+        appliedTenantId: options?.tenantId ?? '(none)',
+        bypass_count: bypass[0]?.count ?? '0',
+        bypass_tenant_id: bypass[0]?.tenant_id ?? '(null)',
+      });
+    }
+    return result;
   });
 
   // Fold: latest event for each (artefact_kind, artefact_id) wins.
