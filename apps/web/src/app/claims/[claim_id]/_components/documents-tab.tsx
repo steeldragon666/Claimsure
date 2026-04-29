@@ -9,9 +9,9 @@ import { listActivities } from '../_lib/api';
  *
  * Two sections:
  *   1. Claim-level documents — generated from claim aggregate data.
- *      C7 ships the first entry (claim summary). Future entries (C9
- *      apportionment report, C-side cover letter, etc.) will be added
- *      here as TODOs / new <DocumentRow>s as they ship.
+ *      C7 shipped the first entry (claim summary); C9 adds the
+ *      apportionment report. Future entries (cover letter, etc.) go
+ *      here as new <DocumentRow>s.
  *
  *   2. Activity-level documents — one row per activity. Today the only
  *      per-activity download is the activity application PDF (A8). A8
@@ -52,9 +52,12 @@ export function DocumentsTab({ claimId }: { claimId: string }) {
             href={`/v1/claims/${claimId}/summary.pdf`}
             downloadName={`claim-summary-${claimId}.pdf`}
           />
-          {/* TODO(C9): apportionment report — once the apportionment
-              calculation projection ships, add a row here pointing at
-              `/v1/claims/${claimId}/apportionment.pdf`. */}
+          <DocumentRow
+            label="Apportionment report"
+            description="Audit-grade detail: how each expenditure mapped to activities."
+            href={`/v1/claims/${claimId}/apportionment.pdf`}
+            downloadName={`apportionment-${claimId}.pdf`}
+          />
         </ul>
       </section>
 
