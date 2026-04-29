@@ -79,20 +79,42 @@ export async function getActivityArtefacts(
     `;
     // Temporary diagnostic for PR #4 test #153 — when zero rows match,
     // also count via privilegedSql (RLS bypassed) to disambiguate "no rows
-    // exist" from "RLS filtered them out".
+    // exist" from "RLS filtered them out". Expanded to also dump nearby
+    // events for the same activity OR any LINKED/UNLINKED events for the
+    // same tenant — narrows whether the seed landed at all vs landed with
+    // a different shape than expected.
     if (result.length === 0) {
       const { privilegedSql } = await import('@cpa/db/client');
-      const bypass = await privilegedSql<{ count: string; tenant_id: string }[]>`
-        SELECT COUNT(*)::text AS count, MAX(tenant_id::text) AS tenant_id
+      const bypass = await privilegedSql<
+        {
+          id: string;
+          kind: string;
+          tenant_id: string;
+          subject_tenant_id: string;
+          payload_text: string;
+          captured_at: string;
+        }[]
+      >`
+        SELECT id::text, kind, tenant_id::text, subject_tenant_id::text,
+               payload::text AS payload_text, captured_at::text
           FROM event
          WHERE kind IN ('ARTEFACT_LINKED', 'ARTEFACT_UNLINKED')
-           AND payload ->> 'activity_id' = ${activityId}
+            OR payload ->> 'activity_id' = ${activityId}
+         ORDER BY captured_at DESC
+         LIMIT 10
       `;
       console.error('[getActivityArtefacts ZERO_ROWS]', {
         activityId,
         appliedTenantId: options?.tenantId ?? '(none)',
-        bypass_count: bypass[0]?.count ?? '0',
-        bypass_tenant_id: bypass[0]?.tenant_id ?? '(null)',
+        nearby_event_count: bypass.length,
+        nearby_events: bypass.map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          tenant_id: r.tenant_id,
+          subject_tenant_id: r.subject_tenant_id,
+          payload: r.payload_text,
+          captured_at: r.captured_at,
+        })),
       });
     }
     return result;
