@@ -49,7 +49,15 @@ interface RawProjectRow {
   updated_at: Date | string;
 }
 
-const isoOf = (v: Date | string): string => (typeof v === 'string' ? v : v.toISOString());
+// Normalise postgres timestamptz output to strict ISO 8601 with offset.
+// postgres-js returns timestamptz columns either as Date OR as a string
+// in postgres's native format like '2026-04-01 00:00:00+00' (depending
+// on connection config). The native format fails Zod's `.datetime({offset:true})`
+// because of the space-instead-of-T and the `+00` (not `+00:00`).
+// Round-tripping through `new Date(...)` produces strict ISO regardless
+// of input shape — Node's Date accepts both postgres native + ISO formats.
+const isoOf = (v: Date | string): string =>
+  v instanceof Date ? v.toISOString() : new Date(v).toISOString();
 const isoOrNull = (v: Date | string | null): string | null => (v === null ? null : isoOf(v));
 
 const toApi = (r: RawProjectRow): Project => ({
