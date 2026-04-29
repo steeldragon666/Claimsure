@@ -92,8 +92,31 @@ import {
 const BATCH_CAP = 500;
 
 // ---------------------------------------------------------------------------
+// Named errors.
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by `mapSourceToKind` if a row carries a `source` value that
+ * isn't in the closed enum. The DB CHECK constraint
+ * (`expenditure_source_valid`) makes this unreachable in production,
+ * but the named error matches the codebase's convention (B8's
+ * `InvalidRuleError`, etc.) — the global error handler emits
+ * `error: e.name` so a real schema-vs-route drift surfaces with a
+ * distinctive identifier instead of bare `Error`.
+ */
+class UnknownExpenditureSourceError extends Error {
+  override readonly name = 'UnknownExpenditureSourceError';
+}
+
+// ---------------------------------------------------------------------------
 // Row → ExpenditureForRules mapping.
 // ---------------------------------------------------------------------------
+
+// Closed-enum representation of the DB `expenditure.source` column.
+// Mirrored from the `expenditure_source_valid` CHECK constraint so the
+// `mapSourceToKind` exhaustiveness check below catches drift at
+// typecheck time.
+type ExpenditureSource = 'xero_invoice' | 'xero_bank_tx' | 'xero_receipt' | 'manual';
 
 /**
  * Map the DB `source` enum to B8's `ExpenditureKind` enum.
@@ -109,8 +132,13 @@ const BATCH_CAP = 500;
  * here rather than added to B8's type because B8 is a leaf module
  * with its own contract; the API layer is the right place to bridge
  * the storage-vs-engine impedance mismatch.
+ *
+ * NOTE on cross-swimlane consistency: C9 (separate swimlane) maps
+ * `'manual' → 'INVOICE'`. The reconciliation is deliberately deferred
+ * to D-swimlane so it lands in one coordinated commit; B10 keeps
+ * `'manual' → 'RECEIPT'` until then.
  */
-function mapSourceToKind(source: string): ExpenditureKind {
+function mapSourceToKind(source: ExpenditureSource): ExpenditureKind {
   switch (source) {
     case 'xero_invoice':
       return 'INVOICE';
@@ -120,12 +148,17 @@ function mapSourceToKind(source: string): ExpenditureKind {
       return 'RECEIPT';
     case 'manual':
       return 'RECEIPT';
-    default:
-      // The DB CHECK constraint (`expenditure_source_valid`) guarantees
-      // this is unreachable at runtime. Throwing here surfaces a
-      // schema-vs-route drift as a 500 rather than silently producing
-      // wrong matches.
-      throw new Error(`preview-rules: unknown expenditure source '${source}'`);
+    default: {
+      // Exhaustiveness check — the DB CHECK constraint
+      // (`expenditure_source_valid`) guards this at runtime. The
+      // `never` assignment turns any future enum addition into a
+      // typecheck failure here, surfacing schema-vs-route drift at
+      // build time.
+      const _exhaustive: never = source;
+      throw new UnknownExpenditureSourceError(
+        `preview-rules: unknown expenditure source '${String(_exhaustive)}'`,
+      );
+    }
   }
 }
 
@@ -138,17 +171,36 @@ function mapSourceToKind(source: string): ExpenditureKind {
  * already a string and lexicographically comparable; pass through.
  *
  * `account_code` and `description` come from the FIRST line of the
- * expenditure (deterministic ORDER BY id ASC). One-line expenditures
- * (most bank-tx / receipts) get exactly the right values; multi-line
- * invoices use the first line's account_code + description as a
- * representative — the alternative (running the engine N times per
- * line) would balloon the preview surface and isn't what the engine
- * is shaped for. If a future rule needs per-line semantics, B11+
- * adds a `lines: ExpenditureLineForRules[]` field to the engine.
+ * expenditure as a representative source for B8's
+ * `ExpenditureForRules` (which wants both, but they live one table
+ * down on `expenditure_line`).
+ *
+ * "First line" here means `ORDER BY id ASC`, where `id` is
+ * `randomUUID()`. This is *deterministic* (a given expenditure always
+ * picks the same line across runs) but *semantically arbitrary* (UUID
+ * lexicographic order has no relationship to insertion order, line
+ * number, or any human-meaningful property of the line).
+ *
+ * Correctness ceiling: for multi-line expenditures with rules using
+ * `account_code eq` (or `description contains`) conditions, the rule
+ * matches or misses based on which line's UUID happened to sort first.
+ * One-line expenditures (most bank-tx / receipts) are unaffected —
+ * the only line is also the "first line". Multi-line invoices are
+ * the exposed surface, but P4 doesn't surface them heavily and rule
+ * authors typically write conditions against the dominant source
+ * category.
+ *
+ * The proper fix is per-line rule application (`lines:
+ * ExpenditureLineForRules[]` on the engine input — see TODO(B11+) at
+ * the route doc-block for line-level semantics) OR adding a
+ * `line_number` column to `expenditure_line` so this query can ORDER
+ * BY a meaningful field. Both are out of B10's scope.
+ *
+ * TODO(B11+): per-line rule semantics or `line_number` column.
  */
 interface ExpenditureRow {
   id: string;
-  source: string;
+  source: ExpenditureSource;
   vendor_name: string;
   reference: string | null;
   expenditure_date: Date | string;

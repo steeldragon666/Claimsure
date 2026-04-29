@@ -17,6 +17,10 @@ import { buildApp } from '../app.js';
  *   - Single happy paths: 0 rules, 1 match, 2 matches, disabled rule skipped
  *   - Batch happy paths: claim with 3 expenditures, mixed match/no-match
  *   - The summary counts.
+ *   - Engine error surfacing: InvalidRuleError → 500 (raw-SQL inserts a
+ *     malformed apportion rule, bypassing B9's write-time validator).
+ *   - Cap-and-flag: BATCH_CAP+1 expenditures triggers truncated=true and
+ *     limits the response array to BATCH_CAP.
  */
 
 const SESSION_SECRET = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
@@ -536,5 +540,170 @@ test('POST /v1/claims/:id/preview-rules: respects fiscal-year window', async () 
     await app.close();
   } finally {
     await privilegedSql`DELETE FROM expenditure WHERE id = ${OUT_OF_WINDOW}`;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Engine error surfacing — InvalidRuleError throws from B8's eager
+// action validator. The route does NOT catch + reshape; it lets the
+// global error handler emit `error: e.name === 'InvalidRuleError'` at
+// 500. We exercise the path by inserting a malformed rule directly via
+// privilegedSql, bypassing B9's `validateRuleViaEngine` (which would
+// have emitted 400 at the create boundary). This guards the route's
+// promise: "if a malformed rule somehow escaped write-time validation,
+// it surfaces as 500 rather than silently producing wrong matches."
+// ---------------------------------------------------------------------------
+
+test('POST /v1/expenditures/:id/preview-rules: InvalidRuleError from engine surfaces as 500', async () => {
+  // Insert an apportion rule whose percentages sum to 50, not 100.
+  // The Zod schema accepts each allocation (positive finite number)
+  // and the DB has no CHECK on the JSONB shape, so this slips past
+  // every layer except B8's eager validator inside `applyRules`.
+  // The route deliberately does NOT catch InvalidRuleError — it
+  // bubbles to the global error handler, which emits
+  // `error: e.name` (= 'InvalidRuleError') at 500.
+  const RULE_BAD_APPORTION = '00000000-0000-4000-8000-0000000b1061';
+  await privilegedSql`
+    INSERT INTO mapping_rule (
+      tenant_id, id, name, priority, enabled, conditions, action, created_by_user_id
+    ) VALUES (
+      ${TENANT_A}, ${RULE_BAD_APPORTION}, 'Bad apportion (sum 50)', 1, true,
+      ${'[]'}::jsonb,
+      ${JSON.stringify({
+        type: 'apportion',
+        allocations: [
+          { activity_id: ACTIVITY_X, percentage: 30 },
+          { activity_id: ACTIVITY_Y, percentage: 20 }, // sum = 50, invalid
+        ],
+      })}::jsonb,
+      ${ADMIN_USER}
+    )
+  `;
+  try {
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/expenditures/${EXP_ACME_INVOICE}/preview-rules`,
+      cookies: { cpa_session: await adminJwt() },
+    });
+    assert.equal(res.statusCode, 500);
+    const body = res.json<{ error: string; message: string }>();
+    assert.equal(body.error, 'InvalidRuleError');
+    assert.match(body.message, /apportion percentages must sum to 100/i);
+    await app.close();
+  } finally {
+    await privilegedSql`DELETE FROM mapping_rule WHERE id = ${RULE_BAD_APPORTION}`;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Cap-and-flag — the batch endpoint hard-caps at BATCH_CAP=500. When
+// the underlying claim has more, the response carries `truncated: true`
+// and `expenditures.length === 500`. We seed BATCH_CAP+1 rows via a
+// single bulk INSERT (`generate_series`) to keep the test cheap; with
+// no individual round-trips per row, total seed time stays under the
+// other write-heavy tests in this suite.
+// ---------------------------------------------------------------------------
+
+test('POST /v1/claims/:id/preview-rules: cap-and-flag emits truncated=true at BATCH_CAP+1 expenditures', async () => {
+  const BATCH_CAP = 500;
+  // Use a dedicated tenant + subject + claim so the seed doesn't
+  // entangle with the fixture (which already has 2 expenditures inside
+  // FY2025 for SUBJECT_A). Seeding into a fresh subject keeps the
+  // count exact at BATCH_CAP+1 inside the FY window.
+  const TENANT_BATCH = '00000000-0000-4000-8000-0000000b1003';
+  const ADMIN_BATCH = '00000000-0000-4000-8000-0000000b1013';
+  const SUBJECT_BATCH = '00000000-0000-4000-8000-0000000b1023';
+  const CLAIM_BATCH = '00000000-0000-4000-8000-0000000b1043';
+
+  // Cleanup any leftovers from a partial previous run.
+  await privilegedSql`DELETE FROM expenditure_line
+                       WHERE expenditure_id IN (
+                         SELECT id FROM expenditure WHERE tenant_id = ${TENANT_BATCH}
+                       )`;
+  await privilegedSql`DELETE FROM expenditure WHERE tenant_id = ${TENANT_BATCH}`;
+  await privilegedSql`DELETE FROM claim WHERE id = ${CLAIM_BATCH}`;
+  await privilegedSql`DELETE FROM subject_tenant WHERE id = ${SUBJECT_BATCH}`;
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${TENANT_BATCH}`;
+  await sql`DELETE FROM "user" WHERE id = ${ADMIN_BATCH}`;
+  await sql`DELETE FROM tenant WHERE id = ${TENANT_BATCH}`;
+
+  await sql`INSERT INTO tenant (id, name, slug, primary_idp)
+            VALUES (${TENANT_BATCH}, 'Firm Batch B10', 'firm-batch-b10', 'mixed')`;
+  await sql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+            VALUES (${ADMIN_BATCH}, 'b10-batch-admin@example.com', 'microsoft',
+                    'microsoft:b10-batch-admin', 'B10 Batch Admin')`;
+  await privilegedSql`INSERT INTO tenant_user (id, tenant_id, user_id, role, is_default)
+                       VALUES (gen_random_uuid(), ${TENANT_BATCH}, ${ADMIN_BATCH}, 'admin', true)`;
+  await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
+                       VALUES (${SUBJECT_BATCH}, ${TENANT_BATCH}, 'Batch Subject', 'claimant')`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, stage)
+                       VALUES (${CLAIM_BATCH}, ${TENANT_BATCH}, ${SUBJECT_BATCH}, 2025, 'engagement')`;
+
+  // Bulk-insert BATCH_CAP+1 expenditures via generate_series — single
+  // round-trip, ~milliseconds vs minutes for per-row inserts. Dates are
+  // scattered inside the FY2025 window (2024-07-01..2025-06-30) using
+  // a modulo trick so every row is in-window. raw_payload stays empty.
+  await privilegedSql`
+    INSERT INTO expenditure (
+      id, tenant_id, subject_tenant_id, source, source_external_id,
+      vendor_name, reference, expenditure_date, total_amount, currency,
+      raw_payload, voided_at
+    )
+    SELECT
+      gen_random_uuid(),
+      ${TENANT_BATCH},
+      ${SUBJECT_BATCH},
+      'xero_invoice',
+      'inv-batch-' || s,
+      'Batch Vendor',
+      'BATCH-' || s,
+      ('2024-07-01'::date + ((s % 365) || ' days')::interval)::date,
+      '100.00',
+      'AUD',
+      '{}'::jsonb,
+      NULL
+    FROM generate_series(1, ${BATCH_CAP + 1}) AS s
+  `;
+
+  try {
+    // jwtFor() above pins activeTenantId to TENANT_A — sign a JWT
+    // scoped to TENANT_BATCH directly so RLS sees the right tenant.
+    const tenantBatchJwt = await signSession(
+      {
+        sub: ADMIN_BATCH,
+        email: 'b10-batch-admin@example.com',
+        primaryIdp: 'microsoft',
+        activeTenantId: TENANT_BATCH,
+        activeRole: 'admin',
+        availableTenants: [],
+      },
+      SESSION_SECRET,
+      { ttlSeconds: 3600 },
+    );
+
+    const app = buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/claims/${CLAIM_BATCH}/preview-rules`,
+      cookies: { cpa_session: tenantBatchJwt },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json<{
+      expenditures: unknown[];
+      summary: { total_expenditures: number };
+      truncated: boolean;
+    }>();
+    assert.equal(body.truncated, true, 'expected truncated=true at BATCH_CAP+1');
+    assert.equal(body.expenditures.length, BATCH_CAP);
+    assert.equal(body.summary.total_expenditures, BATCH_CAP);
+    await app.close();
+  } finally {
+    await privilegedSql`DELETE FROM expenditure WHERE tenant_id = ${TENANT_BATCH}`;
+    await privilegedSql`DELETE FROM claim WHERE id = ${CLAIM_BATCH}`;
+    await privilegedSql`DELETE FROM subject_tenant WHERE id = ${SUBJECT_BATCH}`;
+    await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${TENANT_BATCH}`;
+    await sql`DELETE FROM "user" WHERE id = ${ADMIN_BATCH}`;
+    await sql`DELETE FROM tenant WHERE id = ${TENANT_BATCH}`;
   }
 });
