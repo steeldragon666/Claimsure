@@ -39,34 +39,20 @@ test.describe('Chain verification badge', () => {
     await cleanupByEmailPrefix('e2e-T31-');
   });
 
-  // TODO(chain-integrity): This test has never had a green CI run since it
-  // was added in f67a895 (2026-04-27). The chain-status API returns
-  // `{ verified: false, first_break_at: 0 }` for the freshly-seeded chain,
-  // meaning verifyChain re-hashes event #0 to a value different from what
-  // seedEvent stored. Investigation pointers (chase down before re-enabling):
-  //
-  //   1. seedEvent (apps/web/e2e/fixtures/test-data.ts:139-149) builds
-  //      EventForHashing OMITTING captured_by_employee_id; verifyChain
-  //      (packages/db/src/chain.ts:175-186) passes
-  //      `captured_by_employee_id: e.captured_by_employee_id ?? null`.
-  //      The canonicaliser branch `e.captured_by_employee_id != null`
-  //      should treat both undefined and null identically — but worth
-  //      proving with an inline assertion that the two canonical strings
-  //      match for an actual seedEvent input.
-  //
-  //   2. classification jsonb roundtrip — the test seeds with a literal
-  //      object using `§` (U+00A7) in statutory_anchor; postgres-js round
-  //      trips this through jsonb. Verify byte-identical canonical output
-  //      after roundtrip.
-  //
-  //   3. captured_at timestamptz precision — seedEvent passes Date with
-  //      ms precision; postgres timestamptz stores microseconds, then
-  //      postgres-js returns a Date. If the ms→μs→Date roundtrip drops
-  //      sub-ms precision the toISOString() would differ.
-  //
-  // This is NOT caused by P4 F1-F12 (no chain.ts changes). Skipping here
-  // so the foundation PR can land green; tracked separately for fix.
-  test.skip('Verified badge → tamper hash → Hash break badge', async ({ page, context }) => {
+  // A9 (2026-04-29): re-enabled. The three hypotheses originally listed
+  // here (H1 captured_by_employee_id undefined-vs-null parity, H2
+  // classification jsonb roundtrip with U+00A7, H3 captured_at ms-precision
+  // roundtrip) are now covered by pure unit tests in
+  // packages/db/src/chain.canonical.test.ts and all pass — the canonicaliser
+  // is byte-stable across all three. The actual root cause was the cluster
+  // of postgres-js v3.4.9 + Node 22 bind-path bugs, addressed by:
+  //   - 5a7eb82 fix(web): seedEvent — bind captured_at as ISO string + ::timestamptz
+  //   - 6fbc9d8 fix(web): seedEvent — explicit JSON.stringify for jsonb params
+  //   - ebd4a52 fix(db,agents): explicit JSON.stringify for jsonb params + privilegedSql in verifyChain
+  // The skip predated those fixes landing on the worktree where this spec
+  // was first added; lifting it now that the data-flow side is correct
+  // and the canonicaliser-side invariants are pinned by unit tests.
+  test('Verified badge → tamper hash → Hash break badge', async ({ page, context }) => {
     const tenantId = await seedTenant('e2e-T31-firm');
     const adminId = await seedUser('e2e-T31-admin@example.com', 'T31 Admin');
     await seedMembership(tenantId, adminId, 'admin', true);
