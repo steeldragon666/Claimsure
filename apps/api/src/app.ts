@@ -17,6 +17,7 @@ import { sessionPlugin } from '@cpa/auth';
 import { registerHostnameTenantResolver } from './middleware/hostname-tenant-resolver.js';
 import { registerActivities } from './routes/activities.js';
 import { registerActivityPdf } from './routes/activity-pdf.js';
+import { registerApplyRules } from './routes/apply-rules.js';
 import { registerArtefactLinks } from './routes/artefact-links.js';
 import { registerGoogleAuth } from './routes/auth/google.js';
 import { registerMicrosoftAuth } from './routes/auth/microsoft.js';
@@ -243,6 +244,10 @@ export function buildApp(): App {
   });
   app.register((instance, _opts, done) => {
     registerActivities(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerApplyRules(instance);
     done();
   });
   app.register((instance, _opts, done) => {
