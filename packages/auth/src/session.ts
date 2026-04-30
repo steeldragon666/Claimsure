@@ -60,15 +60,31 @@ const sessionImpl = (app: FastifyInstance, opts: SessionPluginOptions): Promise<
     // connection returns to the pool. Migration 0003 wraps current_setting
     // in NULLIF so empty-string ('') correctly resolves to NULL → policy
     // excludes rows (correct fail-safe).
+    //
+    // P5 Task 2.1: also set `app.current_firm_id` in parallel. The
+    // audit_log table is firm-scoped (its RLS policy keys on
+    // current_setting('app.current_firm_id')) — see
+    // packages/db/migrations/0022_audit_log_table.sql. In this codebase,
+    // "firm" = `tenant` (the consultant firm / white-label root), so the
+    // firm GUC carries the same uuid as the tenant GUC. Two GUCs (not one)
+    // so future phases can introduce a "platform admin acting as firm X"
+    // stance where the two diverge without retrofitting every audit-log
+    // query. The fail-safe pattern (unset → NULLIF → policy denies all)
+    // mirrors `app.current_tenant_id`.
     if (claims.activeTenantId !== null) {
       await sql`SELECT set_config('app.current_tenant_id', ${claims.activeTenantId}, false)`;
+      await sql`SELECT set_config('app.current_firm_id', ${claims.activeTenantId}, false)`;
     }
   });
 
   app.addHook('onResponse', async () => {
-    // Connection-state hygiene: clear the GUC so a subsequent request that
-    // doesn't set it sees the fail-safe NULL/'' behavior.
+    // Connection-state hygiene: clear both GUCs so a subsequent request
+    // that doesn't set them sees the fail-safe NULL/'' behavior. Both
+    // are reset (not just tenant) to avoid one connection's stale firm
+    // GUC leaking into a later request that runs an audit_log query
+    // without re-setting it — the very leak risk register §3 calls out.
     await sql`SELECT set_config('app.current_tenant_id', '', false)`;
+    await sql`SELECT set_config('app.current_firm_id', '', false)`;
   });
 
   return Promise.resolve();

@@ -25,3 +25,4 @@ export * from './expenditure_mapping_rule.js';
 export * from './mapping_rule.js';
 export * from './xero_contact.js';
 export * from './xero_account.js';
+export * from './audit_log.js';
