@@ -447,12 +447,8 @@ export function registerClaimPdf(app: FastifyInstance): void {
       // Transform DB rows into the @cpa/documents input shape.
       //
       // Source classification: the four DB sources collapse to three
-      // PDF kinds — `xero_invoice`/`manual` → INVOICE, `xero_bank_tx`
-      // → BANK_TX, `xero_receipt` → RECEIPT. Manual entries pass as
-      // INVOICE because that's the closest functional analogue (a
-      // single document, payee, reference) — the regulator-facing PDF
-      // doesn't distinguish "manual vs Xero", just the underlying
-      // document type.
+      // PDF kinds — see `classifyKind` below for the canonical mapping
+      // (and the cross-swimlane note documenting `manual` → `RECEIPT`).
       const expenditures: ApportionmentExpenditure[] = fetched.expenditureRows.map((r) => ({
         id: r.id,
         kind: classifyKind(r.source),
@@ -634,10 +630,11 @@ export function registerClaimPdf(app: FastifyInstance): void {
  * Map the DB-level `source` enum to the PDF's `kind` discriminator.
  *
  * Four DB values collapse to three PDF kinds:
- *   - xero_invoice / manual → INVOICE (manual entries are functionally
- *     invoice-shaped: vendor, reference, single document)
- *   - xero_bank_tx          → BANK_TX
- *   - xero_receipt          → RECEIPT
+ *   - xero_invoice → INVOICE
+ *   - xero_bank_tx → BANK_TX
+ *   - xero_receipt → RECEIPT
+ *   - manual       → RECEIPT (see comment in the `manual` arm below
+ *     for the cross-swimlane reconciliation rationale)
  *
  * The regulator-facing document doesn't distinguish "manual vs Xero"
  * origin — that's an audit-trail concern carried by `source` itself,
@@ -646,7 +643,7 @@ export function registerClaimPdf(app: FastifyInstance): void {
  * `source` is typed as `ExpenditureSource` (the enum from `@cpa/db`)
  * rather than a loose `string`. When a future migration adds a 5th
  * source value, the typecheck fails at this site and forces an
- * explicit decision instead of falling through to INVOICE.
+ * explicit decision.
  */
 function classifyKind(source: ExpenditureSource): 'INVOICE' | 'BANK_TX' | 'RECEIPT' {
   switch (source) {
@@ -655,7 +652,14 @@ function classifyKind(source: ExpenditureSource): 'INVOICE' | 'BANK_TX' | 'RECEI
     case 'xero_receipt':
       return 'RECEIPT';
     case 'xero_invoice':
-    case 'manual':
       return 'INVOICE';
+    case 'manual':
+      // 'manual' source maps to 'RECEIPT' kind. This was reconciled
+      // across swimlanes during the P4 merge — see
+      // docs/decisions/0006-p4-merge-plan.md section 4.1. The
+      // rationale: manual entries are user-captured proof (closer to
+      // a receipt than a vendor-issued invoice). Both this file and
+      // preview-rules.ts must agree.
+      return 'RECEIPT';
   }
 }

@@ -132,11 +132,6 @@ type ExpenditureSource = 'xero_invoice' | 'xero_bank_tx' | 'xero_receipt' | 'man
  * here rather than added to B8's type because B8 is a leaf module
  * with its own contract; the API layer is the right place to bridge
  * the storage-vs-engine impedance mismatch.
- *
- * NOTE on cross-swimlane consistency: C9 (separate swimlane) maps
- * `'manual' → 'INVOICE'`. The reconciliation is deliberately deferred
- * to D-swimlane so it lands in one coordinated commit; B10 keeps
- * `'manual' → 'RECEIPT'` until then.
  */
 function mapSourceToKind(source: ExpenditureSource): ExpenditureKind {
   switch (source) {
@@ -147,6 +142,12 @@ function mapSourceToKind(source: ExpenditureSource): ExpenditureKind {
     case 'xero_receipt':
       return 'RECEIPT';
     case 'manual':
+      // 'manual' source maps to 'RECEIPT' kind. This was reconciled
+      // across swimlanes during the P4 merge — see
+      // docs/decisions/0006-p4-merge-plan.md section 4.1. The
+      // rationale: manual entries are user-captured proof (closer to
+      // a receipt than a vendor-issued invoice). Both this file and
+      // claim-pdf.ts must agree.
       return 'RECEIPT';
     default: {
       // Exhaustiveness check — the DB CHECK constraint
