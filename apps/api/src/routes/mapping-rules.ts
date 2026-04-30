@@ -262,15 +262,16 @@ export function registerMappingRules(app: FastifyInstance): void {
       // audit_log RLS WITH CHECK passes when insertAuditLog runs below.
       // In this codebase firm_id IS the consultant tenant id.
       await tx`SELECT set_config('app.current_firm_id', ${tenantId}, true)`;
-      // Pass conditions/action objects directly (no JSON.stringify, no
-      // ::jsonb cast). postgres-js auto-encodes objects as JSON when the
-      // target column is jsonb. The earlier `${JSON.stringify(...)}::jsonb`
-      // form double-encoded (postgres-js JSON.stringifies AGAIN when the
-      // column hint is jsonb, producing a jsonb scalar STRING `"{...}"`
-      // rather than a jsonb OBJECT). Same root cause as the insertAuditLog
-      // fix in 5a0c4d0; mapping_rule lacked the equivalent CHECK so the bug
-      // was silent here until the audit emission downstream tripped on it.
-      // See packages/db/src/audit-log.ts JSDoc for the long-form rationale.
+      // jsonb column binding: pre-stringify + ::jsonb cast. postgres-js
+      // sends a TEXT param and PG parses the cast on the server. Tested
+      // and working in PR #5 / B9. The previous attempt to switch to
+      // `${object}` form (commit 31d31f2) failed for the conditions
+      // ARRAY case — postgres-js's array-handling intercepts before the
+      // jsonb-OID type serializer runs and falls into a text[]/array
+      // serializer that errors with "Received an instance of Array"
+      // when array elements are objects (CI run 25165786894). The bare
+      // `${object}` pattern works for OBJECT roots (audit_log payload,
+      // event payload) but NOT for arrays of objects.
       const rows = await tx<RawMappingRuleRow[]>`
         INSERT INTO mapping_rule (
           tenant_id, id, name, priority, enabled,
@@ -278,8 +279,8 @@ export function registerMappingRules(app: FastifyInstance): void {
         )
         VALUES (
           ${tenantId}, ${id}, ${body.name}, ${body.priority}, ${enabled},
-          ${body.conditions as unknown as never},
-          ${body.action as unknown as never},
+          ${JSON.stringify(body.conditions)}::jsonb,
+          ${JSON.stringify(body.action)}::jsonb,
           ${userId}
         )
         RETURNING id, tenant_id, name, priority, enabled,
@@ -496,22 +497,23 @@ export function registerMappingRules(app: FastifyInstance): void {
         // the statement single-shot regardless of which subset of
         // fields the patch carried (mirrors brand-config PATCH).
         //
-        // Pass conditions/action objects directly (no JSON.stringify, no
-        // ::jsonb cast) — same fix as the POST path above. Null branch
-        // (when the field isn't in the patch) is bound as NULL, the CASE
-        // selects ELSE so the existing column value is preserved.
+        // jsonb columns: pre-stringify + ::jsonb cast (same pattern as
+        // POST handler above; revert of 31d31f2 which broke arrays).
+        // The conditionsPresent/actionPresent flags drive the CASE so
+        // an absent field preserves the existing column value rather
+        // than overwriting with null/empty-string.
         const conditionsPresent = patch.conditions !== undefined;
-        const conditionsValue = conditionsPresent ? patch.conditions : null;
+        const conditionsJson = conditionsPresent ? JSON.stringify(patch.conditions) : null;
         const actionPresent = patch.action !== undefined;
-        const actionValue = actionPresent ? patch.action : null;
+        const actionJson = actionPresent ? JSON.stringify(patch.action) : null;
 
         const updatedRows = await tx<RawMappingRuleRow[]>`
           UPDATE mapping_rule
              SET name = COALESCE(${patch.name ?? null}, name),
                  priority = COALESCE(${patch.priority ?? null}, priority),
                  enabled = COALESCE(${patch.enabled ?? null}, enabled),
-                 conditions = CASE WHEN ${conditionsPresent} THEN ${conditionsValue as unknown as never} ELSE conditions END,
-                 action = CASE WHEN ${actionPresent} THEN ${actionValue as unknown as never} ELSE action END,
+                 conditions = CASE WHEN ${conditionsPresent} THEN ${conditionsJson}::jsonb ELSE conditions END,
+                 action = CASE WHEN ${actionPresent} THEN ${actionJson}::jsonb ELSE action END,
                  updated_at = NOW()
            WHERE id = ${id} AND tenant_id = ${tenantId}
           RETURNING id, tenant_id, name, priority, enabled,

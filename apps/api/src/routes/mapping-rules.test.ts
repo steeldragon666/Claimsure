@@ -147,14 +147,6 @@ test('POST /v1/mapping-rules: 201 happy path with map_to_activity action', async
       action: { type: 'map_to_activity', activity_id: ACTIVITY_X },
     },
   });
-  // TODO(p5b-debug): remove after CI surfaces the 500 root cause.
-  if (res.statusCode !== 201) {
-    console.error(
-      '[p5b-debug] POST /v1/mapping-rules unexpected status:',
-      res.statusCode,
-      res.body,
-    );
-  }
   assert.equal(res.statusCode, 201);
   const body = res.json<{
     mapping_rule: {
