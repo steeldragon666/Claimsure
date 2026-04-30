@@ -5,6 +5,25 @@ import { CLAIM_STAGES_LITERAL } from './claim.js';
 import { EXPENDITURE_SOURCES_LITERAL } from './expenditure.js';
 
 /**
+ * Maximum page size for paginated list endpoints. Replaces the loose
+ * `200` literal that had drifted across the codebase (the `limit`
+ * argument in web pages, `.max(200)` in Zod query schemas). One
+ * constant means one place to bump the cap when product asks for it.
+ *
+ * Used by:
+ *   - `listEventsQuery.limit` (this file) — server-side validator.
+ *   - `ListMappingRulesQuery.limit` (`mapping-rule.ts`) — server-side
+ *     validator.
+ *   - Web feed callers that explicitly request the max (consultant-feed
+ *     filter tabs, A6 register page, project-timeline tab).
+ *
+ * Bumping this re-tightens both the wire-format upper bound and the
+ * default web-feed page size. Server-side defaults remain `50` so this
+ * is a maximum, not a target.
+ */
+export const LIST_PAGE_SIZE = 200;
+
+/**
  * Evidence-kind taxonomy — the wire-format mirror of the DB column
  * `event.kind`. This is the value `/v1/events` returns for both
  * `kind` and `effective_kind`, so it must accept every kind the DB
@@ -272,7 +291,7 @@ export const listEventsQuery = z
     subject_tenant_id: Uuid.optional(),
     activity_id: Uuid.optional(),
     filter: listEventsFilter.default('all'),
-    limit: z.coerce.number().int().min(1).max(200).default(50),
+    limit: z.coerce.number().int().min(1).max(LIST_PAGE_SIZE).default(50),
     cursor: z.string().optional(),
     // Comma-delimited list of evidenceKind values; transformed to an
     // array of validated kinds. Empty / missing ⇒ undefined (no filter).

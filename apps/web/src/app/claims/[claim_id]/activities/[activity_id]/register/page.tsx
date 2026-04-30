@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { use } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { LIST_PAGE_SIZE } from '@cpa/schemas';
 import { AuthGuard } from '@/components/auth-guard';
 import { REGISTER_KINDS } from '@/lib/summarise-event';
 import { getActivity, listActivityEvents } from '../../_lib/api';
@@ -31,14 +32,10 @@ import { UncertaintyFeed } from './_components/uncertainty-feed';
  * `summariseEvent` helper has unit-test coverage in
  * `_components/summarise-event.test.ts`.
  */
-/**
- * Maximum events fetched in a single register-feed request. 200 is the
- * API max (see `listEventsQuery.limit` in @cpa/schemas) and matches the
- * justification in {@link Inner}'s `feed` query: per-activity event
- * volume is bounded to dozens, not thousands, so we keep this single-
- * page even though the cursor surface is wired up server-side.
- */
-const REGISTER_PAGE_SIZE = 200;
+// Pulls `LIST_PAGE_SIZE` from @cpa/schemas — the canonical pagination
+// cap, also enforced server-side by `listEventsQuery.limit`. Per-activity
+// event volume is bounded to dozens, not thousands, so we keep this
+// single-page even though the cursor surface is wired up server-side.
 
 export default function ActivityRegisterPage({
   params,
@@ -62,18 +59,18 @@ function Inner({ claimId, activityId }: { claimId: string; activityId: string })
   });
 
   // Register feed — server-side filter on activity_id + the seven
-  // register kinds. `REGISTER_PAGE_SIZE` (= 200) is the API max; the
-  // register is bounded by per-activity event volume (dozens, not
-  // thousands) so pagination isn't yet wired up. If a future activity
-  // grows past `REGISTER_PAGE_SIZE` events the cursor surface is
-  // already there to extend.
+  // register kinds. `LIST_PAGE_SIZE` is the API max; the register is
+  // bounded by per-activity event volume (dozens, not thousands) so
+  // pagination isn't yet wired up. If a future activity grows past
+  // `LIST_PAGE_SIZE` events the cursor surface is already there to
+  // extend.
   const feed = useQuery({
     queryKey: ['activity-register', activityId],
     queryFn: () =>
       listActivityEvents({
         activity_id: activityId,
         kinds: [...REGISTER_KINDS],
-        limit: REGISTER_PAGE_SIZE,
+        limit: LIST_PAGE_SIZE,
       }),
   });
 
