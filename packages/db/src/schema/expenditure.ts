@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { claim } from './claim.js';
 import { subjectTenant } from './subject_tenant.js';
 import { tenant } from './tenant.js';
 import { user } from './user.js';
@@ -118,11 +119,20 @@ export const expenditure = pgTable(
     ingestedAt: timestamp('ingested_at', { withTimezone: true }).notNull().defaultNow(),
     // Soft-void marker; voided rows stay queryable but are filtered from apportionment.
     voidedAt: timestamp('voided_at', { withTimezone: true }),
+    // Denormalised FK to the claim this expenditure rolls up into (P5 Theme 1.2).
+    // Nullable because unmapped expenditures are a real, valid state — Xero
+    // sync ingests rows before the consultant has decided which claim they
+    // belong to. Theme 5's mapping engine populates this once the consultant
+    // signs off. No backfill in 0020 — pre-P5 rows stay NULL and Theme 5
+    // assigns them on first review. Identity uniqueness stays on
+    // (tenant_id, source, source_external_id); claim_id is descriptive.
+    claimId: uuid('claim_id').references(() => claim.id),
   },
   (t) => ({
     tenantIdx: index('expenditure_tenant_idx').on(t.tenantId),
     subjectTenantIdx: index('expenditure_subject_tenant_idx').on(t.subjectTenantId),
     sourceIdx: index('expenditure_source_idx').on(t.source),
+    claimIdx: index('expenditure_claim_id_idx').on(t.claimId),
     sourceExternalUnique: uniqueIndex('expenditure_source_external_unique')
       .on(t.tenantId, t.source, t.sourceExternalId)
       .where(sql`${t.sourceExternalId} IS NOT NULL`),

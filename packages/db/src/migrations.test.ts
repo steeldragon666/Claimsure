@@ -165,14 +165,11 @@ test('migration 0019: claims without activities keep project_id NULL', async () 
 
 // ---------------------------------------------------------------------------
 // Task 1.2 — expenditure.claim_id
-// TODO(P5-Task-1.2): flip these test.skip → test once migration 0020 lands.
-// Tests are pre-written so the implementation commit only adds the migration
-// + drizzle column + un-skip — they verify column existence, index, and
-// round-trip behaviour, all of which fail today because the column does
-// not yet exist.
+// Tests verify column existence, index, and round-trip behaviour for
+// migration 0020.
 // ---------------------------------------------------------------------------
 
-test.skip('migration 0020: expenditure.claim_id column exists and is nullable', async () => {
+test('migration 0020: expenditure.claim_id column exists and is nullable', async () => {
   const rows = await privilegedSql<
     { column_name: string; is_nullable: string; data_type: string }[]
   >`
@@ -185,7 +182,7 @@ test.skip('migration 0020: expenditure.claim_id column exists and is nullable', 
   assert.equal(rows[0]!.data_type, 'uuid', 'expenditure.claim_id must be uuid');
 });
 
-test.skip('migration 0020: expenditure_claim_id_idx index exists', async () => {
+test('migration 0020: expenditure_claim_id_idx index exists', async () => {
   const rows = await privilegedSql<{ indexname: string }[]>`
     SELECT indexname FROM pg_indexes
      WHERE tablename = 'expenditure' AND indexname = 'expenditure_claim_id_idx'
@@ -193,7 +190,7 @@ test.skip('migration 0020: expenditure_claim_id_idx index exists', async () => {
   assert.equal(rows.length, 1, 'expenditure_claim_id_idx index must exist');
 });
 
-test.skip('migration 0020: round-trip insert with claim_id set', async () => {
+test('migration 0020: round-trip insert with claim_id set', async () => {
   await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
   await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
                        VALUES (${PROJECT_2_ID}, ${TENANT_ID}, ${SUBJECT_ID},
