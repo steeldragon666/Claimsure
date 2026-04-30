@@ -256,78 +256,70 @@ export function registerMappingRules(app: FastifyInstance): void {
       });
     }
 
-    let __debug_step = 'before-begin';
-    const inserted = await sql
-      .begin(async (tx) => {
-        __debug_step = 'inside-begin';
-        __debug_step = 'set-tenant-guc';
-        await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
-        __debug_step = 'set-firm-guc';
-        // P5 Task 2.4: also set app.current_firm_id inside this tx so the
-        // audit_log RLS WITH CHECK passes when insertAuditLog runs below.
-        // In this codebase firm_id IS the consultant tenant id.
-        await tx`SELECT set_config('app.current_firm_id', ${tenantId}, true)`;
-        __debug_step = 'before-insert';
-        // jsonb column binding: pass values directly, no JSON.stringify or
-        // ::jsonb cast. Mirrors the test-seed pattern in mapping-rules.test.ts
-        // (line 49+) which uses privilegedSql with `${[]}` arrays and `${{}}`
-        // objects directly. Both prior attempts on this branch failed:
-        //   - `${value as unknown as never}` (no cast) → TypeError "Received
-        //     an instance of Array" (CI run 25165786894)
-        //   - `${JSON.stringify(value)}::jsonb` (PR #5 pattern) → TypeError
-        //     "Received an instance of Object" (CI run 25166962997)
-        // The test seeds use the bare untyped form successfully — match that.
-        const rows = await tx<RawMappingRuleRow[]>`
+    const inserted = await sql.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
+      // P5 Task 2.4: also set app.current_firm_id inside this tx so the
+      // audit_log RLS WITH CHECK passes when insertAuditLog runs below.
+      // In this codebase firm_id IS the consultant tenant id.
+      await tx`SELECT set_config('app.current_firm_id', ${tenantId}, true)`;
+      // jsonb columns: bind a JSON-text string with the SQL-side cast
+      // `::text::jsonb`. The double cast pins the parameter's wire type
+      // to TEXT (postgres oid 25), which sidesteps a postgres-js v3.4.9
+      // pitfall: `client.ts` calls `drizzle(sql)`, and drizzle's
+      // postgres-js driver MUTATES `sql.options.serializers[3802]`
+      // (jsonb) to an identity passthrough so its ORM-side query
+      // builder can manage serialization itself. Raw `${value}`
+      // (Object/Array) then trips `Buffer.byteLength` at Bind time
+      // (CI runs 25165786894 / 25167769866; same root cause as the
+      // Date workaround in chain.ts ~line 117). The single-cast form
+      // `${JSON.stringify(value)}::jsonb` works under drizzle (identity
+      // passes the JSON-string unmodified, server parses text→jsonb)
+      // but DOUBLE-ENCODES under privilegedSql (default JSON.stringify
+      // serializer JSON.stringify's the already-JSON string, producing
+      // a jsonb scalar STRING — see audit_log_payload_object CHECK
+      // failure in CI 25160635668). The double-cast `::text::jsonb`
+      // works in both: server infers parameter type as TEXT (25),
+      // postgres-js's text serializer is consistent across both
+      // contexts (default `'' + x` and drizzle identity both no-op on
+      // strings), and Postgres casts text→jsonb after the wire round-
+      // trip. See audit-log.ts for the same idiom.
+      const rows = await tx<RawMappingRuleRow[]>`
         INSERT INTO mapping_rule (
           tenant_id, id, name, priority, enabled,
           conditions, action, created_by_user_id
         )
         VALUES (
           ${tenantId}, ${id}, ${body.name}, ${body.priority}, ${enabled},
-          ${body.conditions as unknown as never},
-          ${body.action as unknown as never},
+          ${JSON.stringify(body.conditions)}::text::jsonb,
+          ${JSON.stringify(body.action)}::text::jsonb,
           ${userId}
         )
         RETURNING id, tenant_id, name, priority, enabled,
                   conditions, action, created_at, created_by_user_id, updated_at
       `;
-        __debug_step = 'after-insert';
-        const row = rows[0];
-        if (!row) {
-          throw new Error('POST /v1/mapping-rules: INSERT returned no row');
-        }
-        __debug_step = 'before-audit';
-        // P5 Task 2.4: emit MAPPING_RULE_CREATED to audit_log. Same tx as
-        // the INSERT above so a downstream failure rolls both back; the
-        // helper riding on `tx` is the contract documented in
-        // @cpa/db/audit-log.ts.
-        await insertAuditLog({
-          tx,
-          firmId: tenantId,
-          kind: 'MAPPING_RULE_CREATED',
-          payload: {
-            mapping_rule_id: row.id,
-            name: row.name,
-            priority: row.priority,
-            conditions: row.conditions,
-            action: row.action,
-          },
-          actorUserId: userId,
-        });
-        __debug_step = 'after-audit';
-        return row;
-      })
-      .catch((e: unknown) => {
-        const err = e as Error;
-        console.error(
-          '[p5b-debug3] sql.begin threw at step:',
-          __debug_step,
-          '— err:',
-          err?.message,
-          err?.stack,
-        );
-        throw e;
+      const row = rows[0];
+      if (!row) {
+        throw new Error('POST /v1/mapping-rules: INSERT returned no row');
+      }
+      // P5 Task 2.4: emit MAPPING_RULE_CREATED to audit_log. Same tx as
+      // the INSERT above so a downstream failure rolls both back; the
+      // helper riding on `tx` is the contract documented in
+      // @cpa/db/audit-log.ts.
+      await insertAuditLog({
+        tx,
+        firmId: tenantId,
+        kind: 'MAPPING_RULE_CREATED',
+        payload: {
+          mapping_rule_id: row.id,
+          name: row.name,
+          priority: row.priority,
+          conditions: row.conditions,
+          action: row.action,
+        },
+        actorUserId: userId,
       });
+      return row;
+    });
 
     return reply.status(201).send({ mapping_rule: toApi(inserted) });
   });
@@ -516,22 +508,22 @@ export function registerMappingRules(app: FastifyInstance): void {
         // the statement single-shot regardless of which subset of
         // fields the patch carried (mirrors brand-config PATCH).
         //
-        // jsonb columns: pass values directly (no JSON.stringify, no
-        // ::jsonb cast) — same pattern as POST handler above. The
-        // conditionsPresent/actionPresent flags drive the CASE so an
-        // absent field preserves the existing column value.
+        // jsonb columns: same `${JSON.stringify(value)}::text::jsonb`
+        // double-cast pattern as the POST above (see commentary there).
+        // For absent fields we pass `null` and let the surrounding CASE
+        // pick the ELSE branch (existing column value).
         const conditionsPresent = patch.conditions !== undefined;
-        const conditionsValue = conditionsPresent ? patch.conditions : null;
+        const conditionsJson = conditionsPresent ? JSON.stringify(patch.conditions) : null;
         const actionPresent = patch.action !== undefined;
-        const actionValue = actionPresent ? patch.action : null;
+        const actionJson = actionPresent ? JSON.stringify(patch.action) : null;
 
         const updatedRows = await tx<RawMappingRuleRow[]>`
           UPDATE mapping_rule
              SET name = COALESCE(${patch.name ?? null}, name),
                  priority = COALESCE(${patch.priority ?? null}, priority),
                  enabled = COALESCE(${patch.enabled ?? null}, enabled),
-                 conditions = CASE WHEN ${conditionsPresent} THEN ${conditionsValue as unknown as never} ELSE conditions END,
-                 action = CASE WHEN ${actionPresent} THEN ${actionValue as unknown as never} ELSE action END,
+                 conditions = CASE WHEN ${conditionsPresent} THEN ${conditionsJson}::text::jsonb ELSE conditions END,
+                 action = CASE WHEN ${actionPresent} THEN ${actionJson}::text::jsonb ELSE action END,
                  updated_at = NOW()
            WHERE id = ${id} AND tenant_id = ${tenantId}
           RETURNING id, tenant_id, name, priority, enabled,
