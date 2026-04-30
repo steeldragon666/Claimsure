@@ -1,4 +1,5 @@
 import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { project } from './project.js';
 import { subjectTenant } from './subject_tenant.js';
 import { tenant } from './tenant.js';
 import { user } from './user.js';
@@ -72,6 +73,14 @@ export const claim = pgTable(
     subjectTenantId: uuid('subject_tenant_id')
       .notNull()
       .references(() => subjectTenant.id),
+    // Denormalised FK to the project this claim covers (P5 Theme 1.1).
+    // Nullable because pre-P5 claims may have no activities yet, in
+    // which case there's no project to point at. Backfill in
+    // 0019_claim_project_id.sql copies activity.project_id for claims
+    // that already have activities; claims without activities stay NULL.
+    // Identity uniqueness remains (subject_tenant_id, fiscal_year);
+    // project_id is descriptive, not part of the claim's natural key.
+    projectId: uuid('project_id').references(() => project.id),
     // Australian fiscal year: 2025 = FY ending June 2025.
     fiscalYear: integer('fiscal_year').notNull(),
     // 7-stage pipeline; CHECK constraint enumerating valid values is
@@ -89,6 +98,7 @@ export const claim = pgTable(
   (t) => ({
     tenantIdx: index('claim_tenant_idx').on(t.tenantId),
     subjectTenantIdx: index('claim_subject_tenant_idx').on(t.subjectTenantId),
+    projectIdx: index('claim_project_id_idx').on(t.projectId),
     subjectTenantFiscalYearUnique: uniqueIndex('claim_subject_tenant_fiscal_year_unique').on(
       t.subjectTenantId,
       t.fiscalYear,
