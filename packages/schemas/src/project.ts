@@ -95,12 +95,22 @@ export const UpdateProjectBody = z
 export type UpdateProjectBody = z.infer<typeof UpdateProjectBody>;
 
 /**
- * GET /v1/projects query — optional `subject_tenant_id` filter.
- * RLS already filters cross-firm rows; this narrows further within
- * a firm to projects belonging to one claimant.
+ * GET /v1/projects query.
+ *
+ * `subject_tenant_id` (optional): narrows further within a firm to
+ *   projects belonging to one claimant. RLS already filters cross-firm
+ *   rows so this is purely a within-firm narrowing.
+ *
+ * `status` (default `'active'`): which archive bucket to return.
+ *   - `'active'` (default): only `archived_at IS NULL` — preserves
+ *     backwards compatibility with callers that don't pass the param.
+ *   - `'archived'`: only `archived_at IS NOT NULL` — for surfaces that
+ *     surface a "View archived" affordance.
+ *   - `'all'`: both — for admin / audit views that need full visibility.
  */
 export const ListProjectsQuery = z.object({
   subject_tenant_id: Uuid.optional(),
+  status: z.enum(['active', 'archived', 'all']).default('active'),
 });
 export type ListProjectsQuery = z.infer<typeof ListProjectsQuery>;
 

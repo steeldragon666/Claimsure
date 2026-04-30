@@ -3,8 +3,14 @@
 // test framework choice (Detox) is committed.
 
 describe('Foundation smoke', () => {
+  // SKIP-POLICY (see /SKIP-POLICY.md): the Detox runner is not yet
+  // wired up — the framework choice is committed but the simulator
+  // config + EAS internal build artefacts arrive in D9-D10. Re-test
+  // trigger: when `apps/mobile/.detoxrc.js` lands and an EAS internal
+  // build is available, drop the `.skip` and run `pnpm --filter
+  // @cpa/mobile e2e`. P5 plan reference (Theme 7 Task 7.2): docs/
+  // plans/2026-04-30-p5-implementation.md. A9 precedent: f111458.
   it.skip('launches app and shows login screen', async () => {
-    // TODO: wire after EAS internal build artefacts available
     // await device.launchApp();
     // await expect(element(by.text('CPA Scribe'))).toBeVisible();
   });

@@ -720,6 +720,99 @@ test('GET /v1/events: missing both subject_tenant_id + activity_id surfaces the 
 });
 
 // =============================================================================
+// GET /v1/events?project_id= filter — Task 4.3.
+//
+// Mirrors Task 4.2's claim filter. Direct predicate on the
+// denormalised `event.project_id` column (every PROJECT_*/ACTIVITY_*/
+// CLAIM_* emitter sets it). Combined with subject_tenant_id, the two
+// narrow independently — passing both is allowed, passing only
+// project_id is rejected by the existing refine (subject_tenant_id
+// or activity_id is still required).
+// =============================================================================
+
+test('GET /v1/events?project_id=X: narrows to events tagged with that project', async () => {
+  // Two events under the same subject_tenant — one tagged with PROJECT_A,
+  // one with no project_id. The filter must include the former and
+  // exclude the latter.
+  await privilegedSql`DELETE FROM event WHERE subject_tenant_id = ${SUBJECT_A1}`;
+  await privilegedSql`DELETE FROM agent_call_cache WHERE agent_name = 'classifier' AND prompt_version = 'classify@1.0.0'`;
+
+  await insertEventWithChain({
+    tenant_id: TENANT_A,
+    subject_tenant_id: SUBJECT_A1,
+    project_id: PROJECT_A,
+    kind: 'PROJECT_CREATED',
+    payload: {
+      project_id: PROJECT_A,
+      name: 'EV Project A',
+      started_at: '2026-01-01T00:00:00.000+00:00',
+    },
+    classification: null,
+    captured_at: new Date('2026-04-15T00:00:00Z'),
+    captured_by_user_id: ADMIN_USER,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  await insertEventWithChain({
+    tenant_id: TENANT_A,
+    subject_tenant_id: SUBJECT_A1,
+    // project_id intentionally omitted — represents a non-project-scoped
+    // event for the same claimant (e.g. a free-text note).
+    kind: 'HYPOTHESIS',
+    payload: { _v: 1, source: 'test-fixture', raw_text: 'no project tag' },
+    classification: null,
+    captured_at: new Date('2026-04-16T00:00:00Z'),
+    captured_by_user_id: ADMIN_USER,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/events?subject_tenant_id=${SUBJECT_A1}&project_id=${PROJECT_A}`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ events: Array<{ kind: string; project_id: string | null }> }>();
+  assert.equal(body.events.length, 1);
+  assert.equal(body.events[0]?.kind, 'PROJECT_CREATED');
+  assert.equal(body.events[0]?.project_id, PROJECT_A);
+  await app.close();
+});
+
+test('GET /v1/events?project_id=X: returns empty list when project has no events', async () => {
+  // PROJECT_B exists in firm B; from a firm-A session, RLS hides it AND
+  // there are no firm-A events tagged with PROJECT_B's id. Result: empty
+  // list (200, not 404 — the route returns whatever's visible under RLS).
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/events?subject_tenant_id=${SUBJECT_A1}&project_id=${PROJECT_B}`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ events: unknown[] }>();
+  assert.equal(body.events.length, 0);
+  await app.close();
+});
+
+test('GET /v1/events?project_id=not-a-uuid: 400', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/events?subject_tenant_id=${SUBJECT_A1}&project_id=not-a-uuid`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 400);
+  const body = res.json<{ error: string }>();
+  assert.equal(body.error, 'invalid_query');
+  await app.close();
+});
+
+// =============================================================================
 // GET /v1/activities/:activity_id/artefacts (T-A6 follow-up)
 // =============================================================================
 

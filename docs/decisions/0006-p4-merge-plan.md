@@ -82,9 +82,12 @@ proof (closer to receipt) than vendor-issued invoices. Apply during C's rebase.
 
 **4.2 Spec doc taxonomy drift**
 
-Any spec doc still referring to `RESULT/EVALUATION/CONCLUSION` should use the
-canonical names from `summarise-event.ts`:
-`OBSERVATION/ITERATION/NEW_KNOWLEDGE`. Doc-only patch alongside C's rebase.
+Any spec doc still referring to the old `OBSERVATION/NEW_KNOWLEDGE/ITERATION`
+predecessors should use the canonical names from `summarise-event.ts`:
+`OBSERVATION`, `NEW_KNOWLEDGE`, `ITERATION`. Doc-only patch alongside C's
+rebase. Verified clean in P5 swimlane D Task 6.1 — the only remaining
+references in `docs/` are this paragraph (descriptive, not prescriptive)
+plus the P5 plan's own description of this task.
 
 ### SHOULD reconcile in coordinated commit on main after merge (P5 candidates)
 

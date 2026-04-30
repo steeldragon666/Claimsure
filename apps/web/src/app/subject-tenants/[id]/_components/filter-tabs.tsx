@@ -2,7 +2,7 @@
 import { useQueries } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';
-import type { ListEventsFilter } from '@cpa/schemas';
+import { LIST_PAGE_SIZE, type ListEventsFilter } from '@cpa/schemas';
 import { cn } from '@/lib/utils';
 import { listEvents } from '../../_lib/api';
 
@@ -43,15 +43,19 @@ export function FilterTabs({ subjectTenantId, active }: FilterTabsProps) {
   const searchParams = useSearchParams();
 
   // One useQueries call → four parallel listEvents requests, one per tab.
-  // We use limit=200 (the API max) so the count is exact for any P2-scale
-  // claimant; cursor pagination would only matter once a claimant exceeds
-  // 200 events on a single filter, which we'll address with a count
-  // endpoint later if it becomes real.
+  // We use LIST_PAGE_SIZE (the API max) so the count is exact for any
+  // P2-scale claimant; cursor pagination would only matter once a
+  // claimant exceeds the cap on a single filter, which we'll address
+  // with a count endpoint later if it becomes real.
   const queries = useQueries({
     queries: TABS.map((tab) => ({
-      queryKey: ['events', subjectTenantId, tab.value, 200],
+      queryKey: ['events', subjectTenantId, tab.value, LIST_PAGE_SIZE],
       queryFn: () =>
-        listEvents({ subject_tenant_id: subjectTenantId, filter: tab.value, limit: 200 }),
+        listEvents({
+          subject_tenant_id: subjectTenantId,
+          filter: tab.value,
+          limit: LIST_PAGE_SIZE,
+        }),
     })),
   });
 

@@ -358,6 +358,65 @@ test('GET /v1/projects: 400 on invalid query (non-uuid subject_tenant_id)', asyn
   await app.close();
 });
 
+// =============================================================================
+// GET /v1/projects?status= filter — Task 4.1.
+//
+// status=active (default) returns only rows with archived_at IS NULL,
+// status=archived returns only rows with archived_at IS NOT NULL, and
+// status=all returns both. Default of 'active' preserves backwards
+// compatibility — callers that already issue GET /v1/projects expect
+// the active-only list and don't pass the param.
+// =============================================================================
+
+test('GET /v1/projects?status=active: returns only non-archived rows (default)', async () => {
+  // PROJECT_PRESEED_A is active, PROJECT_PRESEED_ARCHIVED is archived.
+  // Without ?status= we get the same shape as the explicit ?status=active.
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/projects?status=active',
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ projects: Array<{ id: string; archived_at: string | null }> }>();
+  assert.ok(body.projects.some((p) => p.id === PROJECT_PRESEED_A));
+  assert.ok(!body.projects.some((p) => p.id === PROJECT_PRESEED_ARCHIVED));
+  // Spot-check: every row in this view must have archived_at IS NULL.
+  assert.ok(body.projects.every((p) => p.archived_at === null));
+  await app.close();
+});
+
+test('GET /v1/projects?status=archived: returns only archived rows', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/projects?status=archived',
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ projects: Array<{ id: string; archived_at: string | null }> }>();
+  assert.ok(body.projects.some((p) => p.id === PROJECT_PRESEED_ARCHIVED));
+  assert.ok(!body.projects.some((p) => p.id === PROJECT_PRESEED_A));
+  // Every row must carry a non-null archived_at.
+  assert.ok(body.projects.every((p) => p.archived_at !== null));
+  await app.close();
+});
+
+test('GET /v1/projects?status=all: returns both archived and active rows', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/projects?status=all',
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ projects: Array<{ id: string; archived_at: string | null }> }>();
+  // Both fixtures must appear.
+  assert.ok(body.projects.some((p) => p.id === PROJECT_PRESEED_A));
+  assert.ok(body.projects.some((p) => p.id === PROJECT_PRESEED_ARCHIVED));
+  await app.close();
+});
+
 test('GET /v1/projects/:id: detail returns the project', async () => {
   const app = buildApp();
   const res = await app.inject({

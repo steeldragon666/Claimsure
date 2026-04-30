@@ -25,6 +25,11 @@ const CLAIM_PRESEED_A_ENGAGEMENT = '00000000-0000-4000-8000-0000000a2031';
 const CLAIM_PRESEED_A_REVIEW = '00000000-0000-4000-8000-0000000a2032';
 const CLAIM_PRESEED_A_SUBMITTED = '00000000-0000-4000-8000-0000000a2033';
 const CLAIM_PRESEED_B = '00000000-0000-4000-8000-0000000a2034';
+// Project fixtures for the Task 4.2 ?project_id= filter tests. Two
+// projects under firm A — one tagged on CLAIM_PRESEED_A_ENGAGEMENT,
+// the other untagged so we can assert the filter excludes it.
+const PROJECT_A_TAGGED = '00000000-0000-4000-8000-0000000a2041';
+const PROJECT_A_OTHER = '00000000-0000-4000-8000-0000000a2042';
 
 const TENANT_IDS = [TENANT_A, TENANT_B] as const;
 
@@ -78,18 +83,28 @@ before(async () => {
                        VALUES (${SUBJECT_A1}, ${TENANT_A}, 'A2 Acme Co', 'claimant'),
                               (${SUBJECT_A2}, ${TENANT_A}, 'A2 Beta Ltd', 'claimant'),
                               (${SUBJECT_B1}, ${TENANT_B}, 'A2 Other Corp', 'claimant')`;
+  // Project fixtures for the Task 4.2 project_id filter tests.
+  await privilegedSql`
+    INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+    VALUES
+      (${PROJECT_A_TAGGED}, ${TENANT_A}, ${SUBJECT_A1}, 'A2 Tagged Project',
+       '2024-01-01T00:00:00Z'::timestamptz),
+      (${PROJECT_A_OTHER}, ${TENANT_A}, ${SUBJECT_A1}, 'A2 Other Project',
+       '2024-01-01T00:00:00Z'::timestamptz)
+  `;
   // Pre-seed claim rows for GET / PATCH tests:
-  // - engagement: the canonical starting stage
+  // - engagement: the canonical starting stage; tagged with PROJECT_A_TAGGED
+  //   so the project_id filter test has a non-empty positive case.
   // - review: a mid-pipeline stage (used to test backward transitions)
   // - submitted: a terminal stage (used to test cannot_revert + ausindustry_ref gating)
   // - cross-firm B: used to test 404 cross-firm
   await privilegedSql`
-    INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, stage)
+    INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, stage, project_id)
     VALUES
-      (${CLAIM_PRESEED_A_ENGAGEMENT}, ${TENANT_A}, ${SUBJECT_A1}, 2024, 'engagement'),
-      (${CLAIM_PRESEED_A_REVIEW}, ${TENANT_A}, ${SUBJECT_A2}, 2024, 'review'),
-      (${CLAIM_PRESEED_A_SUBMITTED}, ${TENANT_A}, ${SUBJECT_A1}, 2023, 'submitted'),
-      (${CLAIM_PRESEED_B}, ${TENANT_B}, ${SUBJECT_B1}, 2024, 'engagement')
+      (${CLAIM_PRESEED_A_ENGAGEMENT}, ${TENANT_A}, ${SUBJECT_A1}, 2024, 'engagement', ${PROJECT_A_TAGGED}),
+      (${CLAIM_PRESEED_A_REVIEW}, ${TENANT_A}, ${SUBJECT_A2}, 2024, 'review', NULL),
+      (${CLAIM_PRESEED_A_SUBMITTED}, ${TENANT_A}, ${SUBJECT_A1}, 2023, 'submitted', NULL),
+      (${CLAIM_PRESEED_B}, ${TENANT_B}, ${SUBJECT_B1}, 2024, 'engagement', NULL)
   `;
 });
 
@@ -348,6 +363,59 @@ test('GET /v1/claims: 400 on invalid query (non-uuid subject_tenant_id)', async 
     cookies: { cpa_session: await adminJwt() },
   });
   assert.equal(res.statusCode, 400);
+  await app.close();
+});
+
+// =============================================================================
+// GET /v1/claims?project_id= filter — Task 4.2.
+//
+// Uses the denormalised claim.project_id FK landed by P5 swimlane A
+// Task 1.1. Direct WHERE predicate; the indexed
+// claim_project_id_idx makes this fast even with thousands of claims
+// per firm.
+// =============================================================================
+
+test('GET /v1/claims?project_id=X: narrows to claims tagged with that project', async () => {
+  // CLAIM_PRESEED_A_ENGAGEMENT is tagged with PROJECT_A_TAGGED; the
+  // others (REVIEW, SUBMITTED, cross-firm B) are not tagged. Filter
+  // must include only the tagged one.
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/claims?project_id=${PROJECT_A_TAGGED}`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ claims: Array<{ id: string }> }>();
+  assert.equal(body.claims.length, 1);
+  assert.equal(body.claims[0]?.id, CLAIM_PRESEED_A_ENGAGEMENT);
+  await app.close();
+});
+
+test('GET /v1/claims?project_id=Y: returns empty list when project has no claims', async () => {
+  // PROJECT_A_OTHER exists but no claim is tagged with it.
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/claims?project_id=${PROJECT_A_OTHER}`,
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ claims: unknown[] }>();
+  assert.equal(body.claims.length, 0);
+  await app.close();
+});
+
+test('GET /v1/claims?project_id=not-a-uuid: 400', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/claims?project_id=not-a-uuid',
+    cookies: { cpa_session: await adminJwt() },
+  });
+  assert.equal(res.statusCode, 400);
+  const body = res.json<{ error: string }>();
+  assert.equal(body.error, 'invalid_query');
   await app.close();
 });
 

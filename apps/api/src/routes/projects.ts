@@ -285,34 +285,40 @@ export function registerProjects(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({
         error: 'invalid_query',
-        message: 'Query must match { subject_tenant_id?: uuid }',
+        message:
+          "Query must match { subject_tenant_id?: uuid, status?: 'active' | 'archived' | 'all' }",
         requestId: req.id,
       });
     }
-    const { subject_tenant_id } = parsed.data;
+    const { subject_tenant_id, status } = parsed.data;
     const tenantId = req.user!.tenantId!;
 
     return await sql.begin(async (tx) => {
       await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
-      // Filter archived_at IS NULL by default — archived projects stay
-      // queryable for prior-year claims but are filtered from default
-      // active lists (per the schema docstring on `project.archived_at`).
-      const rows = subject_tenant_id
-        ? await tx<RawProjectRow[]>`
-            SELECT id, tenant_id, subject_tenant_id, name, description,
-                   started_at, ended_at, archived_at, created_at, updated_at
-              FROM project
-             WHERE subject_tenant_id = ${subject_tenant_id}
-               AND archived_at IS NULL
-             ORDER BY started_at ASC
-          `
-        : await tx<RawProjectRow[]>`
-            SELECT id, tenant_id, subject_tenant_id, name, description,
-                   started_at, ended_at, archived_at, created_at, updated_at
-              FROM project
-             WHERE archived_at IS NULL
-             ORDER BY started_at ASC
-          `;
+      // status=active (default) → archived_at IS NULL,
+      // status=archived       → archived_at IS NOT NULL,
+      // status=all            → no archive filter.
+      // Default of 'active' preserves backwards compatibility — callers
+      // without ?status= continue to see the same active-only list as
+      // before this filter landed.
+      const archivedClause =
+        status === 'active'
+          ? tx`AND archived_at IS NULL`
+          : status === 'archived'
+            ? tx`AND archived_at IS NOT NULL`
+            : tx``;
+      const subjectClause = subject_tenant_id
+        ? tx`AND subject_tenant_id = ${subject_tenant_id}`
+        : tx``;
+      const rows = await tx<RawProjectRow[]>`
+        SELECT id, tenant_id, subject_tenant_id, name, description,
+               started_at, ended_at, archived_at, created_at, updated_at
+          FROM project
+         WHERE 1 = 1
+               ${subjectClause}
+               ${archivedClause}
+         ORDER BY started_at ASC
+      `;
       return { projects: rows.map(toApi) };
     });
   });

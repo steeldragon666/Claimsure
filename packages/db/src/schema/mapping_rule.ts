@@ -9,68 +9,28 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
+import type { RuleAction, RuleCondition } from '@cpa/schemas';
 import { tenant } from './tenant.js';
 import { user } from './user.js';
 
 /**
- * jsonb shape annotations — mirror B8's `RuleCondition` / `RuleAction`
- * discriminated unions (in `@cpa/integrations/xero-accounting/mapping-rules`).
+ * jsonb shape annotations — pulled from the canonical types in
+ * `@cpa/schemas/mapping-rule` (Task 3.1).
  *
- * **Layering**: `@cpa/db` cannot import from `@cpa/integrations` (would
- * invert the dep graph — integrations depends on db). Same situation as
- * `@cpa/schemas`. The types are redeclared here verbatim and a
- * TypeScript identity assertion in `apps/api/src/routes/mapping-rules.ts`
- * pins them against B8's runtime types — drift surfaces at typecheck
- * time in the API package.
+ * **History**: prior to Task 3.1, these shapes were inlined in this file
+ * because @cpa/db couldn't import from @cpa/integrations (the canonical
+ * home at the time) without inverting the dep graph (integrations
+ * depends on db). Task 3.1 moved the canonical types down into the leaf
+ * package @cpa/schemas, which both db and integrations already depend
+ * on, so the cycle dissolves. See `packages/db/README.md` for the
+ * cycle analysis.
  *
  * **Why annotate at all?** Drizzle's `$type<T>()` gives narrowing on
  * reads/writes through the ORM. The route layer reads from postgres-js
  * directly (not through the ORM), so the annotation is mostly
  * documentation — but it ensures any future drizzle-orm consumer of
  * this column gets the right shape automatically.
- *
- * TODO(P4-followup): consolidate RuleConditionShape / RuleActionShape
- * via a shared @cpa/types meta-package. Currently inlined here to
- * avoid the db -> integrations dep cycle (integrations imports from
- * db; importing types FROM integrations into db would create a cycle).
- * The redeclaration must stay byte-identical to
- * packages/integrations/src/xero-accounting/mapping-rules/types.ts;
- * runtime safety is via Zod + B8's evaluateRule.
  */
-type RuleConditionShape =
-  | {
-      field: 'contact_name';
-      op: 'eq' | 'contains' | 'matches';
-      value: string;
-      case_insensitive?: boolean;
-    }
-  | {
-      field: 'reference';
-      op: 'eq' | 'contains' | 'matches';
-      value: string;
-      case_insensitive?: boolean;
-    }
-  | {
-      field: 'description';
-      op: 'eq' | 'contains' | 'matches';
-      value: string;
-      case_insensitive?: boolean;
-    }
-  | { field: 'account_code'; op: 'eq'; value: string }
-  | { field: 'account_code'; op: 'in'; value: readonly string[] }
-  | { field: 'amount'; op: 'gt' | 'gte' | 'lt' | 'lte'; value: number }
-  | { field: 'amount'; op: 'between'; value: readonly [number, number] }
-  | { field: 'kind'; op: 'eq'; value: 'INVOICE' | 'BANK_TX' | 'RECEIPT' }
-  | { field: 'kind'; op: 'in'; value: readonly ('INVOICE' | 'BANK_TX' | 'RECEIPT')[] }
-  | { field: 'currency'; op: 'eq'; value: string }
-  | { field: 'currency'; op: 'in'; value: readonly string[] }
-  | { field: 'date'; op: 'before' | 'after'; value: string }
-  | { field: 'date'; op: 'between'; value: readonly [string, string] };
-
-type RuleActionShape =
-  | { type: 'map_to_activity'; activity_id: string }
-  | { type: 'apportion'; allocations: ReadonlyArray<{ activity_id: string; percentage: number }> }
-  | { type: 'flag_for_review'; reason: string };
 
 /**
  * Expenditure-to-activity mapping rule (T-B9).
@@ -130,8 +90,8 @@ export const mappingRule = pgTable(
     enabled: boolean('enabled').notNull().default(true),
     // jsonb arrays/objects shaped per B8. Empty conditions array is the
     // "match everything" catch-all (vacuous truth — see B8's README).
-    conditions: jsonb('conditions').$type<readonly RuleConditionShape[]>().notNull(),
-    action: jsonb('action').$type<RuleActionShape>().notNull(),
+    conditions: jsonb('conditions').$type<readonly RuleCondition[]>().notNull(),
+    action: jsonb('action').$type<RuleAction>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     createdByUserId: uuid('created_by_user_id')
       .notNull()

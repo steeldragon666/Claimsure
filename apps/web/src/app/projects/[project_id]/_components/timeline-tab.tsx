@@ -1,6 +1,6 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
-import type { Project } from '@cpa/schemas';
+import { LIST_PAGE_SIZE, type Project } from '@cpa/schemas';
 import { KindChip } from '@/app/subject-tenants/[id]/_components/kind-chip';
 import { useWhoami } from '@/hooks/use-whoami';
 import { PROJECT_TIMELINE_KINDS, summariseEvent } from '@/lib/summarise-event';
@@ -60,7 +60,7 @@ export function TimelineTab({ project }: TimelineTabProps) {
         {
           project,
           kinds: [...PROJECT_TIMELINE_KINDS],
-          limit: 200,
+          limit: LIST_PAGE_SIZE,
         },
         signal,
       ),

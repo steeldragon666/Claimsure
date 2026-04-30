@@ -122,5 +122,9 @@ export const ListClaimsQuery = z.object({
   stage: ClaimStage.optional(),
   assignee: Uuid.optional(),
   fiscal_year: z.coerce.number().int().optional(),
+  // P5 swimlane D Task 4.2: narrow to claims rolling up a single
+  // project. Uses the denormalised claim.project_id FK landed by P5
+  // swimlane A Task 1.1.
+  project_id: Uuid.optional(),
 });
 export type ListClaimsQuery = z.infer<typeof ListClaimsQuery>;

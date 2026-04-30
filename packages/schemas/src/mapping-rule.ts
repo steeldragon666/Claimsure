@@ -2,17 +2,26 @@ import { z } from 'zod';
 import { Iso8601, Uuid } from './primitives.js';
 
 /**
- * Wire-format Zod schemas for the mapping_rule REST surface (T-B9).
+ * Wire-format Zod schemas + canonical TypeScript types for the
+ * mapping_rule REST surface (T-B9 + Task 3.1).
  *
- * **Layering**: `@cpa/schemas` is a leaf package (zod only, no @cpa/*
- * deps). `@cpa/integrations` depends on `@cpa/schemas` for Zod types,
- * so the canonical TypeScript types `RuleCondition` / `RuleAction` in
- * B8 cannot be imported here (would invert the layering and create a
- * cycle). Instead the Zod shapes here are the source of truth at the
- * wire boundary, and a TypeScript identity assertion in
- * `apps/api/src/routes/mapping-rules.ts` pins them against B8's runtime
- * types — drift surfaces at typecheck time in the API package without
- * polluting the schemas-package dependency graph.
+ * **Layering** (post-Task 3.1):
+ *
+ *   - `@cpa/schemas` is the leaf package. It owns BOTH the Zod wire
+ *     schemas AND the canonical TypeScript types `MappingRule`,
+ *     `RuleCondition`, `RuleAction`, `RuleMatch`,
+ *     `ExpenditureForRules`, `ExpenditureKind`.
+ *   - `@cpa/db` and `@cpa/integrations` both depend on `@cpa/schemas`
+ *     and import these types directly — no more inline duplicates in
+ *     either package.
+ *   - The previous arrangement put the canonical types in
+ *     `@cpa/integrations/xero-accounting/mapping-rules/types.ts` and
+ *     redeclared them inline in `@cpa/db`. That couldn't be fixed by
+ *     moving the types to `@cpa/db` (would have given `@cpa/integrations
+ *     -> @cpa/db -> ... -> @cpa/integrations` cycles via the schema
+ *     re-exports), so the canonical home is here in the leaf package
+ *     where every layer can reach them. See `packages/db/README.md`
+ *     for the cycle analysis that drove the decision.
  *
  * **Two layers of defence at the API boundary**:
  *
@@ -22,7 +31,185 @@ import { Iso8601, Uuid } from './primitives.js';
  *      != 100, regex compile failure, inverted between range. The route
  *      layer triggers it by calling `evaluateRule(rule, dummy)` against
  *      a synthetic expenditure before the INSERT/UPDATE.
+ *
+ * The Zod shapes and the TypeScript types are pinned against each other
+ * by the identity assertion in `apps/api/src/routes/mapping-rules.ts`,
+ * which lives in the API package because that is where both
+ * `@cpa/schemas` (for Zod) and `@cpa/integrations` (for B8's runtime
+ * engine) are in scope.
  */
+
+// ===========================================================================
+// Canonical TypeScript types (Task 3.1).
+//
+// Moved verbatim from
+// packages/integrations/src/xero-accounting/mapping-rules/types.ts —
+// byte-identical at move time. The integrations package now re-exports
+// these for backwards compatibility with existing call sites.
+// ===========================================================================
+
+/**
+ * Discriminator on `ExpenditureForRules.kind`. Mirrors the three Xero
+ * resources the B-swimlane syncs (Invoices, BankTransactions, Receipts).
+ * Add new kinds here only when a new sync resource lands.
+ */
+export type ExpenditureKind = 'INVOICE' | 'BANK_TX' | 'RECEIPT';
+
+/**
+ * Subset of expenditure columns the engine evaluates against. Kept
+ * intentionally narrow:
+ *
+ *   - The engine is a pure function that does NOT need the full
+ *     expenditure row; passing only the fields we read keeps test
+ *     fixtures lean and the contract honest.
+ *   - All free-text fields are nullable because Xero allows them to be
+ *     omitted on the wire (e.g. a bank transaction may have no
+ *     `Reference`).
+ *   - `amount` is always a positive number, expressed in the
+ *     expenditure's own currency. Sign normalisation (Xero's negative
+ *     credit-note amounts, etc.) is the syncer's job, not the engine's.
+ *   - `currency` is ISO 4217 (e.g. `'AUD'`, `'USD'`). The engine treats
+ *     it as an opaque string — comparison is case-sensitive against the
+ *     value the caller writes.
+ *   - `date` is an ISO date string (`YYYY-MM-DD`). Lexicographic string
+ *     comparison is correct for the ISO format and avoids dragging in
+ *     `Date` parsing (and its timezone footguns) inside the engine.
+ */
+export type ExpenditureForRules = {
+  id: string;
+  kind: ExpenditureKind;
+  contact_name: string | null;
+  reference: string | null;
+  account_code: string | null;
+  /** Positive number in the expenditure's currency. */
+  amount: number;
+  /** ISO 4217 currency code (e.g. 'AUD'). */
+  currency: string;
+  description: string | null;
+  /** ISO date string (`YYYY-MM-DD`). */
+  date: string;
+};
+
+/**
+ * A single condition on a rule. Within a rule, ALL conditions must hold
+ * (AND semantics — see `evaluateRule`).
+ *
+ * Field/op pairings are intentionally restricted via the discriminated
+ * union: `amount between` is a tuple, `account_code in` accepts a string
+ * array, etc. The engine relies on this narrowing — you cannot construct
+ * a `{ field: 'amount', op: 'eq', value: 'foo' }` and pass typecheck.
+ *
+ * `case_insensitive` only applies to string-comparison ops (`eq`,
+ * `contains`, `matches` on `contact_name | reference | description`).
+ * Setting it on a non-string op is silently ignored — see the README
+ * for the rationale and the test that pins this behaviour.
+ *
+ * `matches` op semantics: `value` is a regex source string (no flags).
+ * The engine compiles it with `new RegExp(value, flags)` where `flags`
+ * is `'i'` when `case_insensitive: true`, `''` otherwise. An invalid
+ * regex throws `InvalidRuleError` at evaluation time — we don't pre-
+ * validate at construction because rules may arrive untrusted from the
+ * (B9) API layer; the engine is the validation point.
+ */
+export type RuleCondition =
+  | {
+      field: 'contact_name';
+      op: 'eq' | 'contains' | 'matches';
+      value: string;
+      case_insensitive?: boolean;
+    }
+  | {
+      field: 'reference';
+      op: 'eq' | 'contains' | 'matches';
+      value: string;
+      case_insensitive?: boolean;
+    }
+  | {
+      field: 'description';
+      op: 'eq' | 'contains' | 'matches';
+      value: string;
+      case_insensitive?: boolean;
+    }
+  | { field: 'account_code'; op: 'eq'; value: string }
+  | { field: 'account_code'; op: 'in'; value: readonly string[] }
+  | { field: 'amount'; op: 'gt' | 'gte' | 'lt' | 'lte'; value: number }
+  | { field: 'amount'; op: 'between'; value: readonly [number, number] }
+  | { field: 'kind'; op: 'eq'; value: ExpenditureKind }
+  | { field: 'kind'; op: 'in'; value: readonly ExpenditureKind[] }
+  | { field: 'currency'; op: 'eq'; value: string }
+  | { field: 'currency'; op: 'in'; value: readonly string[] }
+  | { field: 'date'; op: 'before' | 'after'; value: string }
+  | { field: 'date'; op: 'between'; value: readonly [string, string] };
+
+/**
+ * The action a matching rule prescribes. Three shapes:
+ *
+ *   - `map_to_activity`: 100% of the expenditure goes to one activity.
+ *   - `apportion`: split across N activities; percentages must sum to
+ *     100 (±0.001 float tolerance) and every percentage must be > 0.
+ *     Validated at evaluation time — `evaluateRule` throws
+ *     `InvalidRuleError` on a malformed apportion.
+ *   - `flag_for_review`: the engine surfaces a human-readable reason;
+ *     B10's job will route these to the operator review queue rather
+ *     than emitting `EXPENDITURE_LINE_MAPPED` directly.
+ */
+export type RuleAction =
+  | { type: 'map_to_activity'; activity_id: string }
+  | {
+      type: 'apportion';
+      allocations: ReadonlyArray<{ activity_id: string; percentage: number }>;
+    }
+  | { type: 'flag_for_review'; reason: string };
+
+/**
+ * The full rule. `priority` is ascending — LOWER number = HIGHER
+ * priority (matches the convention C5 already uses for sync ordering).
+ * Equal priorities are tie-broken by `id` ascending lexicographically;
+ * `applyRules` performs that stable sort once at the start of each call.
+ *
+ * `enabled: false` rules are silently skipped — they are NOT considered
+ * for matching at all and produce no `RuleMatch`.
+ *
+ * `tenant_id` is carried on the rule (vs. enforced by a parameter)
+ * because B9 will store rules in a tenant-scoped table and the engine
+ * is happiest when each rule is self-describing. B8 itself does NOT do
+ * tenant-scoping — `applyRules` evaluates whatever you pass it. The
+ * caller (B10's job) is responsible for selecting only the current
+ * tenant's rules out of the DB.
+ */
+export type MappingRule = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  /** Lower number = higher priority. */
+  priority: number;
+  enabled: boolean;
+  /** AND semantics — all conditions must hold for the rule to match. */
+  conditions: readonly RuleCondition[];
+  action: RuleAction;
+};
+
+/**
+ * A successful match returned from `evaluateRule` / `applyRules`. We
+ * surface only the fields B10 will need to emit
+ * `EXPENDITURE_LINE_MAPPED` — `rule_id` for traceability, `rule_name`
+ * for human readability in audit logs, `priority` so the consumer can
+ * tie-break externally if it chooses, and `action` so the consumer can
+ * apply the side effect without re-querying the rule.
+ *
+ * Notably absent: the matched conditions themselves and the
+ * expenditure id. The consumer already holds both at call time and
+ * including them would balloon the payload for the high-volume B10
+ * job. If we need them later for explainability, add a separate
+ * `explainRule(rule, expenditure) -> Reason[]` API rather than widen
+ * this shape.
+ */
+export type RuleMatch = {
+  rule_id: string;
+  rule_name: string;
+  priority: number;
+  action: RuleAction;
+};
 
 // ---------------------------------------------------------------------------
 // Condition schemas — one per (field, op) pair B8 accepts. The outer
