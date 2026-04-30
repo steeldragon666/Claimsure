@@ -1,0 +1,37 @@
+-- DO NOT REGENERATE THIS MIGRATION VIA `pnpm --filter @cpa/db generate`.
+-- Hand-authored migration: adds `expenditure_line.line_number`
+-- (NOT NULL DEFAULT 1) and a unique index on (expenditure_id,
+-- line_number). drizzle-kit emits equivalent DDL, but pinning this file
+-- preserves the rationale linking the column to the preview-rules
+-- ordering fix.
+--
+-- ============================================================
+-- P5 swimlane A — Theme 1 (Task 1.3) — expenditure_line.line_number
+-- ============================================================
+-- Per `docs/plans/2026-04-30-p5-implementation.md` Theme 1 (Wide-scope
+-- denormalization): the multi-line picker in apps/api preview-rules
+-- currently uses `ORDER BY id ASC` to deterministically pick the first
+-- line of an expenditure. UUID lexicographic order is deterministic but
+-- semantically arbitrary — it doesn't track insertion order, line
+-- number on the source invoice, or any human-meaningful ordering.
+--
+-- This column lets sync paths (Xero) and manual route handlers stamp a
+-- 1-based line number on each row at insert time, so downstream
+-- consumers (preview-rules, expenditure schedule UI, audit reports)
+-- can order by an authored, semantically-meaningful sequence.
+--
+-- Why NOT NULL DEFAULT 1: backfills every existing row to line_number=1
+-- (existing data is single-line in practice — see expenditure_line.ts
+-- header). The unique index on (expenditure_id, line_number) only
+-- bites when multi-line expenditures land going forward; backfilled
+-- single-line rows trivially satisfy uniqueness.
+--
+-- Per-expenditure uniqueness: a given expenditure cannot have two lines
+-- with the same line_number. Across expenditures, line_number=1 is
+-- common (every single-line expenditure carries it), so uniqueness must
+-- be scoped to (expenditure_id, line_number), not on line_number alone.
+-- ============================================================
+
+ALTER TABLE "expenditure_line" ADD COLUMN "line_number" integer NOT NULL DEFAULT 1;
+--> statement-breakpoint
+CREATE UNIQUE INDEX "expenditure_line_number_unique" ON "expenditure_line" ("expenditure_id", "line_number");

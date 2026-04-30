@@ -175,28 +175,26 @@ function mapSourceToKind(source: ExpenditureSource): ExpenditureKind {
  * `ExpenditureForRules` (which wants both, but they live one table
  * down on `expenditure_line`).
  *
- * "First line" here means `ORDER BY id ASC`, where `id` is
- * `randomUUID()`. This is *deterministic* (a given expenditure always
- * picks the same line across runs) but *semantically arbitrary* (UUID
- * lexicographic order has no relationship to insertion order, line
- * number, or any human-meaningful property of the line).
+ * "First line" here means `ORDER BY line_number ASC, id ASC` (P5
+ * Theme 1.3). `line_number` is the authored 1-based sequence stamped
+ * by sync paths and manual route handlers; `id` is the UUID
+ * tie-breaker for legacy rows that were backfilled to line_number=1
+ * (and any future rows that share a line_number for the same
+ * expenditure, though the unique index on (expenditure_id,
+ * line_number) prevents that going forward).
  *
- * Correctness ceiling: for multi-line expenditures with rules using
- * `account_code eq` (or `description contains`) conditions, the rule
- * matches or misses based on which line's UUID happened to sort first.
- * One-line expenditures (most bank-tx / receipts) are unaffected —
- * the only line is also the "first line". Multi-line invoices are
- * the exposed surface, but P4 doesn't surface them heavily and rule
- * authors typically write conditions against the dominant source
- * category.
+ * Correctness ceiling (now reduced, but not eliminated): for multi-line
+ * expenditures with rules using `account_code eq` (or `description
+ * contains`) conditions, the rule matches or misses based on which
+ * line is line_number=1. Sync paths now stamp this meaningfully (the
+ * first line of the upstream invoice), so for Xero-sourced data this
+ * is a real, documented choice rather than an arbitrary UUID order.
  *
- * The proper fix is per-line rule application (`lines:
+ * The proper fix remains per-line rule application (`lines:
  * ExpenditureLineForRules[]` on the engine input — see TODO(B11+) at
- * the route doc-block for line-level semantics) OR adding a
- * `line_number` column to `expenditure_line` so this query can ORDER
- * BY a meaningful field. Both are out of B10's scope.
+ * the route doc-block for line-level semantics).
  *
- * TODO(B11+): per-line rule semantics or `line_number` column.
+ * TODO(B11+): per-line rule semantics so all lines participate.
  */
 interface ExpenditureRow {
   id: string;
@@ -335,7 +333,7 @@ export function registerPreviewRules(app: FastifyInstance): void {
             SELECT account_code, description
               FROM expenditure_line
              WHERE expenditure_id = e.id
-             ORDER BY id ASC
+             ORDER BY line_number ASC, id ASC
              LIMIT 1
           ) l ON TRUE
           WHERE e.id = ${id} AND e.tenant_id = ${tenantId}
@@ -464,7 +462,7 @@ export function registerPreviewRules(app: FastifyInstance): void {
             SELECT account_code, description
               FROM expenditure_line
              WHERE expenditure_id = e.id
-             ORDER BY id ASC
+             ORDER BY line_number ASC, id ASC
              LIMIT 1
           ) l ON TRUE
           WHERE e.tenant_id = ${tenantId}

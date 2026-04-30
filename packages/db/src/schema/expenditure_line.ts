@@ -1,4 +1,4 @@
-import { index, integer, numeric, pgTable, text, uuid } from 'drizzle-orm/pg-core';
+import { index, integer, numeric, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { expenditure } from './expenditure.js';
 
 /**
@@ -74,8 +74,21 @@ export const expenditureLine = pgTable(
     amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
     // Apportionment % (0-100); null = unmapped. CHECK 0-100 hand-authored in F4.
     rdPercent: integer('rd_percent'),
+    // 1-based authored line number (P5 Theme 1.3). NOT NULL DEFAULT 1 so
+    // the migration backfills every existing row to 1 (existing data is
+    // single-line in practice). Sync paths and manual route handlers
+    // stamp a per-line sequence at insert time so downstream consumers
+    // (preview-rules multi-line picker, expenditure schedule UI, audit
+    // reports) can order by an authored, semantically-meaningful sequence
+    // instead of UUID lexicographic order. Per-expenditure uniqueness is
+    // enforced by `lineNumberUnique` below.
+    lineNumber: integer('line_number').notNull().default(1),
   },
   (t) => ({
     expenditureIdx: index('expenditure_line_expenditure_idx').on(t.expenditureId),
+    lineNumberUnique: uniqueIndex('expenditure_line_number_unique').on(
+      t.expenditureId,
+      t.lineNumber,
+    ),
   }),
 );
