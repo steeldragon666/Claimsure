@@ -241,7 +241,7 @@ export function registerEvents(app: FastifyInstance): void {
         requestId: req.id,
       });
     }
-    const { subject_tenant_id, activity_id, filter, limit, cursor, kind } = parsed.data;
+    const { subject_tenant_id, activity_id, project_id, filter, limit, cursor, kind } = parsed.data;
     const tenantId = req.user!.tenantId!;
 
     // Decode the opaque cursor. Forward-pagination only (older first → next).
@@ -346,6 +346,14 @@ export function registerEvents(app: FastifyInstance): void {
       const activityClause =
         activity_id !== undefined ? tx`AND payload ->> 'activity_id' = ${activity_id}` : tx``;
 
+      // Project-scoped filter: events whose denormalised project_id
+      // column matches. Direct column predicate (not a payload->>
+      // extraction) — every emitter that knows the project sets this
+      // column at insert time, so the index path is fast.
+      // Mirrors Task 4.1's status filter and Task 4.2's claim project
+      // filter — same flag, same shape, same `tx`` no-op when absent.
+      const projectClause = project_id !== undefined ? tx`AND project_id = ${project_id}` : tx``;
+
       // Kind filter: when present, narrow to the explicit list. We
       // filter on `kind` (the canonical column) rather than
       // `effective_kind` because the register feed wants chain rows of
@@ -359,6 +367,7 @@ export function registerEvents(app: FastifyInstance): void {
            ${cursorClause}
            ${filterClause}
            ${activityClause}
+           ${projectClause}
            ${kindClause}
          ORDER BY captured_at DESC, received_at DESC, id DESC
          LIMIT ${fetchN}

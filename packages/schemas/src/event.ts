@@ -276,6 +276,11 @@ export type ListEventsFilter = z.infer<typeof listEventsFilter>;
  *     the A6 technical uncertainty register. The route resolves the
  *     activity under RLS (cross-firm → 404) and infers subject_tenant_id
  *     from it when not supplied.
+ *   - `project_id` filters on the denormalised `event.project_id`
+ *     column (populated by every PROJECT, ACTIVITY, and CLAIM
+ *     emitter). Used by the project-detail timeline tab; when
+ *     supplied alongside subject_tenant_id the two narrow
+ *     independently (AND).
  *   - `kind` is a comma-delimited list of evidenceKind values. When
  *     omitted the route returns all kinds; when supplied each value
  *     must be a valid evidenceKind. The route widens this to a SQL
@@ -290,6 +295,7 @@ export const listEventsQuery = z
   .object({
     subject_tenant_id: Uuid.optional(),
     activity_id: Uuid.optional(),
+    project_id: Uuid.optional(),
     filter: listEventsFilter.default('all'),
     limit: z.coerce.number().int().min(1).max(LIST_PAGE_SIZE).default(50),
     cursor: z.string().optional(),
