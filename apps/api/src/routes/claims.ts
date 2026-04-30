@@ -194,11 +194,11 @@ export function registerClaims(app: FastifyInstance): void {
       return reply.status(400).send({
         error: 'invalid_query',
         message:
-          'Query must match { subject_tenant_id?: uuid, stage?, assignee?: uuid, fiscal_year?: int }',
+          'Query must match { subject_tenant_id?: uuid, stage?, assignee?: uuid, fiscal_year?: int, project_id?: uuid }',
         requestId: req.id,
       });
     }
-    const { subject_tenant_id, stage, fiscal_year } = parsed.data;
+    const { subject_tenant_id, stage, fiscal_year, project_id } = parsed.data;
     // assignee: see TODO(p4-a-claim-assignee) at top of file. Param is
     // validated as a UUID but currently filters nothing — the
     // claim_assignee table doesn't exist yet.
@@ -216,6 +216,10 @@ export function registerClaims(app: FastifyInstance): void {
       const whereStage = stage !== undefined ? tx`AND stage = ${stage}` : tx``;
       const whereFiscalYear =
         fiscal_year !== undefined ? tx`AND fiscal_year = ${fiscal_year}` : tx``;
+      // Project narrowing uses the denormalised claim.project_id FK
+      // (P5 swimlane A Task 1.1). Indexed via claim_project_id_idx,
+      // so this is a fast path for the project-detail rollup view.
+      const whereProject = project_id !== undefined ? tx`AND project_id = ${project_id}` : tx``;
 
       const rows = await tx<RawClaimRow[]>`
         SELECT id, tenant_id, subject_tenant_id, fiscal_year, stage,
@@ -226,6 +230,7 @@ export function registerClaims(app: FastifyInstance): void {
                ${whereSubject}
                ${whereStage}
                ${whereFiscalYear}
+               ${whereProject}
          ORDER BY fiscal_year DESC, created_at DESC
       `;
       return { claims: rows.map(toApi) };
