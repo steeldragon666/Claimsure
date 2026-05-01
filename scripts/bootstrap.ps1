@@ -258,6 +258,16 @@ PLATFORM_CNAME_TARGET=apex.localhost
 # === Mobile (Expo) - set on the mobile build, not here ===
 # EXPO_PUBLIC_API_URL=http://localhost:3000
 # EXPO_PUBLIC_DEFAULT_BRAND_HOST=localhost:3001
+
+# === P6 Agent feature flags (staged rollout) ===
+# Default-on: unset or =true -> enabled. Set =false to disable an agent
+# without redeploying code (kill-switch semantics). Boolean parsing is
+# strict - typos fall back to the default. See design doc section 6.
+P6_AGENT_A_ENABLED=true              # expenditure classifier (Haiku)
+P6_AGENT_B_ENABLED=true              # activity register synthesizer (Sonnet)
+P6_AGENT_C_ENABLED=true              # narrative drafter (Sonnet, streaming)
+P6_AGENT_C_STREAMING_ENABLED=true    # if false, Agent C falls back to non-streaming response
+P6_AGENT_TENANT_ALLOWLIST=           # csv of tenant_ids; empty=all. Phase 1 dogfood only.
 "@
 
   Set-Content -Path '.env' -Value $envContent -Encoding utf8 -NoNewline

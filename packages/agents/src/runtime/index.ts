@@ -4,3 +4,6 @@ export * from './prompt-registry.js';
 export * from './telemetry.js';
 export * from './idempotency.js';
 export * from './tool-use.js';
+export * from './pricing.js';
+export * from './rate-limit.js';
+export * from './env.js';

@@ -100,6 +100,24 @@ export const evidenceKind = z.enum([
   // 0025_expenditure_apportioned_kind.sql to admit it; this Zod enum
   // tracks the same set.
   'EXPENDITURE_APPORTIONED',
+  // P6 Task 1.1 — emitted by the future Agent A eligibility
+  // classifier. The CHECK is rebuilt by
+  // 0026_expenditure_classified_kind.sql to admit it; this Zod enum
+  // tracks the same set.
+  'EXPENDITURE_CLASSIFIED',
+  // P6 Task 1.2 — emitted by the future Agent B activity-register
+  // synthesizer (once per draft pass) carrying the proposed activity
+  // cluster set. The CHECK is rebuilt by
+  // 0027_activity_register_drafted_kind.sql to admit it; this Zod
+  // enum tracks the same set.
+  'ACTIVITY_REGISTER_DRAFTED',
+  // P6 Task 1.3 — emitted by the future Agent C streaming narrative
+  // drafter (one event per persisted (activity_id, section_kind,
+  // version) draft) carrying metadata only — segments live in the
+  // `narrative_draft` table. The CHECK is rebuilt by
+  // 0028_narrative_drafted_kind.sql to admit it; this Zod enum
+  // tracks the same set.
+  'NARRATIVE_DRAFTED',
 ]);
 export type EvidenceKind = z.infer<typeof evidenceKind>;
 
@@ -703,3 +721,286 @@ export const ExpenditureApportionedPayload = z
     message: 'allocations must sum to 100% (±0.001)',
   });
 export type ExpenditureApportionedPayload = z.infer<typeof ExpenditureApportionedPayload>;
+
+/**
+ * EXPENDITURE_CLASSIFIED — emitted by the future Agent A eligibility
+ * classifier as it triages each expenditure. The decision is one of
+ * `eligible | ineligible | needs_review`, the probability is the
+ * model-stated confidence (∈ [0, 1]), and the statutory anchor pins
+ * the decision to a Division 355 reference (§355-25 for core R&D
+ * activities, §355-30 for supporting activities, or `ineligible`
+ * when no anchor applies).
+ *
+ * `suggested_activity_id` is nullable: the classifier may suggest a
+ * mapping target (downstream Agent B converts that into an
+ * EXPENDITURE_MAPPED rule) but is also allowed to defer the mapping
+ * decision (null). `uncertainty_reason` is populated for
+ * `needs_review` decisions so the consultant inbox can surface why
+ * the model declined to commit. `model` and `prompt_version` pin the
+ * exact agent version that produced the decision (replay /
+ * reproducibility). `idempotency_key` lets the agent retry safely
+ * across worker crashes — the SDK side dedupes on this key before
+ * appending to the chain.
+ *
+ * `_v: 1` is the payload-shape version stamp; bumping it whenever
+ * fields change keeps reads safe across rolling deploys.
+ */
+export const ExpenditureClassifiedPayload = z.object({
+  _v: z.literal(1),
+  expenditure_id: Uuid,
+  decision: z.enum(['eligible', 'ineligible', 'needs_review']),
+  eligibility_probability: z.number().min(0).max(1),
+  statutory_anchor: z.enum(['s.355-25', 's.355-30', 'ineligible']),
+  suggested_activity_id: Uuid.nullable(),
+  rationale: z.string().min(1).max(800),
+  uncertainty_reason: z.string().max(500).nullable(),
+  model: z.string().min(1),
+  prompt_version: z.string().min(1),
+  idempotency_key: z.string().min(1),
+});
+export type ExpenditureClassifiedPayload = z.infer<typeof ExpenditureClassifiedPayload>;
+
+/**
+ * One row of the Agent B activity-register draft — a proposed R&D
+ * activity clustered from the raw evidence stream.
+ *
+ * Reused at TWO emission sites:
+ *
+ *   1. **Agent B** (`ACTIVITY_REGISTER_DRAFTED` payload, this file):
+ *      the synthesizer emits ONE event per draft pass carrying an
+ *      array of `ProposedActivity` rows. Each row is a
+ *      not-yet-persisted candidate — `proposed_id` is a fresh UUID
+ *      the synthesizer mints, NOT yet a real `activity.id`. A
+ *      downstream consultant-review step (or Agent C handoff)
+ *      decides which proposals are promoted to actual `activity`
+ *      rows via the existing `ACTIVITY_CREATED` path.
+ *
+ *   2. **Agent C** (narrative drafter, downstream P6 task):
+ *      consumes the same shape verbatim and inherits
+ *      `proposed_hypothesis` + `proposed_uncertainty` as a
+ *      head-start on the activity narrative — those two fields
+ *      exist precisely so Agent C doesn't have to re-invent the
+ *      baseline framing Agent B already inferred.
+ *
+ * Field meanings:
+ * - `proposed_id` — fresh UUID minted by the synthesizer; stable
+ *   handle for the proposal across the draft → review → promotion
+ *   lifecycle. Distinct from any future `activity.id`.
+ * - `name` — short human-readable activity name (≤200 chars), e.g.
+ *   "Reinforcement learning sample-efficiency study".
+ * - `kind` — `core` (Division 355 §355-25, conducting the
+ *   experimental work) or `supporting` (§355-30, directly
+ *   contributing to a core activity).
+ * - `statutory_anchor` — paired with `kind`; pins the proposal to
+ *   the matching Division 355 reference.
+ * - `rationale` — 1–2000 char justification for why this evidence
+ *   cluster maps to this activity (surfaces in the consultant
+ *   review UI and the assurance report).
+ * - `clustered_event_ids` — non-empty array of `event.id`s that
+ *   form THIS activity's evidence cluster. Used by the review UI to
+ *   show "what evidence backs this proposal" and by Agent C to
+ *   pull narrative material.
+ * - `confidence` — model-stated 0..1 score for the cluster's
+ *   coherence; the consultant review threshold is parameterised
+ *   downstream.
+ * - `proposed_hypothesis` / `proposed_uncertainty` — Agent C
+ *   pre-fills (≤1500 chars each, nullable when the cluster has
+ *   no clear hypothesis frame yet). Inherited verbatim by Agent C
+ *   when the proposal is promoted, so the narrative drafter starts
+ *   from Agent B's framing rather than a blank page.
+ */
+export const ProposedActivity = z.object({
+  proposed_id: Uuid,
+  name: z.string().min(1).max(200),
+  kind: z.enum(['core', 'supporting']),
+  statutory_anchor: z.enum(['s.355-25', 's.355-30']),
+  rationale: z.string().min(1).max(2000),
+  clustered_event_ids: z.array(Uuid).min(1),
+  confidence: z.number().min(0).max(1),
+  proposed_hypothesis: z.string().max(1500).nullable(),
+  proposed_uncertainty: z.string().max(1500).nullable(),
+});
+export type ProposedActivity = z.infer<typeof ProposedActivity>;
+
+/**
+ * ACTIVITY_REGISTER_DRAFTED — emitted by the future Agent B
+ * activity-register synthesizer ONCE per draft pass. The synthesizer
+ * reads the recent evidence stream for a project (raw events plus
+ * Agent A's EXPENDITURE_CLASSIFIED decisions), clusters that stream
+ * into candidate activities, and emits this single event carrying
+ * the full draft register. See {@link ProposedActivity} for the
+ * per-row shape and the dual reuse at Agent B / Agent C.
+ *
+ * Field meanings:
+ * - `project_id` — the project whose evidence stream was synthesized.
+ * - `proposed_activities` — the cluster set Agent B inferred. May
+ *   be empty if the synthesizer concluded the input lacked any
+ *   coherent R&D activity (every event is unclustered).
+ * - `unclustered_event_ids` — events the synthesizer saw but did
+ *   not assign to any proposed activity. Surfaces in the review UI
+ *   so the consultant can decide whether to re-cluster manually,
+ *   ignore them, or kick off a re-run with adjusted prompts.
+ * - `total_input_events` — count of events the synthesizer ingested
+ *   (≥ sum of clustered + unclustered when truncation kicks in).
+ * - `events_truncated` — true when the input window was capped
+ *   below the project's full event count (the harness has a
+ *   per-pass token budget; large projects may need multiple passes).
+ * - `synthesizer_notes` — free-form ≤3000 chars; the synthesizer's
+ *   commentary on the draft (e.g. "split a noisy cluster", "low
+ *   confidence on the supporting/core boundary for cluster #3").
+ *   Surfaces in the consultant review UI.
+ * - `model` / `prompt_version` — pin the exact agent version
+ *   (replay / reproducibility).
+ * - `idempotency_key` — the SDK side dedupes on this key before
+ *   appending to the chain, so the agent can retry safely across
+ *   worker crashes.
+ *
+ * `_v: 1` is the payload-shape version stamp; bumping it whenever
+ * fields change keeps reads safe across rolling deploys.
+ */
+export const ActivityRegisterDraftedPayload = z.object({
+  _v: z.literal(1),
+  project_id: Uuid,
+  proposed_activities: z.array(ProposedActivity),
+  unclustered_event_ids: z.array(Uuid),
+  total_input_events: z.number().int().nonnegative(),
+  events_truncated: z.boolean(),
+  synthesizer_notes: z.string().max(3000),
+  model: z.string().min(1),
+  prompt_version: z.string().min(1),
+  idempotency_key: z.string().min(1),
+});
+export type ActivityRegisterDraftedPayload = z.infer<typeof ActivityRegisterDraftedPayload>;
+
+/**
+ * One segment of an Agent C narrative-section draft — the
+ * fundamental unit of the δ hybrid audit-anchor model.
+ *
+ * Discriminated union on `type`:
+ *
+ *   - **`prose`** — narrative bridges, definitions, statutory
+ *     connectors, and other framing text that does NOT make a
+ *     factual claim about the project. Carries only `text`. The
+ *     consultant review UI renders these inline without a citation
+ *     affordance because there's nothing to anchor.
+ *
+ *   - **`claim`** — every factual statement about the R&D activity
+ *     (what was done, what was learned, what remains uncertain).
+ *     Carries `text` PLUS a non-empty `citing_events` array of
+ *     `event.id`s that back the claim. The δ model is hybrid in
+ *     that audit anchoring is segment-scoped (not whole-document
+ *     scoped): the auditor can click any claim segment and see the
+ *     evidence cluster behind it without trawling the entire
+ *     activity timeline.
+ *
+ * The Zod schema enforces STRUCTURAL validity only — `claim`
+ * segments must have a non-empty `citing_events` array, but Zod
+ * cannot verify the cited UUIDs actually correspond to real events
+ * for the activity. That second-order validation lives server-side
+ * in Task 5.2's validate-and-correct loop, which checks every
+ * `claim` segment's `citing_events` are members of the activity's
+ * `clustered_events` set (drawn from the parent activity's
+ * `ACTIVITY_REGISTER_DRAFTED` cluster) and rejects (or asks the
+ * model to retry) any segment that cites events outside the
+ * cluster. Splitting structural and semantic validation this way
+ * keeps the wire schema cheap to deploy on the client + agent side
+ * while reserving the hard-error semantic check for the server
+ * persistence path.
+ *
+ * Field meanings:
+ * - `type` — `'prose'` for narrative framing, `'claim'` for any
+ *   factual statement that needs an audit anchor.
+ * - `text` — the segment body (1–2000 chars). The 2000-char cap is
+ *   intentionally tight: long claims are fragile under audit, so
+ *   the prompt nudges the model to split run-on assertions into
+ *   discrete segments each anchored to its own evidence subset.
+ * - `citing_events` — `claim` only; non-empty array of `event.id`s.
+ *   Used by the assurance report to render the evidence drawer
+ *   under each claim and by Task 5.2 to enforce in-cluster
+ *   citations.
+ *
+ * Reused at TWO sites:
+ *   1. **`narrative_draft.segments`** (Task 1.4 jsonb column) —
+ *      the live working copy the consultant edits.
+ *   2. **`narrative_draft_version.segments`** (Task 1.5 append-
+ *      only history) — the immutable per-version snapshot the
+ *      auditor verifies via `content_hash`.
+ */
+export const NarrativeSegment = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('prose'), text: z.string().min(1).max(2000) }),
+  z.object({
+    type: z.literal('claim'),
+    text: z.string().min(1).max(2000),
+    citing_events: z.array(Uuid).min(1),
+  }),
+]);
+export type NarrativeSegment = z.infer<typeof NarrativeSegment>;
+
+/**
+ * NARRATIVE_DRAFTED — emitted by the future Agent C streaming
+ * narrative drafter ONCE per persisted narrative-section draft;
+ * one event per (activity_id, section_kind, version) tuple. The
+ * agent streams `emit_segment` tool calls during generation, the
+ * server validates the segments (Task 5.2), persists them to
+ * `narrative_draft` (Task 1.4) + `narrative_draft_version`
+ * (Task 1.5), and only then appends THIS event to the chain.
+ *
+ * METADATA-ONLY by design: the segments themselves are large
+ * (up to ~hundreds of {prose|claim} blocks per section across the
+ * four AusIndustry submission fields) and persisting them inline
+ * on every draft would bloat the per-claimant hash chain to
+ * megabytes. Instead, the chain carries the `content_hash`
+ * (lowercase hex sha256 of the canonicalised segments — see Task
+ * 5.3 for the canonicalisation helper) and segment counts. The
+ * auditor verifies storage integrity by recomputing the hash from
+ * the persisted `narrative_draft.segments` and comparing it
+ * byte-for-byte against the chain event's `content_hash`; any
+ * tampering with the live working copy fails the comparison.
+ *
+ * Field meanings:
+ * - `narrative_draft_id` — points at the `narrative_draft` row
+ *   (Task 1.4) holding the live segments. Stable across versions
+ *   for a given (activity_id, section_kind) pair.
+ * - `activity_id` — the activity this section narrates. Combined
+ *   with `section_kind` to form the per-pair uniqueness key on
+ *   `narrative_draft`.
+ * - `section_kind` — one of the four AusIndustry submission
+ *   narrative fields per design doc Section 5: `new_knowledge`,
+ *   `hypothesis`, `uncertainty`, `experiments_and_results`. Each
+ *   activity has exactly four narrative_draft rows (one per
+ *   section).
+ * - `version` — monotonically increasing positive integer; bumps
+ *   on every regeneration (Task 5.6's per-section regen flow).
+ *   The `narrative_draft_version` table holds the full history
+ *   indexed by (narrative_draft_id, version).
+ * - `content_hash` — lowercase hex sha256 (`^[a-f0-9]{64}$`) of
+ *   the canonicalised segments. Matches the existing `event.hash`
+ *   convention. The auditor recomputes from persisted segments
+ *   and compares byte-for-byte.
+ * - `segment_count` / `claim_segment_count` — counts surfaced for
+ *   the consultant review UI ("3 of 12 segments are claims") and
+ *   the assurance report; both are non-negative (an empty section
+ *   is allowed but unusual).
+ * - `model` / `prompt_version` — pin the exact agent version
+ *   (replay / reproducibility).
+ * - `idempotency_key` — the SDK side dedupes on this key before
+ *   appending to the chain, so the agent can retry safely across
+ *   worker crashes.
+ *
+ * `_v: 1` is the payload-shape version stamp; bumping it whenever
+ * fields change keeps reads safe across rolling deploys.
+ */
+export const NarrativeDraftedPayload = z.object({
+  _v: z.literal(1),
+  narrative_draft_id: Uuid,
+  activity_id: Uuid,
+  section_kind: z.enum(['new_knowledge', 'hypothesis', 'uncertainty', 'experiments_and_results']),
+  version: z.number().int().positive(),
+  content_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  model: z.string().min(1),
+  prompt_version: z.string().min(1),
+  segment_count: z.number().int().nonnegative(),
+  claim_segment_count: z.number().int().nonnegative(),
+  idempotency_key: z.string().min(1),
+});
+export type NarrativeDraftedPayload = z.infer<typeof NarrativeDraftedPayload>;

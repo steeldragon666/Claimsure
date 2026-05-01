@@ -1,0 +1,13 @@
+-- packages/db/migrations/0031_chain_jsonb_doublecast.sql
+-- Hand-authored placeholder migration. The actual fix lives in
+-- packages/db/src/chain.ts (single-cast -> double-cast on jsonb binds).
+-- This file exists only to reserve idx 31 in the journal so subsequent
+-- P6 migrations have a stable numbering anchor.
+--
+-- NOTE: subsequent P6 migrations 0026-0030 (data-model + cross-cutting infra)
+-- and 0032 (mapping_rule scalar-string backfill) numerically slot AROUND
+-- this entry. Removing this no-op file would create a gap in the journal
+-- that the migrator can tolerate, but breaks the human-readable sequence
+-- the P6 implementation plan (docs/plans/2026-05-01-p6-implementation.md
+-- §"Migration idx range") allocates.
+SELECT 1;  -- intentional no-op

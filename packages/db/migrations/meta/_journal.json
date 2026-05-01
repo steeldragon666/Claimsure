@@ -183,6 +183,48 @@
       "when": 1777720360000,
       "tag": "0025_expenditure_apportioned_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1777892100000,
+      "tag": "0026_expenditure_classified_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1777892160000,
+      "tag": "0027_activity_register_drafted_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1777892220000,
+      "tag": "0028_narrative_drafted_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1777892280000,
+      "tag": "0029_narrative_draft",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1777892340000,
+      "tag": "0030_narrative_draft_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1777892400000,
+      "tag": "0031_chain_jsonb_doublecast",
+      "breakpoints": true
     }
   ]
 }

@@ -117,8 +117,22 @@ export async function insertEventWithChain(input: InsertEventInput): Promise<Ins
     // newer Node refuses non-string/Buffer args, and the `serializers[1184]`
     // toISOString conversion isn't running before the bind for reasons we
     // didn't fully untangle. Stringifying upfront is the same pattern we use
-    // for jsonb params (JSON.stringify + ::jsonb) — explicit serialisation +
-    // explicit DB-side cast.
+    // for jsonb params — explicit serialisation + explicit DB-side cast.
+    //
+    // jsonb binds: the `::text::jsonb` double-cast is the canonical pattern
+    // for this codebase (see audit-log.ts JSDoc for full rationale). The
+    // global `sql` client has been mutated by `drizzle(sql)` in client.ts,
+    // which overwrites postgres-js's `serializers[3802]` (jsonb) with an
+    // identity passthrough. Pinning the wire type to TEXT (oid 25) — whose
+    // serializer is consistent across both default and drizzle-mutated
+    // contexts — and casting text → jsonb on the server side guarantees
+    // the value lands as a jsonb OBJECT regardless of which client opened
+    // the tx. The previous single-cast form `${...}::jsonb` worked under
+    // sql/cpa_app today only because drizzle's identity passthrough no-ops
+    // on the pre-stringified JSON text — but it would store a jsonb scalar
+    // string under privilegedSql/cpa, which would silently break
+    // jsonb_typeof checks and any future jsonb operators. This is the same
+    // workaround retro item #1 (P5 PR #9) discovered the hard way.
     const capturedAtIso = input.captured_at.toISOString();
     await tx`
       INSERT INTO event (
@@ -130,7 +144,7 @@ export async function insertEventWithChain(input: InsertEventInput): Promise<Ins
       ) VALUES (
         ${id}, ${input.tenant_id}, ${input.subject_tenant_id},
         ${input.project_id ?? null}, ${input.milestone_id ?? null}, ${input.kind},
-        ${JSON.stringify(input.payload)}::jsonb, ${input.classification === null ? null : JSON.stringify(input.classification)}::jsonb,
+        ${JSON.stringify(input.payload)}::text::jsonb, ${input.classification === null ? null : JSON.stringify(input.classification)}::text::jsonb,
         ${input.override_of_event_id ?? null},
         ${input.override_new_kind ?? null},
         ${input.override_reason ?? null},

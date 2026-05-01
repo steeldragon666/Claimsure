@@ -455,3 +455,125 @@ test('A9 phase 3: heterogeneous P4 kinds chain pairwise', () => {
   }
   assert.equal(seenHashes.size, P4_KIND_FIXTURES.length);
 });
+
+// P6 Task 0.1 — static-analysis revert guard for the chain.ts double-cast.
+//
+// Why static analysis instead of a runtime regression test:
+// the previous attempt at a runtime guard either tautologically hardcoded
+// `::text::jsonb` in its own inline SQL (so reverting chain.ts wouldn't
+// fail it), or would have required refactoring insertEventWithChain to
+// accept a client parameter so we could exercise it under privilegedSql
+// (out of scope for this task — production only writes via `sql.begin`).
+//
+// The cheapest discriminating regression guard is to read chain.ts as a
+// string and assert the double-cast pattern is present in the source. If
+// chain.ts:147 is reverted to `${JSON.stringify(input.payload)}::jsonb`
+// (single-cast), this test fails red — catching a revert that
+// sql/cpa_app's drizzle-mutated identity passthrough would silently mask
+// at runtime under the existing call path.
+//
+// Lives in chain.canonical.test.ts (not chain.test.ts) because it is a
+// pure-string-scan test with zero DB dependency — chain.test.ts has a
+// file-level `before` hook that requires `pnpm db:up`, so co-locating
+// here keeps the test runnable in any environment.
+//
+// See packages/db/src/audit-log.ts JSDoc for the canonical reference on
+// why ::text::jsonb survives both the drizzle-mutated and default
+// postgres-js JSON serializers.
+test('chain.ts source uses ::text::jsonb double-cast for jsonb binds (revert guard)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const chainSrc = readFileSync(fileURLToPath(new URL('./chain.ts', import.meta.url)), 'utf8');
+
+  // Strip JS line and block comments before scanning so prose mentions of
+  // `::jsonb` (e.g. comments documenting why the previous single-cast
+  // form was wrong) don't trigger false positives. We only care about
+  // SQL casts in actual code.
+  const codeOnly = chainSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+  // Positive: both jsonb binds in insertEventWithChain MUST use the
+  // double-cast. We expect at least 2 occurrences (payload + classification).
+  const doubleCastCount = (codeOnly.match(/::text::jsonb/g) ?? []).length;
+  assert.ok(
+    doubleCastCount >= 2,
+    `chain.ts must use ::text::jsonb for both payload and classification jsonb binds; found ${doubleCastCount} occurrence(s)`,
+  );
+
+  // Negative: every ::jsonb cast in code MUST be immediately preceded by
+  // ::text. Negative-lookbehind directly expresses the property under test
+  // ("any ::jsonb not immediately preceded by ::text is bare") without the
+  // 8-character-window-plus-endsWith dance. If chain.ts:147 is reverted to
+  // single-cast, the new bare ::jsonb shows up here.
+  const bareCasts = [...codeOnly.matchAll(/(?<!::text)::jsonb/g)];
+  assert.equal(
+    bareCasts.length,
+    0,
+    `chain.ts must NOT contain bare ::jsonb casts (every cast must go through ::text::jsonb); found ${bareCasts.length} bare cast(s)`,
+  );
+});
+
+// P6 Theme 1 follow-up — broader anti-pattern guard: bare-object-literal
+// interpolated into `::text::jsonb` cast.
+//
+// The Theme 1 migrations CI failure (PR #14, run 25230334059) was three
+// migrations.test.ts INSERTs of the form:
+//
+//     ${{ _v: 1, ... }}::text::jsonb
+//
+// instead of the canonical:
+//
+//     ${JSON.stringify({ _v: 1, ... })}::text::jsonb
+//
+// The `::text` cast pins the wire type to TEXT; postgres-js then encodes
+// the JS object via implicit String() coercion, yielding `[object Object]`,
+// which PostgreSQL rejects with `Token "object" is invalid` when re-parsing
+// as jsonb. The original chain.ts revert guard above only scans chain.ts,
+// so the bug slipped through Theme 1 review.
+//
+// This guard scans ALL `*.ts` files under `packages/db/src/` for the
+// signature pattern `}}::text::jsonb` (object-literal close immediately
+// followed by the jsonb cast). The valid canonical form always ends with
+// `JSON.stringify(...)}::text::jsonb` (closing parenthesis before the
+// brace), so this regex catches the anti-pattern without false positives
+// on the canonical form.
+test('packages/db/src TS sources use JSON.stringify(...) (not bare object) before ::text::jsonb', async () => {
+  const { readFileSync, readdirSync, statSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const path = await import('node:path');
+
+  const srcDir = path.dirname(fileURLToPath(new URL('./chain.ts', import.meta.url)));
+
+  // Recursive walk: collect all *.ts (incl. test files).
+  const tsFiles: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      const st = statSync(full);
+      if (st.isDirectory()) walk(full);
+      else if (full.endsWith('.ts')) tsFiles.push(full);
+    }
+  };
+  walk(srcDir);
+
+  // For each file, strip comments then scan for the anti-pattern.
+  const offenders: string[] = [];
+  for (const file of tsFiles) {
+    const src = readFileSync(file, 'utf8');
+    const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    // `}}::text::jsonb` or `}}::jsonb` immediately after an object-literal close.
+    // The canonical pattern `JSON.stringify(...)}::text::jsonb` ends with `)}`,
+    // not `}}`, so it doesn't match.
+    const matches = codeOnly.match(/\}\}::(text::)?jsonb/g);
+    if (matches && matches.length > 0) {
+      offenders.push(`${path.relative(srcDir, file)}: ${matches.length} occurrence(s)`);
+    }
+  }
+
+  assert.equal(
+    offenders.length,
+    0,
+    `Bare-object-literal interpolated into ::text::jsonb cast detected. ` +
+      `Use \`\${JSON.stringify(obj)}::text::jsonb\` instead. ` +
+      `Offenders:\n${offenders.join('\n')}`,
+  );
+});
