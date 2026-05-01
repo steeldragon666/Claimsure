@@ -67,17 +67,40 @@ const EVENT_27_ID = '00000000-0000-4000-8000-00006a000027';
 // Reuses the same suite-wide TENANT/USER/SUBJECT.
 const EVENT_28_ID = '00000000-0000-4000-8000-00006a000028';
 
+// P6 Task 1.4 — migration 0029 narrative_draft table + RLS.
+// Cross-tenant RLS positive control needs a SECOND tenant + user + subject
+// alongside the suite-wide TENANT_ID. The narrative_draft.activity_id FK
+// (ON DELETE CASCADE) means we must seed real activity rows for both
+// tenants — which in turn requires seeding their parent project + claim.
+// Suffix scheme: `001401`–`001408` for tenant-A side fixtures (project /
+// claim / activity / draft), `001451`–`001458` for tenant-B side.
+const TENANT_B_ID = '00000000-0000-4000-8000-00006a001450';
+const USER_B_ID = '00000000-0000-4000-8000-00006a001451';
+const SUBJECT_B_ID = '00000000-0000-4000-8000-00006a001452';
+const PROJECT_4A_ID = '00000000-0000-4000-8000-00006a001401';
+const CLAIM_4A_ID = '00000000-0000-4000-8000-00006a001402';
+const ACTIVITY_4A_ID = '00000000-0000-4000-8000-00006a001403';
+const DRAFT_4A_ID = '00000000-0000-4000-8000-00006a001404';
+const PROJECT_4B_ID = '00000000-0000-4000-8000-00006a001453';
+const CLAIM_4B_ID = '00000000-0000-4000-8000-00006a001454';
+const ACTIVITY_4B_ID = '00000000-0000-4000-8000-00006a001455';
+const DRAFT_4B_ID = '00000000-0000-4000-8000-00006a001456';
+
 const cleanup = async (): Promise<void> => {
   await privilegedSql`DELETE FROM event WHERE id IN (${EVENT_26_ID}, ${EVENT_27_ID}, ${EVENT_28_ID})`;
+  // Drafts first — FK to activity has ON DELETE CASCADE so the activity
+  // delete below would clean these up too, but explicit DELETE keeps the
+  // cleanup readable and idempotent across reruns.
+  await privilegedSql`DELETE FROM narrative_draft WHERE id IN (${DRAFT_4A_ID}, ${DRAFT_4B_ID})`;
   await privilegedSql`DELETE FROM expenditure_line WHERE expenditure_id IN (${EXPENDITURE_2_ID}, ${EXPENDITURE_3_ID})`;
   await privilegedSql`DELETE FROM expenditure WHERE id IN (${EXPENDITURE_2_ID}, ${EXPENDITURE_3_ID})`;
-  await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_1_ID})`;
-  await privilegedSql`DELETE FROM claim WHERE id IN (${CLAIM_1_WITH_ACTIVITY}, ${CLAIM_1_NO_ACTIVITY}, ${CLAIM_2_ID})`;
-  await privilegedSql`DELETE FROM project WHERE id IN (${PROJECT_1_ID}, ${PROJECT_2_ID})`;
-  await privilegedSql`DELETE FROM subject_tenant WHERE id IN (${SUBJECT_ID})`;
-  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${TENANT_ID}`;
-  await privilegedSql`DELETE FROM "user" WHERE id IN (${USER_ID})`;
-  await privilegedSql`DELETE FROM tenant WHERE id IN (${TENANT_ID})`;
+  await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_1_ID}, ${ACTIVITY_4A_ID}, ${ACTIVITY_4B_ID})`;
+  await privilegedSql`DELETE FROM claim WHERE id IN (${CLAIM_1_WITH_ACTIVITY}, ${CLAIM_1_NO_ACTIVITY}, ${CLAIM_2_ID}, ${CLAIM_4A_ID}, ${CLAIM_4B_ID})`;
+  await privilegedSql`DELETE FROM project WHERE id IN (${PROJECT_1_ID}, ${PROJECT_2_ID}, ${PROJECT_4A_ID}, ${PROJECT_4B_ID})`;
+  await privilegedSql`DELETE FROM subject_tenant WHERE id IN (${SUBJECT_ID}, ${SUBJECT_B_ID})`;
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (${TENANT_ID}, ${TENANT_B_ID})`;
+  await privilegedSql`DELETE FROM "user" WHERE id IN (${USER_ID}, ${USER_B_ID})`;
+  await privilegedSql`DELETE FROM tenant WHERE id IN (${TENANT_ID}, ${TENANT_B_ID})`;
 };
 
 before(async () => {
@@ -90,6 +113,20 @@ before(async () => {
   await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
   await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
                        VALUES (${SUBJECT_ID}, ${TENANT_ID}, 'P5A Test Claimant', 'claimant')`;
+  // P6 Task 1.4 — second tenant + user + subject_tenant for the
+  // narrative_draft RLS positive control test below. privilegedSql
+  // bypasses RLS (cpa is the table owner) so we can seed across both
+  // tenant scopes without juggling the GUC for these globally-scoped
+  // (no RLS) inserts. subject_tenant IS RLS-protected, so we flip
+  // the GUC before seeding the tenant-B subject.
+  await privilegedSql`INSERT INTO tenant (id, name, slug, primary_idp)
+                       VALUES (${TENANT_B_ID}, 'P6 Task 1.4 Tenant B', 'p6-1-4-tenant-b', 'mixed')`;
+  await privilegedSql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+                       VALUES (${USER_B_ID}, 'p6-1-4-tenant-b@example.com', 'microsoft',
+                               'microsoft:p6-1-4-tenant-b', 'P6 Task 1.4 Tenant B User')`;
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_B_ID}, true)`;
+  await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
+                       VALUES (${SUBJECT_B_ID}, ${TENANT_B_ID}, 'P6 Task 1.4 Tenant B Claimant', 'claimant')`;
 });
 
 after(async () => {
@@ -529,4 +566,148 @@ test('migration 0028: event_kind_valid CHECK admits NARRATIVE_DRAFTED', async ()
     'new_knowledge',
     'payload.section_kind must round-trip via jsonb',
   );
+});
+
+// ---------------------------------------------------------------------------
+// P6 Task 1.4 — migration 0029 narrative_draft table + RLS isolation.
+// Two assertions in one test:
+//   1. Column existence (NOT NULL ordinal-position list matches the
+//      Task 1.4 spec verbatim) — guards against accidental column
+//      reorders or drops.
+//   2. RLS positive control — seed one draft per tenant via the
+//      privileged client, then verify a TENANT_A session can read its
+//      own draft and CANNOT see the TENANT_B row through the
+//      `narrative_draft_tenant_isolation` policy.
+// Uses privilegedSql to seed (cpa is the table owner so RLS still
+// applies even with FORCE — except when the role is a superuser, which
+// cpa IS in the dev harness — that's why migrations.test.ts inserts
+// run privileged), then sql.begin() with a per-tx GUC flip to exercise
+// the policy from the cpa_app role (which is non-superuser, non-owner —
+// RLS DOES apply).
+//
+// Segments are bound via the canonical `${object}::text::jsonb` pattern
+// documented in audit-log.ts (and chain.ts as of P6 Task 0.1) so the
+// jsonb column lands as a parsed object, not a JSON-encoded string.
+// ---------------------------------------------------------------------------
+
+test('migration 0029: narrative_draft table exists with expected columns and RLS isolation', async () => {
+  // ---- 1. Column existence assertion -------------------------------------
+  const cols = await privilegedSql<{ column_name: string }[]>`
+    SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'narrative_draft'
+     ORDER BY ordinal_position
+  `;
+  const expected = [
+    'tenant_id',
+    'id',
+    'activity_id',
+    'section_kind',
+    'current_version',
+    'status',
+    'segments',
+    'content_hash',
+    'model',
+    'prompt_version',
+    'idempotency_key',
+    'created_at',
+    'updated_at',
+    'created_by_user_id',
+  ];
+  assert.deepEqual(
+    cols.map((c) => c.column_name),
+    expected,
+    'narrative_draft columns must match the Task 1.4 spec in declared order',
+  );
+
+  // ---- 2. Seed one project + claim + activity + draft per tenant ---------
+  // Both inserts go through privilegedSql (cpa is the migration role,
+  // RLS-bypassing because it's the table owner + superuser) so we can
+  // span tenants without juggling the GUC for the seed itself. The
+  // RLS check below uses the cpa_app role (sql) which is non-owner +
+  // non-superuser, so the policy actually fires.
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_4A_ID}, ${TENANT_ID}, ${SUBJECT_ID},
+                               'P6 T1.4 Tenant A Project', '2026-01-01T00:00:00Z')`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
+                       VALUES (${CLAIM_4A_ID}, ${TENANT_ID}, ${SUBJECT_ID}, 2034, ${PROJECT_4A_ID})`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title)
+                       VALUES (${ACTIVITY_4A_ID}, ${TENANT_ID}, ${PROJECT_4A_ID},
+                               ${CLAIM_4A_ID}, 'CA-01', 'core', 'P6 T1.4 Tenant A Activity')`;
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_B_ID}, true)`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_4B_ID}, ${TENANT_B_ID}, ${SUBJECT_B_ID},
+                               'P6 T1.4 Tenant B Project', '2026-01-01T00:00:00Z')`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
+                       VALUES (${CLAIM_4B_ID}, ${TENANT_B_ID}, ${SUBJECT_B_ID}, 2034, ${PROJECT_4B_ID})`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title)
+                       VALUES (${ACTIVITY_4B_ID}, ${TENANT_B_ID}, ${PROJECT_4B_ID},
+                               ${CLAIM_4B_ID}, 'CA-01', 'core', 'P6 T1.4 Tenant B Activity')`;
+
+  // Each draft is one segment for brevity — the RLS positive control
+  // doesn't care about segment shape, it cares about tenant isolation.
+  // The `JSON.stringify(...)::text::jsonb` pattern matches the canonical
+  // chain.ts / audit-log.ts idiom: explicit JSON.stringify on the JS
+  // side + ::text::jsonb cast on the SQL side keeps the wire type pinned
+  // to TEXT and forces server-side jsonb parsing. We use stringify
+  // explicitly here (rather than relying on postgres-js's object
+  // serializer) because the segments value is an ARRAY — postgres-js
+  // may try to detect a Postgres-array bind for raw `[...]` literals,
+  // which is the wrong shape for a jsonb column.
+  const draftSegmentsA = [{ type: 'prose', text: 'Tenant A new-knowledge prose segment.' }];
+  const draftSegmentsB = [{ type: 'prose', text: 'Tenant B new-knowledge prose segment.' }];
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+  await privilegedSql`
+    INSERT INTO narrative_draft (
+      tenant_id, id, activity_id, section_kind, current_version, status,
+      segments, content_hash, model, prompt_version, idempotency_key,
+      created_by_user_id
+    ) VALUES (
+      ${TENANT_ID}, ${DRAFT_4A_ID}, ${ACTIVITY_4A_ID}, 'new_knowledge', 1, 'complete',
+      ${JSON.stringify(draftSegmentsA)}::text::jsonb,
+      ${'a'.repeat(64)}, 'claude-sonnet-4-5', 'draft-narrative@1.0.0', NULL,
+      ${USER_ID}
+    )
+  `;
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_B_ID}, true)`;
+  await privilegedSql`
+    INSERT INTO narrative_draft (
+      tenant_id, id, activity_id, section_kind, current_version, status,
+      segments, content_hash, model, prompt_version, idempotency_key,
+      created_by_user_id
+    ) VALUES (
+      ${TENANT_B_ID}, ${DRAFT_4B_ID}, ${ACTIVITY_4B_ID}, 'new_knowledge', 1, 'complete',
+      ${JSON.stringify(draftSegmentsB)}::text::jsonb,
+      ${'b'.repeat(64)}, 'claude-sonnet-4-5', 'draft-narrative@1.0.0', NULL,
+      ${USER_B_ID}
+    )
+  `;
+
+  // ---- 3. RLS positive control via the cpa_app role ----------------------
+  // sql is the non-owner, non-superuser handle — RLS DOES apply. Set
+  // the GUC to TENANT_ID inside a transaction; the SELECT must see
+  // ONLY the tenant-A draft, not the tenant-B one.
+  const visibleAsA = await sql.begin(async (tx) => {
+    await tx`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+    return tx<{ id: string }[]>`SELECT id FROM narrative_draft ORDER BY id`;
+  });
+  assert.equal(
+    visibleAsA.length,
+    1,
+    'TENANT_A session must see exactly one narrative_draft row through RLS',
+  );
+  assert.equal(
+    visibleAsA[0]!.id,
+    DRAFT_4A_ID,
+    'TENANT_A session must see only its own draft (tenant-B draft is invisible)',
+  );
+
+  // Symmetric assertion for TENANT_B — guards against an accidental
+  // policy that always returned tenant-A regardless of GUC.
+  const visibleAsB = await sql.begin(async (tx) => {
+    await tx`SELECT set_config('app.current_tenant_id', ${TENANT_B_ID}, true)`;
+    return tx<{ id: string }[]>`SELECT id FROM narrative_draft ORDER BY id`;
+  });
+  assert.equal(visibleAsB.length, 1, 'TENANT_B session must see exactly one row through RLS');
+  assert.equal(visibleAsB[0]!.id, DRAFT_4B_ID, 'TENANT_B session must see only its own draft');
 });
