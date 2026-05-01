@@ -100,6 +100,11 @@ export const evidenceKind = z.enum([
   // 0025_expenditure_apportioned_kind.sql to admit it; this Zod enum
   // tracks the same set.
   'EXPENDITURE_APPORTIONED',
+  // P6 Task 1.1 — emitted by the future Agent A eligibility
+  // classifier. The CHECK is rebuilt by
+  // 0026_expenditure_classified_kind.sql to admit it; this Zod enum
+  // tracks the same set.
+  'EXPENDITURE_CLASSIFIED',
 ]);
 export type EvidenceKind = z.infer<typeof evidenceKind>;
 
@@ -703,3 +708,41 @@ export const ExpenditureApportionedPayload = z
     message: 'allocations must sum to 100% (±0.001)',
   });
 export type ExpenditureApportionedPayload = z.infer<typeof ExpenditureApportionedPayload>;
+
+/**
+ * EXPENDITURE_CLASSIFIED — emitted by the future Agent A eligibility
+ * classifier as it triages each expenditure. The decision is one of
+ * `eligible | ineligible | needs_review`, the probability is the
+ * model-stated confidence (∈ [0, 1]), and the statutory anchor pins
+ * the decision to a Division 355 reference (§355-25 for core R&D
+ * activities, §355-30 for supporting activities, or `ineligible`
+ * when no anchor applies).
+ *
+ * `suggested_activity_id` is nullable: the classifier may suggest a
+ * mapping target (downstream Agent B converts that into an
+ * EXPENDITURE_MAPPED rule) but is also allowed to defer the mapping
+ * decision (null). `uncertainty_reason` is populated for
+ * `needs_review` decisions so the consultant inbox can surface why
+ * the model declined to commit. `model` and `prompt_version` pin the
+ * exact agent version that produced the decision (replay /
+ * reproducibility). `idempotency_key` lets the agent retry safely
+ * across worker crashes — the SDK side dedupes on this key before
+ * appending to the chain.
+ *
+ * `_v: 1` is the payload-shape version stamp; bumping it whenever
+ * fields change keeps reads safe across rolling deploys.
+ */
+export const ExpenditureClassifiedPayload = z.object({
+  _v: z.literal(1),
+  expenditure_id: Uuid,
+  decision: z.enum(['eligible', 'ineligible', 'needs_review']),
+  eligibility_probability: z.number().min(0).max(1),
+  statutory_anchor: z.enum(['s.355-25', 's.355-30', 'ineligible']),
+  suggested_activity_id: Uuid.nullable(),
+  rationale: z.string().min(1).max(800),
+  uncertainty_reason: z.string().max(500).nullable(),
+  model: z.string().min(1),
+  prompt_version: z.string().min(1),
+  idempotency_key: z.string().min(1),
+});
+export type ExpenditureClassifiedPayload = z.infer<typeof ExpenditureClassifiedPayload>;

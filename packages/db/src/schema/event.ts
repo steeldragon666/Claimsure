@@ -115,6 +115,14 @@ export const EVIDENCE_KINDS = [
   // 0025_expenditure_apportioned_kind.sql; this list tracks the
   // CHECK byte-for-byte.
   'EXPENDITURE_APPORTIONED',
+  // P6 Task 1.1 — emitted by the future Agent A eligibility
+  // classifier; binds an expenditure to an
+  // `eligible | ineligible | needs_review` decision plus statutory
+  // anchor (Division 355 §355-25 / §355-30). The
+  // `event_kind_valid` CHECK is rebuilt to admit it by
+  // 0026_expenditure_classified_kind.sql; this list tracks the
+  // CHECK byte-for-byte.
+  'EXPENDITURE_CLASSIFIED',
 ] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 

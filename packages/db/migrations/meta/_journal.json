@@ -185,6 +185,13 @@
       "breakpoints": true
     },
     {
+      "idx": 26,
+      "version": "7",
+      "when": 1777892100000,
+      "tag": "0026_expenditure_classified_kind",
+      "breakpoints": true
+    },
+    {
       "idx": 31,
       "version": "7",
       "when": 1777892400000,

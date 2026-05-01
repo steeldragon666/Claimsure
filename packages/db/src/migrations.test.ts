@@ -55,7 +55,12 @@ const LINE_3A_ID = '00000000-0000-4000-8000-00005a001302';
 const LINE_3B_ID = '00000000-0000-4000-8000-00005a001303';
 const LINE_3C_ID = '00000000-0000-4000-8000-00005a001304';
 
+// P6 Task 1.1 — migration 0026 EXPENDITURE_CLASSIFIED CHECK round-trip.
+// Reuses TENANT/USER/SUBJECT seeded in the suite-wide before() hook.
+const EVENT_26_ID = '00000000-0000-4000-8000-00006a000026';
+
 const cleanup = async (): Promise<void> => {
+  await privilegedSql`DELETE FROM event WHERE id IN (${EVENT_26_ID})`;
   await privilegedSql`DELETE FROM expenditure_line WHERE expenditure_id IN (${EXPENDITURE_2_ID}, ${EXPENDITURE_3_ID})`;
   await privilegedSql`DELETE FROM expenditure WHERE id IN (${EXPENDITURE_2_ID}, ${EXPENDITURE_3_ID})`;
   await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_1_ID})`;
@@ -308,4 +313,54 @@ test('migration 0021: duplicate (expenditure_id, line_number) is rejected by uni
     /unique|duplicate/i,
     'inserting a duplicate (expenditure_id, line_number) must be rejected',
   );
+});
+
+// ---------------------------------------------------------------------------
+// P6 Task 1.1 — migration 0026 EXPENDITURE_CLASSIFIED kind
+// Round-trip: a raw INSERT with kind='EXPENDITURE_CLASSIFIED' must succeed
+// post-migration. Pre-migration the same row would fail the
+// `event_kind_valid` CHECK with a 23514 violation. Uses privilegedSql to
+// bypass RLS on event since the suite-wide before() hook already seeds
+// the tenant + subject_tenant fixtures used here. The payload follows
+// `ExpenditureClassifiedPayload` in @cpa/schemas/event.ts; the
+// `${object}` jsonb bind pattern (no manual JSON.stringify) follows the
+// audit-log.ts JSDoc (postgres-js auto-serialises objects to jsonb when
+// the placeholder is not preceded by ::text).
+// ---------------------------------------------------------------------------
+
+test('migration 0026: event_kind_valid CHECK admits EXPENDITURE_CLASSIFIED', async () => {
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+  // Bind the payload object directly (no manual JSON.stringify) and
+  // force `::text::jsonb` server-side parsing — same canonical pattern
+  // documented in audit-log.ts (and chain.ts as of P6 Task 0.1) so the
+  // value lands as a jsonb object regardless of which client opened
+  // the tx. privilegedSql's default JSON.stringify serializer handles
+  // the object → text conversion at the wire boundary.
+  await privilegedSql`
+    INSERT INTO event (
+      id, tenant_id, subject_tenant_id, kind, payload,
+      hash, captured_at, captured_by_user_id
+    ) VALUES (
+      ${EVENT_26_ID}, ${TENANT_ID}, ${SUBJECT_ID}, 'EXPENDITURE_CLASSIFIED',
+      ${{
+        _v: 1,
+        expenditure_id: '00000000-0000-4000-8000-000000abc001',
+        decision: 'eligible',
+        eligibility_probability: 0.92,
+        statutory_anchor: 's.355-25',
+        suggested_activity_id: null,
+        rationale: 'unit test fixture',
+        uncertainty_reason: null,
+        model: 'claude-haiku-4-5',
+        prompt_version: 'classify-expenditure@1.0.0',
+        idempotency_key: 'fixture-key',
+      }}::text::jsonb,
+      ${'a6'.padEnd(64, '0')}, '2026-05-01T00:00:00Z', ${USER_ID}
+    )
+  `;
+  const rows = await privilegedSql<{ id: string; kind: string }[]>`
+    SELECT id, kind FROM event WHERE id = ${EVENT_26_ID}
+  `;
+  assert.equal(rows.length, 1, 'EXPENDITURE_CLASSIFIED row must be admitted by the CHECK');
+  assert.equal(rows[0]!.kind, 'EXPENDITURE_CLASSIFIED');
 });
