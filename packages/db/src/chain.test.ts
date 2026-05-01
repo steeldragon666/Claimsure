@@ -198,6 +198,57 @@ test('EXPENDITURE_SOURCES parity: @cpa/db and @cpa/schemas stay in sync', async 
   );
 });
 
+// P6 Task 0.1 — chain.ts jsonb double-cast (retro item #1).
+//
+// Reproduces the latent serializer bug discovered during P5 PR #9: under
+// the global `sql` client, `drizzle(sql)` overwrites postgres-js's
+// `serializers[3802]` (jsonb) with an identity passthrough. The previous
+// single-cast form `${JSON.stringify(payload)}::jsonb` then runs the
+// pre-stringified JSON text through the identity (no-op on strings) and
+// hands postgres a JSON string parameter, which `::jsonb` parses into a
+// jsonb SCALAR STRING (jsonb_typeof = 'string') rather than an object.
+// The double-cast `::text::jsonb` pins the wire type to TEXT (oid 25,
+// whose serializer is consistent across both default and drizzle-mutated
+// contexts), then casts text → jsonb on the server side, producing a
+// proper jsonb object.
+//
+// Bug is technically latent because the chain is only written from
+// `sql.begin → tx` today and drizzle's identity passthrough also no-ops
+// on strings — but the audit-log writer's JSDoc on this branch documents
+// the canonical reasoning (`packages/db/src/audit-log.ts`).
+test('insertEventWithChain stores payload as jsonb object (not scalar string) under sql client', async () => {
+  await insertEventWithChain({
+    tenant_id: TENANT_ID,
+    subject_tenant_id: SUBJECT_ID,
+    kind: 'HYPOTHESIS',
+    payload: { _v: 1, source: 'test', text: 'fixture text' },
+    classification: null,
+    captured_at: new Date('2026-05-01T00:00:00Z'),
+    captured_by_user_id: USER_ID,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+  // Read via privilegedSql (RLS-bypass) so the SELECT doesn't need a
+  // freshly-set GUC on a pooled connection — same pattern used by
+  // verifyChain and the tamper test below.
+  const { privilegedSql } = await import('./client.js');
+  const rows = await privilegedSql<{ typeof_payload: string }[]>`
+    SELECT jsonb_typeof(payload) AS typeof_payload
+      FROM event
+     WHERE subject_tenant_id = ${SUBJECT_ID}
+       AND captured_at = '2026-05-01T00:00:00Z'::timestamptz
+     ORDER BY captured_at DESC, received_at DESC, id DESC
+     LIMIT 1
+  `;
+  assert.equal(rows.length, 1, 'inserted event must be findable');
+  assert.equal(
+    rows[0]!.typeof_payload,
+    'object',
+    'payload must be a jsonb object, not a scalar string',
+  );
+});
+
 test('insertEventWithChain: first event has prev_hash=null', async () => {
   const e = await insertEventWithChain({
     tenant_id: TENANT_ID,

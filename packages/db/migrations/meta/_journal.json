@@ -183,6 +183,13 @@
       "when": 1777720360000,
       "tag": "0025_expenditure_apportioned_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1777892400000,
+      "tag": "0031_chain_jsonb_doublecast",
+      "breakpoints": true
     }
   ]
 }
