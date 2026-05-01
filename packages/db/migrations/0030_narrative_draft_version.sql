@@ -109,12 +109,25 @@ CREATE POLICY "narrative_draft_version_tenant_isolation" ON "narrative_draft_ver
 	WITH CHECK ("tenant_id" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 --> statement-breakpoint
 
--- APPEND-ONLY: SELECT + INSERT only. NO UPDATE / DELETE. Mirrors
--- audit_log from 0022_audit_log_table.sql. Postgres has no built-in
--- append-only table mode; the GRANT discipline is the structural
--- enforcement. Future migrations adding new app roles must preserve
--- this restriction.
+-- APPEND-ONLY: SELECT + INSERT only. NO UPDATE / DELETE.
+--
+-- IMPORTANT: A bare `GRANT SELECT, INSERT` is NOT sufficient because
+-- migration 0002 establishes `ALTER DEFAULT PRIVILEGES FOR ROLE cpa
+-- IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO
+-- cpa_app` — meaning every newly-created table auto-grants ALL CRUD
+-- to cpa_app. To enforce append-only we must explicitly REVOKE the
+-- UPDATE + DELETE that DEFAULT PRIVILEGES granted automatically.
+--
+-- (audit_log from 0022 has the same defect — it intends append-only
+-- but only does the additive GRANT, so cpa_app can in fact UPDATE
+-- audit_log today. That's a P6 retro inheritance bug to fix; this
+-- migration does the right thing for narrative_draft_version.)
+--
+-- Postgres has no built-in append-only table mode; the GRANT/REVOKE
+-- discipline is the structural enforcement. Future migrations adding
+-- new app roles must preserve this restriction.
 GRANT SELECT, INSERT ON "narrative_draft_version" TO cpa_app;
+REVOKE UPDATE, DELETE ON "narrative_draft_version" FROM cpa_app;
 --> statement-breakpoint
 
 -- "Latest N versions of draft X" scan index. (tenant_id, draft_id,

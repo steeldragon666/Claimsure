@@ -247,6 +247,16 @@ test('insertEventWithChain stores payload as jsonb object (not scalar string) un
     'object',
     'payload must be a jsonb object, not a scalar string',
   );
+
+  // Clean up so subsequent chain tests (notably "first event has
+  // prev_hash=null" below) start with an empty chain for SUBJECT_ID.
+  // Without this DELETE, the row above becomes the "previous" event for
+  // the next insertEventWithChain call and prev_hash is non-null.
+  await privilegedSql`
+    DELETE FROM event
+     WHERE subject_tenant_id = ${SUBJECT_ID}
+       AND captured_at = '2026-05-01T00:00:00Z'::timestamptz
+  `;
 });
 
 test('insertEventWithChain: first event has prev_hash=null', async () => {
