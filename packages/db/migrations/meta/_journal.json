@@ -225,6 +225,13 @@
       "when": 1777892400000,
       "tag": "0031_chain_jsonb_doublecast",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1777892520000,
+      "tag": "0033_agent_b_system_user",
+      "breakpoints": true
     }
   ]
 }

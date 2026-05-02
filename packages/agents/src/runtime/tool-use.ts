@@ -52,6 +52,38 @@ function zodToJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
     case 'ZodOptional': {
       return zodToJsonSchema((def as unknown as { innerType: z.ZodTypeAny }).innerType);
     }
+    case 'ZodArray': {
+      const itemDef = (def as unknown as { type: z.ZodTypeAny }).type;
+      const obj: Record<string, unknown> = {
+        type: 'array',
+        items: zodToJsonSchema(itemDef),
+      };
+      // Array-level checks: { kind: 'min', value }, { kind: 'max', value }.
+      const checks = def as unknown as {
+        minLength?: { value: number };
+        maxLength?: { value: number };
+      };
+      if (checks.minLength) obj.minItems = checks.minLength.value;
+      if (checks.maxLength) obj.maxItems = checks.maxLength.value;
+      return obj;
+    }
+    case 'ZodBoolean': {
+      return { type: 'boolean' };
+    }
+    case 'ZodLiteral': {
+      const value = (def as unknown as { value: unknown }).value;
+      return { const: value };
+    }
+    case 'ZodEffects': {
+      // `.refine()` / `.transform()` wrap the underlying schema in a
+      // ZodEffects layer. The model can't see the runtime predicate anyway,
+      // so we strip the effect and emit JSON Schema for the inner shape.
+      // Validation-side, the runtime still parses through the full schema
+      // (including the refinement) — see `args.tool.input_schema.parse`
+      // below — so any model output that violates the predicate fails there.
+      const inner = (def as unknown as { schema: z.ZodTypeAny }).schema;
+      return zodToJsonSchema(inner);
+    }
     default:
       throw new Error(`zodToJsonSchema: unsupported type ${def.typeName}`);
   }

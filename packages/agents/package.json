@@ -17,6 +17,10 @@
     "./classifier": {
       "types": "./dist/classifier/index.d.ts",
       "import": "./dist/classifier/index.js"
+    },
+    "./synthesizer-register": {
+      "types": "./dist/synthesizer-register/index.d.ts",
+      "import": "./dist/synthesizer-register/index.js"
     }
   },
   "scripts": {
@@ -28,6 +32,7 @@
   "dependencies": {
     "@cpa/db": "workspace:*",
     "@cpa/observability": "workspace:*",
+    "@cpa/schemas": "workspace:*",
     "@anthropic-ai/sdk": "^0.32.1",
     "@opentelemetry/api": "^1.9.0",
     "zod": "^3.24.1"

@@ -416,6 +416,18 @@ export type ExpenditureMappingChannel = z.infer<typeof expenditureMappingChannel
  * ACTIVITY_CREATED — emitted by POST /v1/activities once the row is
  * inserted. Carries enough denormalised context for downstream readers
  * (assurance report, auditor inbox) to render without re-joining.
+ *
+ * `proposed_id` (optional) is the Agent B {@link ProposedActivity}
+ * `proposed_id` this activity was promoted from via
+ * `POST /v1/projects/:id/activity-register/accept`. Absent when the
+ * activity was created directly via `POST /v1/activities`. Used by
+ * `GET /v1/projects/:id/activity-register/latest` to derive the
+ * accepted-vs-pending status for a draft register: the route counts
+ * `ACTIVITY_CREATED` events whose `payload.proposed_id` matches a
+ * `proposed_id` in the latest `ACTIVITY_REGISTER_DRAFTED` payload.
+ *
+ * Additive change (z.optional) — pre-Agent-B events with no
+ * `proposed_id` field still parse cleanly.
  */
 export const ActivityCreatedPayload = z.object({
   activity_id: Uuid,
@@ -424,6 +436,7 @@ export const ActivityCreatedPayload = z.object({
   title: z.string(),
   project_id: Uuid,
   claim_id: Uuid,
+  proposed_id: Uuid.optional(),
 });
 export type ActivityCreatedPayload = z.infer<typeof ActivityCreatedPayload>;
 
