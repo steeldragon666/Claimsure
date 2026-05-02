@@ -36,6 +36,7 @@ import { registerMedia } from './routes/media.js';
 import { registerMobileEvents } from './routes/mobile-events.js';
 import { registerRefreshRoute } from './routes/mobile-session.js';
 import { registerEvents } from './routes/events.js';
+import { registerExpenditures } from './routes/expenditures.js';
 import { registerIntegrations } from './routes/integrations.js';
 import { registerProjects } from './routes/projects.js';
 import { registerSigning, registerDocuSignWebhookPlugin } from './routes/signing.js';
@@ -185,6 +186,10 @@ export function buildApp(): App {
   });
   app.register((instance, _opts, done) => {
     registerEvents(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerExpenditures(instance);
     done();
   });
   app.register((instance, _opts, done) => {
