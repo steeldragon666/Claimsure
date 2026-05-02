@@ -22,11 +22,20 @@ export type EventForHashing = {
 
 /**
  * Recursive JSON serializer that emits object keys in sorted order so the
- * resulting bytes are insertion-order-independent. Exported so callers
- * outside the chain (e.g. agent idempotency-key derivation) can compute a
- * deterministic hash bundle without re-implementing the same algorithm —
- * a divergent serializer is exactly the silent-cache-miss class of bug
- * this is meant to prevent.
+ * resulting bytes are insertion-order-independent. Refuses non-finite
+ * numbers (NaN / Infinity) since those are not JSON-representable and
+ * would round-trip lossily through any chain or storage layer.
+ *
+ * Exported so callers outside the chain can compute a deterministic
+ * hash bundle without re-implementing the same algorithm — a divergent
+ * serializer is exactly the silent-cache-miss class of bug this is meant
+ * to prevent. Current call sites:
+ *
+ * - chain.ts itself: event hashing for the audit chain
+ * - apps/api/src/jobs/expenditure-classify.ts: agent idempotency-key
+ *   bundle (Agent A — see PR #15)
+ * - packages/db/src/narrative-canonical.ts: narrative draft
+ *   `content_hash` (Agent C — P6 Task 5.3)
  */
 export function canonicalJsonStringify(value: unknown): string {
   if (typeof value === 'number' && !Number.isFinite(value)) {
