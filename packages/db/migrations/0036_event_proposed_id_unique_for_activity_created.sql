@@ -1,0 +1,50 @@
+-- DO NOT REGENERATE THIS MIGRATION VIA `pnpm --filter @cpa/db generate`.
+-- Hand-authored migration: drizzle-kit cannot express a partial unique
+-- index over a jsonb expression (`(payload->>'proposed_id')` with a
+-- `WHERE` predicate). Same hand-authored class as 0006 / 0008 / 0010
+-- / 0012 / 0013 / 0016 / 0018 / 0022 / 0029 / 0030.
+--
+-- ============================================================
+-- Agent B accept-race partial unique index.
+--
+-- The accept endpoint (POST /v1/projects/:id/activity-register/accept,
+-- introduced for Agent B in P6 Theme 4) pre-loads existing
+-- ACTIVITY_CREATED-with-proposed_id rows before each batch insert, but
+-- the pre-load is racy: two concurrent requests for the same
+-- proposed_id both see "no acceptance yet" and both proceed to insert.
+--
+-- Today this is mitigated by frontend serialization (the consultant UI
+-- doesn't fire concurrent accept requests) but the contract is
+-- "consultant action MUST result in exactly one activity per
+-- proposed_id" — a contract that should be enforced structurally.
+--
+-- Partial unique index on (tenant_id, (payload->>'proposed_id'))
+-- WHERE kind='ACTIVITY_CREATED' AND payload->>'proposed_id' IS NOT NULL
+-- closes the race deterministically: the SECOND concurrent INSERT
+-- fails with a unique-constraint violation (sqlstate 23505), which the
+-- route handler can catch and treat as idempotent (the first insert
+-- already produced the activity that satisfies the consultant's
+-- intent).
+--
+-- TENANT-SCOPED: cross-tenant proposed_ids are never compared (each
+-- firm's drafts mint independently). The (tenant_id, proposed_id) pair
+-- is the natural uniqueness boundary; a global unique index would
+-- create false collisions across firms.
+--
+-- WHERE clause filters out:
+--  - non-ACTIVITY_CREATED events (the entire P2-P5 evidence chain has
+--    no proposed_id and shouldn't be indexed)
+--  - manually-created activities (POST /v1/activities, P4) which emit
+--    ACTIVITY_CREATED with no proposed_id field — these aren't subject
+--    to the race
+--
+-- jsonb expression-index gotcha: postgres's IMMUTABLE inference for
+-- `(payload->>'proposed_id')` works because `->>` is marked IMMUTABLE
+-- for jsonb operands. No `(payload->>'proposed_id')::text` cast needed
+-- (it's already text); a redundant cast would also be fine but adds
+-- noise.
+-- ============================================================
+
+CREATE UNIQUE INDEX "event_activity_created_proposed_id_unique"
+  ON "event" ("tenant_id", ("payload" ->> 'proposed_id'))
+  WHERE kind = 'ACTIVITY_CREATED' AND "payload" ->> 'proposed_id' IS NOT NULL;

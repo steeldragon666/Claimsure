@@ -27,6 +27,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { sql, privilegedSql } from './client.js';
+import { insertEventWithChain } from './chain.js';
 
 // ---------------------------------------------------------------------------
 // Fixture identifiers (hex-only UUIDs; 8-4-4-4-12 layout). The `5a0`
@@ -107,9 +108,39 @@ const MAPPING_RULE_61_USER_ID = '00000000-0000-4000-8000-00006a006101';
 const MAPPING_RULE_61_CONDITIONS_ID = '00000000-0000-4000-8000-00006a006102';
 const MAPPING_RULE_61_ACTION_ID = '00000000-0000-4000-8000-00006a006103';
 
+// P6 follow-up — migrations 0035 (audit_log REVOKE UPDATE/DELETE) and
+// 0036 (event partial unique index on ACTIVITY_CREATED proposed_id).
+// Use a dedicated `c8800` UUID segment so cleanup() targets only these
+// rows and there's no overlap with any other suite. Two tenants for
+// the cross-tenant uniqueness probe (test 5).
+const TENANT_C_ID = '00000000-0000-4000-8000-0000000c8801';
+const TENANT_D_ID = '00000000-0000-4000-8000-0000000c8802';
+const USER_C_ID = '00000000-0000-4000-8000-0000000c8811';
+const USER_D_ID = '00000000-0000-4000-8000-0000000c8812';
+const SUBJECT_C_ID = '00000000-0000-4000-8000-0000000c8821';
+const SUBJECT_D_ID = '00000000-0000-4000-8000-0000000c8822';
+// Per-test event IDs.
+const AUDIT_LOG_C1_ID = '00000000-0000-4000-8000-0000000c8831';
+// Note: event-row IDs are NOT pinned by constants for the migration-0036
+// tests — `insertEventWithChain` mints its own UUID. Cleanup of those
+// rows happens via DELETE FROM event WHERE tenant_id IN (TENANT_C_ID,
+// TENANT_D_ID), which works because TENANT_C / TENANT_D are dedicated
+// to this test segment (the c8800 UUID prefix is unique to the suite).
+
 const cleanup = async (): Promise<void> => {
-  // Task 6.1 — mapping_rule fixtures. Delete first so the user FK
-  // referenced by created_by_user_id is free before the user row goes.
+  // P6 follow-up cleanup (c8800 segment) — drop FIRST because event has
+  // FK → tenant(id) and audit_log has FK → tenant(id). Event rows are
+  // tenant-scoped delete (rather than id-list) because
+  // insertEventWithChain mints its own UUIDs in tests 3-6 below.
+  await privilegedSql`DELETE FROM event WHERE tenant_id IN (${TENANT_C_ID}, ${TENANT_D_ID})`;
+  await privilegedSql`DELETE FROM audit_log WHERE id = ${AUDIT_LOG_C1_ID}`;
+  await privilegedSql`DELETE FROM audit_log WHERE firm_id IN (${TENANT_C_ID}, ${TENANT_D_ID})`;
+  await privilegedSql`DELETE FROM subject_tenant WHERE id IN (${SUBJECT_C_ID}, ${SUBJECT_D_ID})`;
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (${TENANT_C_ID}, ${TENANT_D_ID})`;
+  await privilegedSql`DELETE FROM "user" WHERE id IN (${USER_C_ID}, ${USER_D_ID})`;
+  await privilegedSql`DELETE FROM tenant WHERE id IN (${TENANT_C_ID}, ${TENANT_D_ID})`;
+  // Task 6.1 — mapping_rule fixtures. Delete BEFORE the suite-wide
+  // user delete so the created_by_user_id FK is free.
   await privilegedSql`DELETE FROM mapping_rule WHERE id IN (${MAPPING_RULE_61_CONDITIONS_ID}, ${MAPPING_RULE_61_ACTION_ID})`;
   await privilegedSql`DELETE FROM "user" WHERE id = ${MAPPING_RULE_61_USER_ID}`;
   await privilegedSql`DELETE FROM event WHERE id IN (${EVENT_26_ID}, ${EVENT_27_ID}, ${EVENT_28_ID})`;
@@ -156,6 +187,28 @@ before(async () => {
   await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_B_ID}, true)`;
   await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
                        VALUES (${SUBJECT_B_ID}, ${TENANT_B_ID}, 'P6 Task 1.4 Tenant B Claimant', 'claimant')`;
+
+  // P6 follow-up — fixtures for migrations 0035 + 0036 tests below.
+  // Two tenants are needed for migration 0036's cross-tenant probe
+  // (test 5). Each tenant gets one user (FK target on event +
+  // audit_log) and one subject_tenant (FK target on event).
+  await privilegedSql`INSERT INTO tenant (id, name, slug, primary_idp)
+                       VALUES (${TENANT_C_ID}, 'P6H Tenant C', 'p6h-tenant-c', 'mixed')`;
+  await privilegedSql`INSERT INTO tenant (id, name, slug, primary_idp)
+                       VALUES (${TENANT_D_ID}, 'P6H Tenant D', 'p6h-tenant-d', 'mixed')`;
+  await privilegedSql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+                       VALUES (${USER_C_ID}, 'p6h-tenant-c@example.com', 'microsoft',
+                               'microsoft:p6h-tenant-c', 'P6H Tenant C User')`;
+  await privilegedSql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+                       VALUES (${USER_D_ID}, 'p6h-tenant-d@example.com', 'microsoft',
+                               'microsoft:p6h-tenant-d', 'P6H Tenant D User')`;
+  // subject_tenant has RLS, so flip the GUC before each insert.
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_C_ID}, true)`;
+  await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
+                       VALUES (${SUBJECT_C_ID}, ${TENANT_C_ID}, 'P6H Tenant C Claimant', 'claimant')`;
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_D_ID}, true)`;
+  await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
+                       VALUES (${SUBJECT_D_ID}, ${TENANT_D_ID}, 'P6H Tenant D Claimant', 'claimant')`;
 });
 
 after(async () => {
@@ -1163,5 +1216,305 @@ test('migration 0034: mapping_rule scalar-string backfill re-encodes conditions 
     idemByActionId.action,
     postByActionId.action,
     'idempotent re-run must leave action unchanged',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// P6 follow-up — migration 0035: audit_log REVOKE UPDATE, DELETE
+//
+// Migration 0022 created audit_log with `GRANT SELECT, INSERT ON audit_log
+// TO cpa_app`, but migration 0002's `ALTER DEFAULT PRIVILEGES ... GRANT
+// SELECT, INSERT, UPDATE, DELETE ON TABLES TO cpa_app` had already
+// auto-granted ALL CRUD to cpa_app on every newly-created table. So the
+// 0022 GRANT was a no-op (additive), and cpa_app could in fact UPDATE and
+// DELETE audit_log rows — defeating the append-only intent.
+//
+// Migration 0035 retroactively REVOKEs UPDATE, DELETE from cpa_app on
+// audit_log. The two tests below verify that:
+//   1. UPDATE as cpa_app fails with `permission denied`.
+//   2. DELETE as cpa_app fails with `permission denied`.
+// They mirror the test in this file at line ~880 ("Append-only enforcement:
+// UPDATE denied to cpa_app") that proves the same REVOKE works on
+// narrative_draft_version (migration 0030).
+//
+// SETUP: insert one audit_log row via privilegedSql (cpa role bypasses
+// RLS as table owner + superuser, and has full CRUD via the migration).
+// Then attempt UPDATE / DELETE via sql.begin (cpa_app role) — the
+// permission denied is raised at the privilege check before RLS evaluates
+// rows, so the GUC value doesn't matter for the negative-path assertion.
+// ---------------------------------------------------------------------------
+
+test('migration 0035: audit_log UPDATE rejected as cpa_app (append-only enforcement)', async () => {
+  // Seed an audit_log row as cpa (privilegedSql bypasses RLS).
+  await privilegedSql`
+    INSERT INTO audit_log (id, firm_id, kind, payload, actor_user_id)
+    VALUES (
+      ${AUDIT_LOG_C1_ID}, ${TENANT_C_ID}, 'P6H_TEST_KIND',
+      ${JSON.stringify({ note: 'p6h follow-up audit_log row' })}::text::jsonb,
+      ${USER_C_ID}
+    )
+  `;
+
+  // Sanity check the row is visible to privilegedSql.
+  const seeded = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM audit_log WHERE id = ${AUDIT_LOG_C1_ID}
+  `;
+  assert.equal(seeded.length, 1, 'audit_log seed row must round-trip to privilegedSql');
+
+  // UPDATE as cpa_app must fail with permission denied (sqlstate 42501).
+  // Set BOTH GUCs the audit_log RLS policy expects (current_firm_id
+  // is the audit_log policy's predicate) plus current_tenant_id for
+  // good measure — although the privilege check fires before RLS, so
+  // the GUC values are belt-and-suspenders here.
+  await assert.rejects(
+    () =>
+      sql.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_tenant_id', ${TENANT_C_ID}, true)`;
+        await tx`SELECT set_config('app.current_firm_id', ${TENANT_C_ID}, true)`;
+        await tx`
+          UPDATE audit_log
+             SET kind = 'TAMPERED'
+           WHERE id = ${AUDIT_LOG_C1_ID}
+        `;
+      }),
+    /permission denied/i,
+    'UPDATE on audit_log as cpa_app must fail (append-only REVOKE in 0035)',
+  );
+});
+
+test('migration 0035: audit_log DELETE rejected as cpa_app (append-only enforcement)', async () => {
+  // Reuse the AUDIT_LOG_C1_ID row seeded by the UPDATE test above.
+  // node:test runs tests in file order within a single file, so by
+  // the time this test runs the seed is in place. (Cleanup() drops it
+  // in after() — irrelevant here since after() runs once at suite end.)
+  // If the previous test's seed somehow didn't land we re-seed
+  // idempotently via ON CONFLICT DO NOTHING.
+  await privilegedSql`
+    INSERT INTO audit_log (id, firm_id, kind, payload, actor_user_id)
+    VALUES (
+      ${AUDIT_LOG_C1_ID}, ${TENANT_C_ID}, 'P6H_TEST_KIND',
+      ${JSON.stringify({ note: 'p6h follow-up audit_log row' })}::text::jsonb,
+      ${USER_C_ID}
+    )
+    ON CONFLICT (id) DO NOTHING
+  `;
+
+  await assert.rejects(
+    () =>
+      sql.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_tenant_id', ${TENANT_C_ID}, true)`;
+        await tx`SELECT set_config('app.current_firm_id', ${TENANT_C_ID}, true)`;
+        await tx`DELETE FROM audit_log WHERE id = ${AUDIT_LOG_C1_ID}`;
+      }),
+    /permission denied/i,
+    'DELETE on audit_log as cpa_app must fail (append-only REVOKE in 0035)',
+  );
+
+  // Confirm the row is still there — REVOKE worked, the row survived.
+  const stillThere = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM audit_log WHERE id = ${AUDIT_LOG_C1_ID}
+  `;
+  assert.equal(stillThere.length, 1, 'audit_log row must survive the rejected DELETE');
+});
+
+// ---------------------------------------------------------------------------
+// P6 follow-up — migration 0036: partial unique index on
+// (tenant_id, payload->>'proposed_id') WHERE kind='ACTIVITY_CREATED' AND
+// payload->>'proposed_id' IS NOT NULL.
+//
+// The Agent B accept endpoint (Theme 4) pre-loads existing
+// ACTIVITY_CREATED-with-proposed_id rows once per request, then inserts.
+// Two concurrent requests for the same proposed_id both pre-load empty
+// and both try to insert — only frontend serialization saves us today.
+// The partial unique index closes the race structurally: the second
+// concurrent INSERT fails with sqlstate 23505, which the route handler
+// can catch and treat as idempotent.
+//
+// Tests use insertEventWithChain (the canonical insert path for `event`)
+// rather than raw INSERTs, so they exercise the same code path the
+// production accept endpoint uses. event.captured_at differs per insert
+// to avoid `event_hash_unique` collisions (canonicaliseEvent includes
+// captured_at, so different timestamps → different hashes).
+// ---------------------------------------------------------------------------
+
+test('migration 0036: duplicate (tenant_id, proposed_id) ACTIVITY_CREATED rejected by partial unique index', async () => {
+  // First insert succeeds.
+  await insertEventWithChain({
+    tenant_id: TENANT_C_ID,
+    subject_tenant_id: SUBJECT_C_ID,
+    kind: 'ACTIVITY_CREATED',
+    payload: { _v: 1, proposed_id: 'p1', activity_code: 'CA-01' },
+    classification: null,
+    captured_at: new Date('2026-05-01T10:00:00Z'),
+    captured_by_user_id: USER_C_ID,
+    captured_by_employee_id: null,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+
+  // Second insert for SAME tenant + SAME proposed_id must fail. We use a
+  // different captured_at so the hash differs (otherwise event_hash_unique
+  // would fire first — we want to prove the PARTIAL UNIQUE INDEX is what
+  // rejects this insert, not the hash uniqueness).
+  await assert.rejects(
+    () =>
+      insertEventWithChain({
+        tenant_id: TENANT_C_ID,
+        subject_tenant_id: SUBJECT_C_ID,
+        kind: 'ACTIVITY_CREATED',
+        payload: { _v: 1, proposed_id: 'p1', activity_code: 'CA-02' },
+        classification: null,
+        captured_at: new Date('2026-05-01T10:01:00Z'),
+        captured_by_user_id: USER_C_ID,
+        captured_by_employee_id: null,
+        override_of_event_id: null,
+        override_new_kind: null,
+        override_reason: null,
+      }),
+    (err: Error) => {
+      // The partial unique index is named
+      // event_activity_created_proposed_id_unique. Postgres surfaces
+      // either the index name or "duplicate key" in the message; match
+      // either to be implementation-tolerant.
+      return /event_activity_created_proposed_id_unique|duplicate key|unique/i.test(err.message);
+    },
+    'second ACTIVITY_CREATED with same (tenant_id, proposed_id) must be rejected by partial unique index',
+  );
+});
+
+test('migration 0036: ACTIVITY_CREATED with NULL proposed_id is NOT subject to the index', async () => {
+  // Manually-created activities (P4 POST /v1/activities) emit
+  // ACTIVITY_CREATED with no proposed_id field. The partial index's
+  // WHERE clause filters those out — so two such events for the same
+  // tenant must both succeed.
+  await insertEventWithChain({
+    tenant_id: TENANT_C_ID,
+    subject_tenant_id: SUBJECT_C_ID,
+    kind: 'ACTIVITY_CREATED',
+    // No proposed_id field at all (the manually-created path).
+    payload: { _v: 1, activity_code: 'CA-MANUAL-A' },
+    classification: null,
+    captured_at: new Date('2026-05-01T10:02:00Z'),
+    captured_by_user_id: USER_C_ID,
+    captured_by_employee_id: null,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+
+  await insertEventWithChain({
+    tenant_id: TENANT_C_ID,
+    subject_tenant_id: SUBJECT_C_ID,
+    kind: 'ACTIVITY_CREATED',
+    payload: { _v: 1, activity_code: 'CA-MANUAL-B' },
+    classification: null,
+    captured_at: new Date('2026-05-01T10:03:00Z'),
+    captured_by_user_id: USER_C_ID,
+    captured_by_employee_id: null,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+
+  // Both should be present.
+  const rows = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM event
+     WHERE tenant_id = ${TENANT_C_ID}
+       AND kind = 'ACTIVITY_CREATED'
+       AND payload->>'proposed_id' IS NULL
+  `;
+  assert.equal(
+    rows.length,
+    2,
+    'two ACTIVITY_CREATED events with no proposed_id must coexist (partial index excludes NULLs)',
+  );
+});
+
+test('migration 0036: same proposed_id but DIFFERENT tenant_id is allowed', async () => {
+  // Cross-tenant uniqueness probe: each firm's drafts mint
+  // proposed_ids independently, so 'p1' from TENANT_C and 'p1' from
+  // TENANT_D must not collide.
+  //
+  // TENANT_C already has an ACTIVITY_CREATED with proposed_id='p1'
+  // from the first test in this group (migration 0036 test 1). We
+  // insert one for TENANT_D with the same proposed_id and assert it
+  // succeeds.
+  await insertEventWithChain({
+    tenant_id: TENANT_D_ID,
+    subject_tenant_id: SUBJECT_D_ID,
+    kind: 'ACTIVITY_CREATED',
+    payload: { _v: 1, proposed_id: 'p1', activity_code: 'CD-01' },
+    classification: null,
+    captured_at: new Date('2026-05-01T10:04:00Z'),
+    captured_by_user_id: USER_D_ID,
+    captured_by_employee_id: null,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+
+  // Both tenants' rows must be present.
+  const rows = await privilegedSql<{ tenant_id: string }[]>`
+    SELECT tenant_id FROM event
+     WHERE tenant_id IN (${TENANT_C_ID}, ${TENANT_D_ID})
+       AND kind = 'ACTIVITY_CREATED'
+       AND payload->>'proposed_id' = 'p1'
+  `;
+  const tenants = rows.map((r) => r.tenant_id).sort();
+  assert.deepEqual(
+    tenants,
+    [TENANT_C_ID, TENANT_D_ID].sort(),
+    'both tenants must keep their ACTIVITY_CREATED proposed_id=p1 row (index is tenant-scoped)',
+  );
+});
+
+test('migration 0036: other event kinds with the same payload key are NOT indexed', async () => {
+  // The partial index's WHERE clause filters to kind='ACTIVITY_CREATED'
+  // only. Other kinds with a `proposed_id` field in payload (synthetic
+  // — HYPOTHESIS payload doesn't normally carry one) must NOT be
+  // affected. Two HYPOTHESIS events with the same (tenant_id,
+  // proposed_id) must both succeed.
+  await insertEventWithChain({
+    tenant_id: TENANT_C_ID,
+    subject_tenant_id: SUBJECT_C_ID,
+    kind: 'HYPOTHESIS',
+    // Synthetic — payload would normally have hypothesis-shape; we
+    // only need the proposed_id key to prove the index ignores
+    // non-ACTIVITY_CREATED kinds.
+    payload: { _v: 1, proposed_id: 'p1', text: 'first hypothesis' },
+    classification: null,
+    captured_at: new Date('2026-05-01T10:05:00Z'),
+    captured_by_user_id: USER_C_ID,
+    captured_by_employee_id: null,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+
+  await insertEventWithChain({
+    tenant_id: TENANT_C_ID,
+    subject_tenant_id: SUBJECT_C_ID,
+    kind: 'HYPOTHESIS',
+    payload: { _v: 1, proposed_id: 'p1', text: 'second hypothesis' },
+    classification: null,
+    captured_at: new Date('2026-05-01T10:06:00Z'),
+    captured_by_user_id: USER_C_ID,
+    captured_by_employee_id: null,
+    override_of_event_id: null,
+    override_new_kind: null,
+    override_reason: null,
+  });
+
+  const rows = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM event
+     WHERE tenant_id = ${TENANT_C_ID}
+       AND kind = 'HYPOTHESIS'
+       AND payload->>'proposed_id' = 'p1'
+  `;
+  assert.equal(
+    rows.length,
+    2,
+    'two HYPOTHESIS events with same (tenant_id, proposed_id) must coexist (partial index filters by kind)',
   );
 });

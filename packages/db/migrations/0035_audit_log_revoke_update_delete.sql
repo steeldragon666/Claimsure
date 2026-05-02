@@ -1,0 +1,32 @@
+-- DO NOT REGENERATE THIS MIGRATION VIA `pnpm --filter @cpa/db generate`.
+-- Hand-authored migration: pure GRANT/REVOKE plumbing. drizzle-kit's schema
+-- model has no representation for ACL changes, so this file is hand-authored
+-- the same way 0002 / 0022 / 0030 were.
+--
+-- ============================================================
+-- audit_log append-only REVOKE — fixes a latent defect from
+-- migration 0022.
+--
+-- Migration 0022's `GRANT SELECT, INSERT ON audit_log TO cpa_app`
+-- was additive (no-op) because migration 0002 had already established
+-- `ALTER DEFAULT PRIVILEGES ... GRANT SELECT, INSERT, UPDATE, DELETE
+-- ON TABLES TO cpa_app`, which auto-granted ALL CRUD on every
+-- newly-created table.
+--
+-- The intent of audit_log was append-only. Without explicit REVOKE,
+-- cpa_app could (a) UPDATE existing audit rows (rewriting history),
+-- and (b) DELETE rows (erasing history). Neither is desirable for an
+-- audit-trail keystone.
+--
+-- Same class of fix as migration 0030 (narrative_draft_version) which
+-- got it right at table-creation time. This migration retroactively
+-- closes the gap on audit_log.
+--
+-- Postgres has no built-in append-only table mode; the GRANT/REVOKE
+-- discipline is the structural enforcement. Future migrations adding
+-- new app roles must preserve this restriction (an ALTER DEFAULT
+-- PRIVILEGES change for a new role would re-grant CRUD here too —
+-- see retro item carried forward from P6).
+-- ============================================================
+
+REVOKE UPDATE, DELETE ON "audit_log" FROM cpa_app;

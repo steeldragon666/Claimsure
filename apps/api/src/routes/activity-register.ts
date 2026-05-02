@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireSession } from '@cpa/auth';
-import { sql } from '@cpa/db/client';
+import { sql, privilegedSql } from '@cpa/db/client';
 import { insertEventWithChain, nextActivityCode } from '@cpa/db';
 import {
   ActivityCreatedPayload,
@@ -544,6 +544,45 @@ export function registerActivityRegister(app: FastifyInstance): void {
             code,
           });
         } catch (err) {
+          // Detect the partial unique-index violation from migration 0036:
+          //   event_activity_created_proposed_id_unique on
+          //   (tenant_id, payload->>'proposed_id') WHERE kind='ACTIVITY_CREATED'.
+          // This fires when a concurrent accept request for the same
+          // proposed_id raced past our pre-load. The pre-load already
+          // handles sequential retries; the index handles the truly-
+          // concurrent case. On 23505, look up the existing activity
+          // and route to skipped_idempotent so the second client sees
+          // the same outcome as the first.
+          const isUniqueViolation =
+            err !== null &&
+            typeof err === 'object' &&
+            'code' in err &&
+            (err as { code?: string }).code === '23505';
+          if (isUniqueViolation) {
+            const winnerRows = await privilegedSql<{ activity_id: string; code: string }[]>`
+              SELECT
+                (payload ->> 'activity_id') AS activity_id,
+                (payload ->> 'code') AS code
+              FROM event
+              WHERE tenant_id = ${tenantId}
+                AND kind = 'ACTIVITY_CREATED'
+                AND payload ->> 'proposed_id' = ${item.proposed_id}
+              ORDER BY captured_at DESC
+              LIMIT 1
+            `;
+            const winner = winnerRows[0];
+            if (winner) {
+              accepted.push({
+                proposed_id: item.proposed_id,
+                activity_id: winner.activity_id,
+                code: winner.code,
+                skipped_idempotent: true,
+              });
+              continue;
+            }
+            // Fall through to rejected if we can't find the winner —
+            // shouldn't happen but defensive.
+          }
           rejected.push({
             proposed_id: item.proposed_id,
             reason: `insert_failed: ${(err as Error).message}`,
