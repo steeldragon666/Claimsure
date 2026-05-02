@@ -1,0 +1,103 @@
+# Agent eval workflow
+#
+# Runs the offline eval harness for the three P6 agents (expenditure-classifier,
+# register-synthesizer, narrative-drafter) against their hand-curated golden
+# datasets. See packages/agents/eval/README.md for framework details.
+#
+# Triggers:
+#   - pull_request: only when prompts under packages/agents/src/**/prompts/**
+#     change (path-filtered to avoid burning the eval budget on every PR).
+#   - schedule: nightly at 03:00 UTC (~13:00 AEST — workday for AU dogfood firm).
+#   - workflow_dispatch: manual ad-hoc runs (useful when bumping prompt versions).
+#
+# Required GitHub secret:
+#   EVAL_ANTHROPIC_API_KEY — sandboxed Anthropic API key with separate cost
+#   tracking and rate-limit budget. Promoted to ANTHROPIC_API_KEY at script
+#   start by each per-agent run.ts. See eval/README.md "Required environment".
+#
+# Cost per full nightly run (placeholder datasets, Task 7.1):
+#   - expenditure-classifier:  5 cases  Haiku    ~$0.10
+#   - register-synthesizer:    2 cases  Sonnet   ~$0.30
+#   - narrative-drafter:       2 cases  Sonnet   ~$0.50
+#   Total per nightly run:     ~$0.90 (will scale with Task 7.2 datasets).
+#
+# Failure semantics (advisory):
+#   The eval step uses `continue-on-error: true`, so a failed eval surfaces as
+#   a red check on the matrix view but does NOT block PR merges. Logs are
+#   uploaded as artifacts (90-day retention) for consultant review. If the
+#   Anthropic API is exhausted / 5xx, the workflow fails open — the artifact
+#   log captures the cause for triage, and the next nightly run re-attempts.
+#   Promote agent-eval to a required check only after Task 7.2 lands the
+#   production datasets and pass rates have stabilised.
+
+name: Agent Eval
+
+on:
+  pull_request:
+    paths:
+      - 'packages/agents/src/**/prompts/**'
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    name: eval (${{ matrix.agent }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [expenditure, register, narrative]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run eval (${{ matrix.agent }})
+        id: eval
+        continue-on-error: true
+        env:
+          EVAL_ANTHROPIC_API_KEY: ${{ secrets.EVAL_ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.EVAL_ANTHROPIC_API_KEY }}
+        run: |
+          set -o pipefail
+          pnpm --filter @cpa/agents eval:${{ matrix.agent }} \
+            2>&1 | tee eval-${{ matrix.agent }}.log
+
+      - name: Upload eval log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ matrix.agent }}-${{ github.sha }}
+          path: eval-${{ matrix.agent }}.log
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Annotate eval outcome
+        if: always()
+        run: |
+          if [ "${{ steps.eval.outcome }}" = "success" ]; then
+            echo "::notice::Agent eval (${{ matrix.agent }}) passed."
+          else
+            echo "::warning::Agent eval (${{ matrix.agent }}) did not pass — see uploaded log artifact for triage. This check is advisory and does not block merges."
+          fi

@@ -53,6 +53,25 @@ export default tseslint.config(
     },
   },
   {
+    // Agent eval drivers live outside `src/` so the package's main
+    // tsconfig (which has `include: ["src/**/*"]`) does not cover them.
+    // Resolve them through the dedicated `tsconfig.eval.json` instead;
+    // otherwise the project service errors with "not found by the
+    // project service" when lint runs from the workspace root. The
+    // tests-glob block above already handles eval/**/*.test.ts via
+    // tsconfig.test.json, so this override is for the non-test
+    // entrypoints (run.ts, scoring.ts, run.ts in each per-agent dir).
+    files: ['packages/agents/eval/**/*.ts'],
+    ignores: ['packages/agents/eval/**/*.test.ts'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: ['packages/agents/tsconfig.eval.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
     ignores: [
       '**/dist/**',
       '**/.next/**',

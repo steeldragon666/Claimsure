@@ -33,9 +33,13 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "tsx --env-file-if-exists=../../.env --test --test-force-exit \"src/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
+    "test": "tsx --env-file-if-exists=../../.env --test --test-force-exit \"src/**/*.test.ts\" \"eval/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.eval.json --noEmit",
+    "lint": "eslint src eval",
+    "eval:expenditure": "tsx --env-file-if-exists=../../.env eval/expenditure-classifier/run.ts",
+    "eval:register": "tsx --env-file-if-exists=../../.env eval/register-synthesizer/run.ts",
+    "eval:narrative": "tsx --env-file-if-exists=../../.env eval/narrative-drafter/run.ts",
+    "eval:all": "pnpm eval:expenditure && pnpm eval:register && pnpm eval:narrative"
   },
   "dependencies": {
     "@cpa/db": "workspace:*",

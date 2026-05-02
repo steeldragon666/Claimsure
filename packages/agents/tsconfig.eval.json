@@ -4,5 +4,6 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["src/**/*.test.ts", "eval/**/*.test.ts"]
+  "include": ["eval/**/*.ts"],
+  "references": [{ "path": "./tsconfig.json" }]
 }
