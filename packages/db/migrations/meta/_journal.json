@@ -227,6 +227,13 @@
       "breakpoints": true
     },
     {
+      "idx": 32,
+      "version": "7",
+      "when": 1777892460000,
+      "tag": "0032_agent_a_system_user",
+      "breakpoints": true
+    },
+    {
       "idx": 33,
       "version": "7",
       "when": 1777892520000,

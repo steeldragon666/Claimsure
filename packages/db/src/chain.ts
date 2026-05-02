@@ -20,7 +20,15 @@ export type EventForHashing = {
   override_reason: string | null;
 };
 
-function canonicalJsonStringify(value: unknown): string {
+/**
+ * Recursive JSON serializer that emits object keys in sorted order so the
+ * resulting bytes are insertion-order-independent. Exported so callers
+ * outside the chain (e.g. agent idempotency-key derivation) can compute a
+ * deterministic hash bundle without re-implementing the same algorithm —
+ * a divergent serializer is exactly the silent-cache-miss class of bug
+ * this is meant to prevent.
+ */
+export function canonicalJsonStringify(value: unknown): string {
   if (typeof value === 'number' && !Number.isFinite(value)) {
     throw new Error(
       `canonicalJsonStringify: non-finite number (NaN/Infinity) is not JSON-representable; reject before hashing`,

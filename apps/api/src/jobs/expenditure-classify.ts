@@ -1,5 +1,5 @@
 import { privilegedSql } from '@cpa/db/client';
-import { insertEventWithChain } from '@cpa/db';
+import { canonicalJsonStringify, insertEventWithChain } from '@cpa/db';
 import {
   computeIdempotencyKey,
   EXPENDITURE_CONFIDENCE_THRESHOLDS,
@@ -323,7 +323,16 @@ async function classifyOne(tenantId: string, expenditureId: string): Promise<One
   // bundle JSON). Same string is reused for both the cache lookup and
   // the eventual `EXPENDITURE_CLASSIFIED` payload — diverging the two
   // would silently break dedupe across deploys.
-  const idempotencyKey = computeIdempotencyKey(PROMPT_VERSION, JSON.stringify(inputBundle));
+  //
+  // Uses `canonicalJsonStringify` (sorted-key recursive serializer
+  // shared with the event chain) instead of the bare `JSON.stringify`
+  // so a future field-reorder in the literal above can't silently
+  // invalidate the cache. V8 preserves insertion order for non-numeric
+  // keys today, but relying on that is a footgun — a refactor that
+  // moves `expenditure` below `project` would produce different bytes
+  // and a cache-miss storm doubling Anthropic spend until backfill.
+  const inputJson = canonicalJsonStringify(inputBundle);
+  const idempotencyKey = computeIdempotencyKey(PROMPT_VERSION, inputJson);
 
   const cached = await lookupCache(idempotencyKey);
   if (cached) {

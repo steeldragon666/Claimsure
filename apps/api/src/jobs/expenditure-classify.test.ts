@@ -153,7 +153,10 @@ const cleanup = async (): Promise<void> => {
   await privilegedSql`DELETE FROM subject_tenant_user WHERE subject_tenant_id = ${SUBJECT}`;
   await privilegedSql`DELETE FROM subject_tenant WHERE id = ${SUBJECT}`;
   await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (${TENANT}, ${TENANT_OTHER})`;
-  await sql`DELETE FROM "user" WHERE id IN (${ADMIN_USER}, ${AGENT_A_SYSTEM_USER_ID})`;
+  // NB: AGENT_A_SYSTEM_USER_ID is seeded by migration 0032 and persists
+  // across test runs (the chain FK requires the row to exist for the
+  // chain's lifetime). We deliberately do NOT delete it here.
+  await sql`DELETE FROM "user" WHERE id = ${ADMIN_USER}`;
   await sql`DELETE FROM tenant WHERE id IN (${TENANT}, ${TENANT_OTHER})`;
 };
 
@@ -166,12 +169,13 @@ before(async () => {
             VALUES (${TENANT}, 'Firm A33', 'firm-a33', 'mixed'),
                    (${TENANT_OTHER}, 'Firm A33-Other', 'firm-a33-other', 'mixed')`;
 
-  // Two users: a normal admin (used as `submitted_by_user_id` etc.) and
-  // the Agent A system user (used as `captured_by_user_id` for the
-  // chain events the job writes).
+  // Admin user used as submitted_by_user_id etc. The Agent A system
+  // user (AGENT_A_SYSTEM_USER_ID) is seeded by migration 0032 and is
+  // not inserted here. ON CONFLICT DO NOTHING guards against an older
+  // migrator state that already created the admin row.
   await sql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
-            VALUES (${ADMIN_USER}, 'a33-admin@example.com', 'microsoft', 'microsoft:a33-admin', 'A33 Admin'),
-                   (${AGENT_A_SYSTEM_USER_ID}, 'agent-a-system@cpa.local', 'microsoft', 'microsoft:agent-a-system', 'Agent A')`;
+            VALUES (${ADMIN_USER}, 'a33-admin@example.com', 'microsoft', 'microsoft:a33-admin', 'A33 Admin')
+            ON CONFLICT (id) DO NOTHING`;
   await privilegedSql`INSERT INTO tenant_user (id, tenant_id, user_id, role, is_default)
                        VALUES (gen_random_uuid(), ${TENANT}, ${ADMIN_USER}, 'admin', true)`;
   await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
