@@ -96,7 +96,22 @@ const DRAFT_VERSION_5A_INITIAL_ID = '00000000-0000-4000-8000-00006a001501';
 const DRAFT_VERSION_5A_REGEN_ID = '00000000-0000-4000-8000-00006a001502';
 const DRAFT_VERSION_5B_INITIAL_ID = '00000000-0000-4000-8000-00006a001503';
 
+// P6 Task 6.1 — migration 0034 mapping_rule scalar-string backfill.
+// Two rule fixtures: one with conditions stored as a jsonb scalar
+// STRING (the bug shape), one with action stored as a jsonb scalar
+// STRING. The migration's two UPDATEs re-encode each into its
+// proper jsonb array/object shape. Test owns its own user FK because
+// mapping_rule.created_by_user_id is NOT NULL. Reuses the suite-wide
+// TENANT_ID so we don't need a new tenant row.
+const MAPPING_RULE_61_USER_ID = '00000000-0000-4000-8000-00006a006101';
+const MAPPING_RULE_61_CONDITIONS_ID = '00000000-0000-4000-8000-00006a006102';
+const MAPPING_RULE_61_ACTION_ID = '00000000-0000-4000-8000-00006a006103';
+
 const cleanup = async (): Promise<void> => {
+  // Task 6.1 — mapping_rule fixtures. Delete first so the user FK
+  // referenced by created_by_user_id is free before the user row goes.
+  await privilegedSql`DELETE FROM mapping_rule WHERE id IN (${MAPPING_RULE_61_CONDITIONS_ID}, ${MAPPING_RULE_61_ACTION_ID})`;
+  await privilegedSql`DELETE FROM "user" WHERE id = ${MAPPING_RULE_61_USER_ID}`;
   await privilegedSql`DELETE FROM event WHERE id IN (${EVENT_26_ID}, ${EVENT_27_ID}, ${EVENT_28_ID})`;
   // Versions first — FK to narrative_draft has ON DELETE CASCADE so
   // the draft delete below would clean these up too, but explicit
@@ -947,5 +962,206 @@ test('migration 0030: narrative_draft_version append-only table + RLS isolation'
     visibleAsB[0]!.id,
     DRAFT_VERSION_5B_INITIAL_ID,
     'TENANT_B session must see only its own version row',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// P6 Task 6.1 — migration 0034 mapping_rule scalar-string backfill
+//
+// The migration is idempotent and ALREADY ran on the test DB by the time
+// this test executes (the `pnpm db:migrate` runner applies the full
+// journal before the suite starts). To exercise the backfill SQL
+// behaviorally, this test takes Option A from the task spec:
+//
+//   1. Seed two mapping_rule rows whose `conditions` / `action` columns
+//      hold jsonb SCALAR STRINGS (the bug shape). We construct the
+//      scalar via a `to_jsonb(text)` cast so postgres-js doesn't try to
+//      decode the bind value as a JSON object/array — the wire shape we
+//      want is a jsonb scalar whose underlying text content happens to
+//      look like a JSON-serialised array/object.
+//   2. Re-run the two UPDATE statements from the migration inline. They
+//      WHERE-filter on jsonb_typeof(...) = 'string', so only the bug-
+//      shape rows are touched.
+//   3. Assert jsonb_typeof flipped to 'array' and 'object' respectively
+//      — proves the backfill re-encoded the scalar back into a structural
+//      jsonb value.
+//   4. Re-run the same SQL again — assert `jsonb_typeof` is unchanged
+//      and the row content is byte-identical (idempotency: the WHERE
+//      filter excludes already-correct rows).
+//   5. cleanup() (defined above + after()) drops the rows.
+//
+// We DON'T use `pnpm db:migrate` here because the migration has already
+// run and the runner has no public "re-run idx N" surface. Inlining the
+// two UPDATEs is the same SQL the migration ships — a future revert of
+// the migration body would still surface here as a behavioral regression.
+// ---------------------------------------------------------------------------
+
+test('migration 0034: mapping_rule scalar-string backfill re-encodes conditions to array', async () => {
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+  // Seed a user row owned by the suite — mapping_rule.created_by_user_id
+  // is NOT NULL FK to user.id. Re-using the suite-wide USER_ID would
+  // collide with cleanup ordering (the suite-level after() drops it
+  // before this test's cleanup runs in some interleavings), so we own
+  // a dedicated fixture user.
+  await privilegedSql`
+    INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+    VALUES (
+      ${MAPPING_RULE_61_USER_ID}, 'p6-6-1@example.com', 'microsoft',
+      'microsoft:p6-6-1', 'P6 Task 6.1 User'
+    )
+  `;
+
+  // The bug shape: a jsonb SCALAR whose decoded text is the string
+  // representation of an array. `to_jsonb(text)` produces a jsonb
+  // scalar string; jsonb_typeof on it returns 'string'. This is what
+  // the pre-fix drizzle-mutated single-cast pattern wrote.
+  const conditionsBugText = '["vendor=Acme"]';
+  // For the action row, the bug shape is a jsonb scalar whose decoded
+  // text is the string representation of an object (the action shape).
+  const actionBugText = '{"kind":"map","activity_id":"00000000-0000-4000-8000-000000abc999"}';
+
+  // Insert the conditions-bug row. action is a valid object so it
+  // doesn't collide with the second test's premise.
+  await privilegedSql`
+    INSERT INTO mapping_rule (
+      tenant_id, id, name, priority, enabled,
+      conditions, action, created_by_user_id
+    ) VALUES (
+      ${TENANT_ID}, ${MAPPING_RULE_61_CONDITIONS_ID},
+      'P6 T6.1 conditions-bug fixture', 100, true,
+      to_jsonb(${conditionsBugText}::text),
+      ${JSON.stringify({ kind: 'flag_for_review' })}::text::jsonb,
+      ${MAPPING_RULE_61_USER_ID}
+    )
+  `;
+
+  // Insert the action-bug row. conditions is a valid array so the
+  // first UPDATE doesn't touch it.
+  await privilegedSql`
+    INSERT INTO mapping_rule (
+      tenant_id, id, name, priority, enabled,
+      conditions, action, created_by_user_id
+    ) VALUES (
+      ${TENANT_ID}, ${MAPPING_RULE_61_ACTION_ID},
+      'P6 T6.1 action-bug fixture', 101, true,
+      ${JSON.stringify([])}::text::jsonb,
+      to_jsonb(${actionBugText}::text),
+      ${MAPPING_RULE_61_USER_ID}
+    )
+  `;
+
+  // Sanity check: pre-backfill, both rows hold jsonb scalar strings
+  // in their respective bug columns.
+  const preTypes = await privilegedSql<
+    { id: string; conditions_type: string; action_type: string }[]
+  >`
+    SELECT id,
+           jsonb_typeof(conditions) AS conditions_type,
+           jsonb_typeof(action)     AS action_type
+      FROM mapping_rule
+     WHERE id IN (${MAPPING_RULE_61_CONDITIONS_ID}, ${MAPPING_RULE_61_ACTION_ID})
+     ORDER BY id
+  `;
+  assert.equal(preTypes.length, 2, 'both fixture rows must round-trip');
+  const preByConditionsId = preTypes.find((r) => r.id === MAPPING_RULE_61_CONDITIONS_ID)!;
+  const preByActionId = preTypes.find((r) => r.id === MAPPING_RULE_61_ACTION_ID)!;
+  assert.equal(
+    preByConditionsId.conditions_type,
+    'string',
+    'pre-backfill: conditions-bug row must hold a jsonb scalar string',
+  );
+  assert.equal(
+    preByActionId.action_type,
+    'string',
+    'pre-backfill: action-bug row must hold a jsonb scalar string',
+  );
+
+  // ---- Run the two UPDATE statements from migration 0034 inline. -------
+  // These are byte-identical to the migration body — a future revert
+  // would surface as a regression here.
+  await privilegedSql`
+    UPDATE mapping_rule
+       SET conditions = (conditions #>> '{}')::jsonb
+     WHERE jsonb_typeof(conditions) = 'string'
+  `;
+  await privilegedSql`
+    UPDATE mapping_rule
+       SET action = (action #>> '{}')::jsonb
+     WHERE jsonb_typeof(action) = 'string'
+  `;
+
+  // ---- Post-backfill assertions ----------------------------------------
+  const postTypes = await privilegedSql<
+    {
+      id: string;
+      conditions_type: string;
+      action_type: string;
+      conditions: unknown;
+      action: unknown;
+    }[]
+  >`
+    SELECT id,
+           jsonb_typeof(conditions) AS conditions_type,
+           jsonb_typeof(action)     AS action_type,
+           conditions, action
+      FROM mapping_rule
+     WHERE id IN (${MAPPING_RULE_61_CONDITIONS_ID}, ${MAPPING_RULE_61_ACTION_ID})
+     ORDER BY id
+  `;
+  const postByConditionsId = postTypes.find((r) => r.id === MAPPING_RULE_61_CONDITIONS_ID)!;
+  const postByActionId = postTypes.find((r) => r.id === MAPPING_RULE_61_ACTION_ID)!;
+  assert.equal(
+    postByConditionsId.conditions_type,
+    'array',
+    'post-backfill: conditions-bug row must now hold a jsonb array',
+  );
+  assert.deepEqual(
+    postByConditionsId.conditions,
+    ['vendor=Acme'],
+    'post-backfill: conditions content must round-trip as the parsed array',
+  );
+  assert.equal(
+    postByActionId.action_type,
+    'object',
+    'post-backfill: action-bug row must now hold a jsonb object',
+  );
+  assert.deepEqual(
+    postByActionId.action,
+    { kind: 'map', activity_id: '00000000-0000-4000-8000-000000abc999' },
+    'post-backfill: action content must round-trip as the parsed object',
+  );
+
+  // ---- Idempotency: re-run the SQL — already-correct rows must be -----
+  // skipped by the WHERE filter and the values stay byte-identical.
+  await privilegedSql`
+    UPDATE mapping_rule
+       SET conditions = (conditions #>> '{}')::jsonb
+     WHERE jsonb_typeof(conditions) = 'string'
+  `;
+  await privilegedSql`
+    UPDATE mapping_rule
+       SET action = (action #>> '{}')::jsonb
+     WHERE jsonb_typeof(action) = 'string'
+  `;
+
+  const idempotentTypes = await privilegedSql<
+    { id: string; conditions: unknown; action: unknown }[]
+  >`
+    SELECT id, conditions, action
+      FROM mapping_rule
+     WHERE id IN (${MAPPING_RULE_61_CONDITIONS_ID}, ${MAPPING_RULE_61_ACTION_ID})
+     ORDER BY id
+  `;
+  const idemByConditionsId = idempotentTypes.find((r) => r.id === MAPPING_RULE_61_CONDITIONS_ID)!;
+  const idemByActionId = idempotentTypes.find((r) => r.id === MAPPING_RULE_61_ACTION_ID)!;
+  assert.deepEqual(
+    idemByConditionsId.conditions,
+    postByConditionsId.conditions,
+    'idempotent re-run must leave conditions unchanged',
+  );
+  assert.deepEqual(
+    idemByActionId.action,
+    postByActionId.action,
+    'idempotent re-run must leave action unchanged',
   );
 });

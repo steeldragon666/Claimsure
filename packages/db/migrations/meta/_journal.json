@@ -239,6 +239,13 @@
       "when": 1777892520000,
       "tag": "0033_agent_b_system_user",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1777892580000,
+      "tag": "0034_mapping_rule_scalar_string_backfill",
+      "breakpoints": true
     }
   ]
 }
