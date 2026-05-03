@@ -13,6 +13,7 @@ import {
 } from './multi-cycle-summarize@1.0.0.js';
 import { getPrompt, listPrompts } from '../../runtime/prompt-registry.js';
 import { MULTI_CYCLE_TRANSITION_KINDS } from '../types.js';
+import { PriorFyContextBlock } from '../../narrative-drafter/types.js';
 
 /* ------------------------------------------------------------------ */
 /* Fixtures                                                            */
@@ -73,6 +74,76 @@ test('multi-cycle-summarize@1.0.0 is registered in the prompt registry', () => {
 
 test('PROMPT_VERSION matches the registered version', () => {
   assert.equal(PROMPT_VERSION, '1.0.0');
+});
+
+/* ------------------------------------------------------------------ */
+/* P7 Task A.6 — three-way parity for transition_kind enum            */
+/* ------------------------------------------------------------------ */
+
+// Plan reference: docs/plans/2026-05-03-p7-implementation.md Task A.6.
+//
+// Adapted three-way parity check for `transition_kind`. Unlike the
+// AuditKind parity test in `packages/db/src/migrations.test.ts` (which
+// asserts Zod ↔ db const ↔ SQL CHECK), `transition_kind` is purely an
+// LLM-tool output enum. There is NO SQL CHECK constraint binding it —
+// the values never persist as a discriminated column, only as elements
+// of `narrative_draft_audit.summary_payload` (jsonb) and similar agent
+// output blobs. So the "third leg" of the three-way is a SECOND Zod
+// usage site rather than SQL:
+//
+//   1. canonical const: MULTI_CYCLE_TRANSITION_KINDS in
+//      packages/agents/src/multi-cycle/types.ts
+//   2. tool-schema Zod enum: citation_graph[].transition_kind in
+//      multi-cycle-summarize@1.0.0.ts (this file's sibling)
+//   3. narrative-drafter Zod enum: prior_fys[].transition_classification
+//      in narrative-drafter/types.ts (the v1.1.0 multi-cycle context
+//      block)
+//
+// Drift between any two of these would silently mis-classify
+// continuity citations or fail PriorFyContextBlock parses for chains
+// where the summariser populated `transition_classification`. The web
+// component mirror (`apps/web/src/components/multi-cycle-timeline.tsx`)
+// is a fourth site but lives behind the package-boundary rule (web
+// does not depend on @cpa/agents); it carries an explicit comment
+// pointing back to MULTI_CYCLE_TRANSITION_KINDS as the canonical
+// source, and is tested separately in its own component test file.
+test('transition_kind enum parity: canonical const ↔ tool schema ↔ narrative-drafter schema', () => {
+  // Source 1: canonical const.
+  const canonical = [...MULTI_CYCLE_TRANSITION_KINDS].sort();
+
+  // Source 2: extract values from the tool-schema citation_graph entry.
+  //   multiCycleSummarizeToolBaseShape.citation_graph is z.array(CitationGraphEntry).
+  //   .element walks into the array's inner schema (the strict ZodObject).
+  //   .shape.transition_kind is z.enum(MULTI_CYCLE_TRANSITION_KINDS) — a ZodEnum
+  //   whose `.options` is the runtime-readable string[] copy of its values.
+  const citationEntry = (
+    multiCycleSummarizeToolBaseShape.citation_graph as z.ZodArray<z.ZodObject<z.ZodRawShape>>
+  ).element;
+  const toolEnum = (citationEntry.shape.transition_kind as z.ZodEnum<[string, ...string[]]>)
+    .options;
+  const toolEnumValues = [...toolEnum].sort();
+
+  // Source 3: extract values from PriorFyContextBlock.prior_fys[].transition_classification.
+  //   Same array→element walk; transition_classification is .nullable(), so
+  //   unwrap the ZodNullable to reach the inner ZodEnum.
+  const priorFyEntry = (
+    PriorFyContextBlock.shape.prior_fys as z.ZodArray<z.ZodObject<z.ZodRawShape>>
+  ).element;
+  const drafterEnum = (
+    priorFyEntry.shape.transition_classification as z.ZodNullable<z.ZodEnum<[string, ...string[]]>>
+  ).unwrap().options;
+  const drafterEnumValues = [...drafterEnum].sort();
+
+  assert.deepEqual(
+    toolEnumValues,
+    canonical,
+    'tool-schema citation_graph[].transition_kind drifted from MULTI_CYCLE_TRANSITION_KINDS',
+  );
+  assert.deepEqual(
+    drafterEnumValues,
+    canonical,
+    'narrative-drafter prior_fys[].transition_classification drifted from MULTI_CYCLE_TRANSITION_KINDS',
+  );
 });
 
 test('system prompt explicitly forbids paraphrase', () => {
