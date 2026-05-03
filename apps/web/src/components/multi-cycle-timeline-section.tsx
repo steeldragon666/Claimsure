@@ -1,6 +1,6 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, NotFoundError } from '@/lib/api';
 import {
   MultiCycleTimeline,
   type CitationGraphEntry,
@@ -21,6 +21,12 @@ import {
  * the chain having 2+ FYs anyway, so a missing endpoint is
  * indistinguishable from "no prior FY chain" from the consultant's
  * perspective.
+ *
+ * Catches NotFoundError specifically (HTTP 404 from `apiFetch`); other
+ * errors propagate to the query state and result in `query.data ===
+ * undefined`, which the section then renders as null. This silent-
+ * fallthrough on non-404 errors is by design until the API endpoint
+ * lands; document any explicit telemetry hooks in a follow-up.
  *
  * **Gating rules (per Task A.5 spec):**
  *   - chain length < 2 FYs           → render nothing
@@ -48,7 +54,7 @@ async function fetchMultiCycleTimeline(
     // Endpoint may not exist yet (A.6+ work). Treat any failure as
     // "no timeline" so the activity page doesn't break — the section
     // is purely additive context.
-    if (err instanceof Error && /404|not found/i.test(err.message)) {
+    if (err instanceof NotFoundError) {
       return null;
     }
     throw err;

@@ -313,7 +313,12 @@ export function MultiCycleTimeline({
               data-fy-label={bucket.fy_label}
             >
               <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-                <span className="font-mono text-sm font-semibold">{bucket.fy_label}</span>
+                <span
+                  id={`fy-${bucket.fy_label}-heading`}
+                  className="font-mono text-sm font-semibold"
+                >
+                  {bucket.fy_label}
+                </span>
                 {nextTransition ? (
                   <span
                     className={cn(
@@ -329,7 +334,7 @@ export function MultiCycleTimeline({
                 ) : null}
               </div>
 
-              <ul className="space-y-2 p-3">
+              <ul className="space-y-2 p-3" aria-labelledby={`fy-${bucket.fy_label}-heading`}>
                 {bucket.entries.flatMap((entry) =>
                   entry.cited_segment_indices.map((segIdx) => {
                     const segment = lookupSegment(
