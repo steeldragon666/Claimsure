@@ -27,78 +27,263 @@
 
 ## Theme A — Multi-cycle narrative + forensic metadata (p7a)
 
-### Task A.1: Migration 0037 — forensic columns + immutability trigger
+### Task A.1: Migration 0037 — Theme A schema foundation
 
-**Worktree:** `p7a`. **Theme:** A. **Depends on:** none. **Effort:** ~3 hours.
+**Worktree:** `p7a`. **Theme:** A. **Depends on:** none. **Effort:** ~6 hours.
+
+**Schema-reconciliation context (added 2026-05-03 after implementer investigation):**
+The original Task A.1 spec referenced four schema objects that don't exist in the codebase as of `main` @ `2da4f5e`:
+
+1. `narrative_segment` table — segments are stored inline as `jsonb` on `narrative_draft.segments` (P6 pattern). **Decision Q-Fix1=A:** create `narrative_segment` table by extracting from the jsonb. Existing `narrative_draft.segments` is preserved as the legacy read path; new writers populate both during transition (read-path migration deferred to a follow-up task).
+2. `activity.proposed_id` column — `proposed_id` lives only on `event.payload->>'proposed_id'`. **Decision Q-Fix2=A:** add `activity.proposed_id uuid` denormalized column, backfilled from the latest `ACTIVITY_REGISTER_DRAFTED` event payload per activity.
+3. `activity.fy_label` column — FY currently lives as `claim.fiscal_year integer` joined via `activity.claim_id`. **Decision Q-Fix3=A:** add `activity.fy_label text` denormalized column derived from `'FY' || (claim.fiscal_year - 2000)::text`.
+4. `audit_log` schema — actual columns are `(id, firm_id, kind, payload, actor_user_id, created_at)`, NOT `(tenant_id, subject_kind, subject_id, payload, created_at)`. **Decision Q-Fix4=B:** adapt the immutability trigger to use the existing schema — encode `subject_kind: 'activity'` and `subject_id: activity.id` inside the payload jsonb; resolve `firm_id` from the activity's tenant via `tenant.firm_id` lookup.
+5. `AuditKind` Zod enum is closed-set (`MAPPING_RULE_CREATED`, `MAPPING_RULE_UPDATED`, `MAPPING_RULE_ARCHIVED`). **Decision Q-Fix5=A:** extend the Zod enum + agents-package mirror const + add a SQL CHECK constraint listing all valid kinds (three-way parity, retroactively pulled into Task A.1).
 
 **Files:**
 
 - Create: `packages/db/migrations/0037_multi_cycle_narrative.sql`
 - Modify: `packages/db/migrations/meta/_journal.json` — append idx 37
-- Test: `packages/db/src/migrations.test.ts` — additive
+- Modify: `packages/db/src/schema/narrative.ts` — add `narrativeSegment` Drizzle table definition; keep `narrativeDraft.segments` jsonb for backward compat
+- Modify: `packages/db/src/schema/activity.ts` — add `proposedId`, `fyLabel`, `hypothesisFormedAt` Drizzle columns
+- Modify: `packages/schemas/src/audit.ts` — extend `AuditKind` Zod enum with `HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION`
+- Modify: `packages/agents/src/audit-kinds.ts` (or wherever the agents-package mirror const lives — find with `grep -r "AuditKind\|MAPPING_RULE_CREATED" packages/agents`) — mirror the enum extension
+- Test: `packages/db/src/migrations.test.ts` — additive (8 tests)
 
-**Step 1: Write the failing test**
+**Step 1: Investigate codebase before writing tests**
+
+Confirm the following before authoring:
+- Existing test conventions in `packages/db/src/migrations.test.ts` — note the inline UUID constants pattern (no `TENANT_A`/`seedActivity` helpers exist; tests use `privilegedSql` and inline `INSERT` statements).
+- `tenant.firm_id` relationship exists (the trigger needs to resolve firm from tenant). If not, halt and ask.
+- Existing `audit_log_kind_nonempty` and `audit_log_payload_object` CHECK constraints (migration 0022 + 0035 area). The new SQL CHECK on `kind` extends the existing constraint shape.
+- Drizzle schema file conventions (`packages/db/src/schema/*.ts`).
+- `narrative_draft.segments` jsonb shape (look at `packages/db/src/schema/narrative.ts` + actual data in `narrative_draft_version` rows for examples).
+
+**Step 2: Write failing tests** (8 tests, append to `migrations.test.ts`)
 
 ```ts
-// packages/db/src/migrations.test.ts (append)
-test('0037: narrative_segment.first_recorded_at exists with NOT NULL DEFAULT now()', async () => {
-  const rows = await sql<{ column_name: string; is_nullable: string; column_default: string | null }[]>`
-    SELECT column_name, is_nullable, column_default
+test('migration 0037: narrative_segment table exists with required columns', async () => {
+  const rows = await privilegedSql<{ column_name: string; data_type: string; is_nullable: string }[]>`
+    SELECT column_name, data_type, is_nullable
       FROM information_schema.columns
      WHERE table_name = 'narrative_segment'
-       AND column_name = 'first_recorded_at'
+     ORDER BY ordinal_position
+  `;
+  const cols = Object.fromEntries(rows.map(r => [r.column_name, r]));
+  assert.ok(cols.id, 'narrative_segment.id missing');
+  assert.ok(cols.narrative_draft_id, 'narrative_segment.narrative_draft_id missing');
+  assert.ok(cols.segment_index, 'narrative_segment.segment_index missing');
+  assert.ok(cols.section_kind, 'narrative_segment.section_kind missing');
+  assert.ok(cols.body, 'narrative_segment.body missing');
+  assert.ok(cols.first_recorded_at, 'narrative_segment.first_recorded_at missing');
+  assert.equal(cols.first_recorded_at!.is_nullable, 'NO');
+});
+
+test('migration 0037: narrative_segment backfilled from narrative_draft.segments jsonb', async () => {
+  // Seed a narrative_draft with 3 segments before the migration would have run.
+  // After migration, narrative_segment should have 3 rows for that draft.
+  // (This test runs against the migrated DB; it asserts row count consistency
+  // for any pre-existing narrative_draft rows.)
+  const rows = await privilegedSql<{ draft_count: number; segment_count: number }[]>`
+    SELECT
+      (SELECT COUNT(*) FROM narrative_draft WHERE jsonb_array_length(segments) > 0) AS draft_count,
+      (SELECT COUNT(DISTINCT narrative_draft_id) FROM narrative_segment) AS segment_count
+  `;
+  assert.equal(rows[0]!.draft_count, rows[0]!.segment_count, 'every draft with segments should have narrative_segment rows');
+});
+
+test('migration 0037: activity.proposed_id column exists (uuid, nullable)', async () => {
+  const rows = await privilegedSql<{ data_type: string; is_nullable: string }[]>`
+    SELECT data_type, is_nullable
+      FROM information_schema.columns
+     WHERE table_name = 'activity' AND column_name = 'proposed_id'
   `;
   assert.equal(rows.length, 1);
-  assert.equal(rows[0]!.is_nullable, 'NO');
-  assert.match(rows[0]!.column_default ?? '', /now\(\)/);
+  assert.equal(rows[0]!.data_type, 'uuid');
+  assert.equal(rows[0]!.is_nullable, 'YES');  // nullable: not all activities have a proposed_id origin
 });
 
-test('0037: activity.hypothesis_formed_at is NOT NULL after backfill', async () => {
-  const rows = await sql<{ column_name: string; is_nullable: string }[]>`
-    SELECT column_name, is_nullable
+test('migration 0037: activity.fy_label column exists (text, NOT NULL after backfill)', async () => {
+  const rows = await privilegedSql<{ data_type: string; is_nullable: string }[]>`
+    SELECT data_type, is_nullable
       FROM information_schema.columns
-     WHERE table_name = 'activity'
-       AND column_name = 'hypothesis_formed_at'
+     WHERE table_name = 'activity' AND column_name = 'fy_label'
   `;
+  assert.equal(rows[0]!.data_type, 'text');
   assert.equal(rows[0]!.is_nullable, 'NO');
 });
 
-test('0037: hypothesis_formed_at immutability trigger fires', async () => {
-  // seed activity row, attempt to update hypothesis_formed_at, expect throw + audit_log row
-  const tenantId = TENANT_A;
-  const activityId = await seedActivity(tenantId, { hypothesis_formed_at: new Date('2025-01-01') });
+test('migration 0037: activity.hypothesis_formed_at column exists (timestamptz, NOT NULL after backfill)', async () => {
+  const rows = await privilegedSql<{ data_type: string; is_nullable: string }[]>`
+    SELECT data_type, is_nullable
+      FROM information_schema.columns
+     WHERE table_name = 'activity' AND column_name = 'hypothesis_formed_at'
+  `;
+  assert.equal(rows[0]!.data_type, 'timestamp with time zone');
+  assert.equal(rows[0]!.is_nullable, 'NO');
+});
+
+test('migration 0037: audit_log_kind CHECK includes HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION', async () => {
+  const rows = await privilegedSql<{ check_clause: string }[]>`
+    SELECT cc.check_clause
+      FROM information_schema.check_constraints cc
+      JOIN information_schema.constraint_column_usage ccu USING (constraint_name)
+     WHERE ccu.table_name = 'audit_log' AND ccu.column_name = 'kind'
+  `;
+  const matched = rows.some(r => r.check_clause.includes('HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION'));
+  assert.ok(matched, 'audit_log kind CHECK must list the new immutability-violation kind');
+});
+
+test('migration 0037: hypothesis_formed_at immutability trigger fires + audit-logs', async () => {
+  // Seed: tenant + firm + claim + activity with hypothesis_formed_at set
+  const firmId = randomUUID();
+  const tenantId = randomUUID();
+  const claimId = randomUUID();
+  const activityId = randomUUID();
+  await privilegedSql`INSERT INTO firm (id, name) VALUES (${firmId}, 'test firm')`;
+  await privilegedSql`INSERT INTO tenant (id, firm_id, slug) VALUES (${tenantId}, ${firmId}, 'test-tenant')`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, fiscal_year) VALUES (${claimId}, ${tenantId}, 2025)`;
+  await privilegedSql`
+    INSERT INTO activity (id, tenant_id, claim_id, code, kind, title, fy_label, hypothesis_formed_at)
+    VALUES (${activityId}, ${tenantId}, ${claimId}, 'A1', 'core', 'test', 'FY25', '2025-01-01'::timestamptz)
+  `;
+
   await assert.rejects(
-    () => sql`UPDATE activity SET hypothesis_formed_at = ${new Date('2024-01-01')}::timestamptz WHERE id = ${activityId}`,
+    () => privilegedSql`UPDATE activity SET hypothesis_formed_at = '2024-01-01'::timestamptz WHERE id = ${activityId}`,
     /immutable/
   );
-  const audit = await sql<{ kind: string }[]>`
-    SELECT kind FROM audit_log WHERE subject_id = ${activityId} AND kind = 'HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION'
+
+  // Audit log entry should be present (via trigger insert before raise)
+  // NOTE: the EXCEPTION rolls back the INSERT in PostgreSQL's default behaviour,
+  // so the trigger must use a separate transaction or rely on RAISE NOTICE
+  // for the audit hook. The implementer must decide: either
+  //   (a) emit the audit row via dblink/autonomous transaction (heavy), or
+  //   (b) accept that the audit_log row is rolled back along with the rejected
+  //       UPDATE — in which case the test asserts only the rejection, and the
+  //       "audit trail" is the application-layer error log, OR
+  //   (c) use INSTEAD OF / split into validate-fn + writer-fn pattern where
+  //       a guard table records every attempt before the throwing trigger.
+  // RECOMMENDED: (c) using a dedicated `forensic_violation_attempt` table
+  // OR drop the audit_log INSERT entirely and rely on the EXCEPTION + app log.
+  // **Implementer: pick the simplest viable option and document the choice in
+  // the migration's leading comment block.**
+});
+
+test('migration 0037: trigger does NOT fire when other columns update', async () => {
+  // Seed an activity, update its title, assert no audit_log row inserted
+  // (regression guard: trigger must be column-scoped to hypothesis_formed_at)
+  const firmId = randomUUID();
+  const tenantId = randomUUID();
+  const claimId = randomUUID();
+  const activityId = randomUUID();
+  await privilegedSql`INSERT INTO firm (id, name) VALUES (${firmId}, 'test firm 2')`;
+  await privilegedSql`INSERT INTO tenant (id, firm_id, slug) VALUES (${tenantId}, ${firmId}, 'test-tenant-2')`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, fiscal_year) VALUES (${claimId}, ${tenantId}, 2025)`;
+  await privilegedSql`
+    INSERT INTO activity (id, tenant_id, claim_id, code, kind, title, fy_label, hypothesis_formed_at)
+    VALUES (${activityId}, ${tenantId}, ${claimId}, 'A2', 'core', 'before', 'FY25', '2025-01-01'::timestamptz)
   `;
-  assert.equal(audit.length, 1);
+  await privilegedSql`UPDATE activity SET title = 'after' WHERE id = ${activityId}`;
+  // Should succeed silently. Audit assertion depends on Q-Fix4=B implementation choice above.
 });
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 3: Run tests to verify they fail**
 
 ```bash
 pnpm --filter @cpa/db test --test-name-pattern "0037"
-# Expected: FAIL — column does not exist
+# Expected: FAIL — relation/column does not exist
 ```
 
-**Step 3: Write the migration**
-
-`packages/db/migrations/0037_multi_cycle_narrative.sql`:
+**Step 4: Write migration `packages/db/migrations/0037_multi_cycle_narrative.sql`**
 
 ```sql
--- Forensic provenance on narrative_segment (RSM Dec 2025 advisory)
-ALTER TABLE narrative_segment
-  ADD COLUMN first_recorded_at timestamptz NOT NULL DEFAULT now();
+-- ============================================================
+-- Migration 0037 — Theme A schema foundation (P7)
+-- ============================================================
+-- Implements decisions Q-Fix1..Q-Fix5 (see plan: docs/plans/2026-05-03-p7-implementation.md):
+--   - Q-Fix1=A: create narrative_segment table + backfill from narrative_draft.segments jsonb
+--   - Q-Fix2=A: add activity.proposed_id (denormalized from event payload)
+--   - Q-Fix3=A: add activity.fy_label (denormalized from claim.fiscal_year)
+--   - Q-Fix4=B: hypothesis_formed_at immutability trigger uses existing audit_log schema
+--               (firm_id + payload-encoded subject_kind/subject_id)
+--   - Q-Fix5=A: extend audit_log kind CHECK constraint with the new violation kind
+-- ============================================================
 
--- Activity-level hypothesis stamp (Body by Michael ART decision)
-ALTER TABLE activity
-  ADD COLUMN hypothesis_formed_at timestamptz;
+-- 1. narrative_segment table (Q-Fix1=A)
+CREATE TABLE narrative_segment (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  narrative_draft_id uuid NOT NULL REFERENCES narrative_draft(id) ON DELETE CASCADE,
+  segment_index int NOT NULL,
+  section_kind text NOT NULL,
+  segment_kind text NOT NULL CHECK (segment_kind IN ('prose', 'claim')),
+  body text NOT NULL,
+  citing_events uuid[] NOT NULL DEFAULT ARRAY[]::uuid[],
+  content_hash text NOT NULL,
+  first_recorded_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (narrative_draft_id, segment_index)
+);
 
--- Backfill from earliest narrative_draft
+CREATE INDEX narrative_segment_draft_idx ON narrative_segment (narrative_draft_id, segment_index);
+
+-- Backfill from existing narrative_draft.segments jsonb arrays.
+-- Each segment in jsonb becomes a narrative_segment row.
+-- Implementer: confirm jsonb shape by reading actual narrative_draft rows in
+-- the test DB. Expected shape per P6 design Section 5:
+--   { "section_kind": "...", "segments": [
+--       { "kind": "prose"|"claim", "body": "...", "citing_events": [...], "content_hash": "..." }
+--     ] }
+INSERT INTO narrative_segment (
+  narrative_draft_id, segment_index, section_kind, segment_kind, body, citing_events, content_hash, first_recorded_at
+)
+SELECT
+  nd.id,
+  (segment.idx)::int - 1,
+  COALESCE(segment.value->>'section_kind', 'unknown'),
+  COALESCE(segment.value->>'kind', 'prose'),
+  COALESCE(segment.value->>'body', ''),
+  COALESCE(
+    ARRAY(SELECT jsonb_array_elements_text(segment.value->'citing_events'))::uuid[],
+    ARRAY[]::uuid[]
+  ),
+  COALESCE(segment.value->>'content_hash', md5(COALESCE(segment.value->>'body', ''))),
+  nd.created_at
+  FROM narrative_draft nd,
+       LATERAL jsonb_array_elements(nd.segments) WITH ORDINALITY AS segment(value, idx)
+ WHERE nd.segments IS NOT NULL
+   AND jsonb_array_length(nd.segments) > 0;
+
+-- 2. activity.proposed_id column (Q-Fix2=A)
+ALTER TABLE activity ADD COLUMN proposed_id uuid;
+
+-- Backfill from latest ACTIVITY_REGISTER_DRAFTED event payload per activity.
+-- (P6 stores proposed_id at event level; we denormalize for chain walk performance.)
+UPDATE activity a
+   SET proposed_id = (
+     SELECT (e.payload->>'proposed_id')::uuid
+       FROM event e
+      WHERE e.kind = 'ACTIVITY_REGISTER_DRAFTED'
+        AND e.payload->>'activity_id' = a.id::text
+        AND e.payload->>'proposed_id' IS NOT NULL
+      ORDER BY e.captured_at DESC
+      LIMIT 1
+   )
+ WHERE a.proposed_id IS NULL;
+
+-- 3. activity.fy_label column (Q-Fix3=A)
+ALTER TABLE activity ADD COLUMN fy_label text;
+
+UPDATE activity a
+   SET fy_label = 'FY' || ((c.fiscal_year - 2000)::text)
+  FROM claim c
+ WHERE a.claim_id = c.id
+   AND a.fy_label IS NULL;
+
+ALTER TABLE activity ALTER COLUMN fy_label SET NOT NULL;
+
+-- 4. activity.hypothesis_formed_at column + immutability
+ALTER TABLE activity ADD COLUMN hypothesis_formed_at timestamptz;
+
 UPDATE activity a
    SET hypothesis_formed_at = COALESCE(
      (SELECT MIN(nd.created_at) FROM narrative_draft nd WHERE nd.activity_id = a.id),
@@ -106,28 +291,53 @@ UPDATE activity a
    )
  WHERE a.hypothesis_formed_at IS NULL;
 
-ALTER TABLE activity
-  ALTER COLUMN hypothesis_formed_at SET NOT NULL;
+ALTER TABLE activity ALTER COLUMN hypothesis_formed_at SET NOT NULL;
 
--- Immutability trigger
-CREATE OR REPLACE FUNCTION audit_hypothesis_formed_at_immutability()
+-- 5. Extend audit_log kind CHECK constraint (Q-Fix5=A)
+-- Find existing constraint name (likely audit_log_kind_check or similar) via:
+--   SELECT conname FROM pg_constraint WHERE conrelid = 'audit_log'::regclass AND contype = 'c';
+-- Drop and re-add with extended value list.
+ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_kind_check;
+ALTER TABLE audit_log ADD CONSTRAINT audit_log_kind_check CHECK (
+  kind IN (
+    'MAPPING_RULE_CREATED',
+    'MAPPING_RULE_UPDATED',
+    'MAPPING_RULE_ARCHIVED',
+    'HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION'
+  )
+);
+
+-- 6. Immutability trigger (Q-Fix4=B — adapt to existing audit_log schema)
+-- Per Q-Fix4=B, encode subject_kind/subject_id in payload jsonb; resolve firm_id
+-- via tenant.firm_id JOIN.
+--
+-- IMPORTANT — transaction semantics: PostgreSQL trigger functions run in the
+-- same transaction as the triggering statement. RAISE EXCEPTION rolls back
+-- that transaction, INCLUDING any INSERT into audit_log inside the trigger.
+-- Three options for capturing the violation:
+--   (a) autonomous transaction via dblink — heavyweight, adds extension dep
+--   (b) accept rollback; rely on PostgreSQL log + application error log for
+--       forensic record (the EXCEPTION message itself names the violation)
+--   (c) split: a separate AFTER UPDATE trigger logs every change attempt,
+--       and a separate constraint enforces immutability without rollback
+--
+-- DECISION: option (b). The PostgreSQL exception is itself the audit signal;
+-- application-layer code wraps the UPDATE and logs the rejection event via
+-- the normal audit_log writer (which runs in its own transaction). The
+-- trigger's job is purely defensive — to make backdating impossible at the
+-- DB layer. The test assertion is therefore "UPDATE rejects with /immutable/";
+-- the audit-log assertion belongs in an integration test at the API layer.
+
+CREATE OR REPLACE FUNCTION enforce_hypothesis_formed_at_immutability()
 RETURNS trigger AS $$
 BEGIN
   IF OLD.hypothesis_formed_at IS DISTINCT FROM NEW.hypothesis_formed_at THEN
-    INSERT INTO audit_log (
-      tenant_id, kind, subject_kind, subject_id, payload, created_at
-    ) VALUES (
-      NEW.tenant_id,
-      'HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION',
-      'activity', NEW.id,
-      jsonb_build_object(
-        'old_value', OLD.hypothesis_formed_at,
-        'attempted_value', NEW.hypothesis_formed_at,
-        'attempted_by', current_setting('app.current_user_id', true)
-      ),
-      now()
-    );
-    RAISE EXCEPTION 'hypothesis_formed_at is immutable; backdating attempts are audit-logged';
+    RAISE EXCEPTION USING
+      ERRCODE = 'check_violation',
+      MESSAGE = format(
+        'hypothesis_formed_at is immutable; backdating attempt on activity %s rejected (old=%s, new=%s)',
+        NEW.id, OLD.hypothesis_formed_at, NEW.hypothesis_formed_at
+      );
   END IF;
   RETURN NEW;
 END;
@@ -136,31 +346,62 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER activity_hypothesis_formed_at_immutable
   BEFORE UPDATE ON activity
   FOR EACH ROW
-  EXECUTE FUNCTION audit_hypothesis_formed_at_immutability();
+  WHEN (OLD.hypothesis_formed_at IS DISTINCT FROM NEW.hypothesis_formed_at)
+  EXECUTE FUNCTION enforce_hypothesis_formed_at_immutability();
 
--- Index for proposed_id chain walk (Theme A continuity queries)
+-- 7. Index for proposed_id chain walk
 CREATE INDEX IF NOT EXISTS activity_proposed_id_fy_idx
-  ON activity (tenant_id, proposed_id, fy_label, hypothesis_formed_at);
+  ON activity (tenant_id, proposed_id, fy_label, hypothesis_formed_at)
+  WHERE proposed_id IS NOT NULL;
 ```
 
-**Step 4: Append journal entry**
+**Step 5: Update Drizzle schema files**
+
+In `packages/db/src/schema/narrative.ts`, add `narrativeSegment` table definition. In `packages/db/src/schema/activity.ts`, add the three new columns. Mirror the `narrative_draft.segments` jsonb (keep it; backward compat).
+
+**Step 6: Extend `AuditKind` Zod enum (Q-Fix5=A)**
+
+In `packages/schemas/src/audit.ts`:
+
+```ts
+export const AuditKind = z.enum([
+  'MAPPING_RULE_CREATED',
+  'MAPPING_RULE_UPDATED',
+  'MAPPING_RULE_ARCHIVED',
+  'HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION',  // P7 Theme A
+]);
+```
+
+Mirror in `@cpa/agents`'s audit-kind const (find via grep).
+
+**Step 7: Append journal entry**
 
 ```jsonc
 { "idx": 37, "version": "7", "when": <now-ms>, "tag": "0037_multi_cycle_narrative", "breakpoints": true }
 ```
 
-**Step 5: Run tests to verify pass**
+**Step 8: Run all migration tests + three-way parity test**
 
 ```bash
 pnpm --filter @cpa/db test --test-name-pattern "0037"
-# Expected: PASS — all three tests
+pnpm --filter @cpa/db build
+pnpm --filter @cpa/schemas build
+pnpm --filter @cpa/agents build
+pnpm --filter ./tools/scripts test  # three-way parity guard
+# Expected: all PASS (modulo the immutability trigger audit-log assertion which is documented as deferred to API integration test)
 ```
 
-**Step 6: Commit**
+**Step 9: Commit**
 
 ```bash
-git add packages/db/migrations/0037_multi_cycle_narrative.sql packages/db/migrations/meta/_journal.json packages/db/src/migrations.test.ts
-git commit -m "feat(db): migration 0037 — forensic columns + hypothesis_formed_at immutability trigger"
+git add packages/db/migrations/0037_multi_cycle_narrative.sql \
+        packages/db/migrations/meta/_journal.json \
+        packages/db/src/schema/narrative.ts \
+        packages/db/src/schema/activity.ts \
+        packages/db/src/migrations.test.ts \
+        packages/schemas/src/audit.ts \
+        packages/agents/src/audit-kinds.ts
+git commit -m "feat(db,schemas,agents): P7 Theme A schema foundation — narrative_segment table, activity.{proposed_id,fy_label,hypothesis_formed_at}, AuditKind extension, immutability trigger"
 ```
 
 ### Task A.2: `proposed_id` chain walker
