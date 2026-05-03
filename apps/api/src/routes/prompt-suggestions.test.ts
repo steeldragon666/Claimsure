@@ -435,14 +435,14 @@ describe('GET /v1/suggestions', () => {
     });
     assert.equal(listRes.statusCode, 200);
     const body = listRes.json<{
-      items: { id: string; tenant_id: string }[];
+      suggestions: { id: string; tenant_id: string }[];
       next_cursor: string | null;
     }>();
-    for (const item of body.items) {
+    for (const item of body.suggestions) {
       assert.equal(item.tenant_id, TENANT_A);
     }
     // At least the two we just inserted.
-    assert.ok(body.items.length >= 2);
+    assert.ok(body.suggestions.length >= 2);
 
     await app.close();
   });
@@ -456,8 +456,8 @@ describe('GET /v1/suggestions', () => {
       cookies: { cpa_session: await consultantJwt() },
     });
     assert.equal(res.statusCode, 200);
-    const body = res.json<{ items: { status: string }[] }>();
-    for (const item of body.items) assert.equal(item.status, 'open');
+    const body = res.json<{ suggestions: { status: string }[] }>();
+    for (const item of body.suggestions) assert.equal(item.status, 'open');
     await app.close();
   });
 
@@ -494,8 +494,8 @@ describe('GET /v1/suggestions', () => {
       cookies: { cpa_session: await consultantJwt() },
     });
     assert.equal(res.statusCode, 200);
-    const body = res.json<{ items: unknown[]; next_cursor: string | null }>();
-    assert.equal(body.items.length, 1);
+    const body = res.json<{ suggestions: unknown[]; next_cursor: string | null }>();
+    assert.equal(body.suggestions.length, 1);
     assert.notEqual(body.next_cursor, null);
     await app.close();
   });

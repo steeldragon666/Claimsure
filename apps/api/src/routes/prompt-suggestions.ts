@@ -353,7 +353,7 @@ export function registerPromptSuggestions(app: FastifyInstance): void {
             })
           : null;
 
-      return { items: page.map(toSuggestionApi), next_cursor: nextCursor };
+      return { suggestions: page.map(toSuggestionApi), next_cursor: nextCursor };
     });
   });
 
