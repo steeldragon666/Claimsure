@@ -1,6 +1,5 @@
 import {
   foreignKey,
-  index,
   integer,
   pgTable,
   text,
@@ -83,7 +82,10 @@ export const narrativeSegment = pgTable(
     firstRecordedAt: timestamp('first_recorded_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    draftIdx: index('narrative_segment_draft_idx').on(t.narrativeDraftId, t.segmentIndex),
+    // The UNIQUE (narrative_draft_id, segment_index) constraint already
+    // creates a backing B-tree index over those columns, so a separate
+    // non-unique index would be redundant. Lookups by narrative_draft_id
+    // alone (or with segment_index) use the unique index.
     draftIndexUnique: uniqueIndex('narrative_segment_narrative_draft_id_segment_index_key').on(
       t.narrativeDraftId,
       t.segmentIndex,

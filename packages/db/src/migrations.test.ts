@@ -139,6 +139,13 @@ const CLAIM_37_ID = '00000000-0000-4000-8000-000000000372';
 const ACTIVITY_37A_ID = '00000000-0000-4000-8000-000000000373';
 const ACTIVITY_37B_ID = '00000000-0000-4000-8000-000000000374';
 const DRAFT_37_ID = '00000000-0000-4000-8000-000000000375';
+// Migration 0037 — proposed_id backfill positive test. Activity 37C has
+// no proposed_id at insert; a matching ACTIVITY_CREATED event seeded by
+// the test carries the proposed_id correlation, and the backfill UPDATE
+// must populate the column.
+const ACTIVITY_37C_ID = '00000000-0000-4000-8000-000000000376';
+const EVENT_37C_ID = '00000000-0000-4000-8000-000000000377';
+const PROPOSED_37C_ID = '00000000-0000-4000-8000-000000000378';
 
 const cleanup = async (): Promise<void> => {
   // P6 follow-up cleanup (c8800 segment) — drop FIRST because event has
@@ -164,7 +171,12 @@ const cleanup = async (): Promise<void> => {
   // so they're scoped only by id.
   await privilegedSql`DELETE FROM narrative_segment WHERE narrative_draft_id = ${DRAFT_37_ID}`;
   await privilegedSql`DELETE FROM narrative_draft WHERE id = ${DRAFT_37_ID}`;
-  await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_37A_ID}, ${ACTIVITY_37B_ID})`;
+  // Drop the 0037 proposed_id-backfill ACTIVITY_CREATED event BEFORE the
+  // activity row it references — event has no FK on payload, but
+  // dropping in this order keeps the cleanup symmetric to insert order
+  // and matches the rest of the suite's discipline.
+  await privilegedSql`DELETE FROM event WHERE id = ${EVENT_37C_ID}`;
+  await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_37A_ID}, ${ACTIVITY_37B_ID}, ${ACTIVITY_37C_ID})`;
   await privilegedSql`DELETE FROM claim WHERE id = ${CLAIM_37_ID}`;
   await privilegedSql`DELETE FROM project WHERE id = ${PROJECT_37_ID}`;
   // Versions first — FK to narrative_draft has ON DELETE CASCADE so
@@ -1556,16 +1568,18 @@ test('migration 0036: other event kinds with the same payload key are NOT indexe
 // P7 Theme A Task A.1 — migration 0037: schema foundation for the
 // multi-cycle narrative chain.
 //
-// Eight tests covering:
+// Eleven tests covering:
 //   1. narrative_segment table shape (column existence + nullability)
 //   2. narrative_segment backfill round-trip against a known draft
 //   3. activity.proposed_id column shape
-//   4. activity.fy_label column shape
-//   5. activity.hypothesis_formed_at column shape
-//   6. audit_log_kind_check constraint includes the new violation kind
-//   7. hypothesis_formed_at trigger rejects backdating
-//   8. hypothesis_formed_at trigger does NOT fire on other column updates
-//   9. AuditKind three-way parity (Zod ↔ db AUDIT_KINDS const ↔ SQL CHECK)
+//   4. activity.proposed_id backfill round-trip from ACTIVITY_CREATED event
+//   5. activity.fy_label column shape
+//   6. activity.fy_label backfill zero-pads to two digits (FY05 not FY5)
+//   7. activity.hypothesis_formed_at column shape
+//   8. audit_log_kind_check constraint includes the new violation kind
+//   9. hypothesis_formed_at trigger rejects backdating
+//  10. hypothesis_formed_at trigger does NOT fire on other column updates
+//  11. AuditKind three-way parity (Zod ↔ db AUDIT_KINDS const ↔ SQL CHECK)
 //
 // Locked decisions (see docs/plans/2026-05-03-p7-implementation.md A.1):
 // Q-Fix1=A, Q-Fix2=A, Q-Fix3=A, Q-Fix4=B, Q-Fix5=A, Q-Extra1..3=A.
@@ -1704,6 +1718,90 @@ test('migration 0037: activity.proposed_id (uuid, nullable)', async () => {
   assert.equal(rows[0]!.is_nullable, 'YES');
 });
 
+test('migration 0037: proposed_id backfill populates from ACTIVITY_CREATED event', async () => {
+  // Approach mirrors the migration-0019 claim.project_id backfill test
+  // above (lines ~268): the migration's UPDATE ran ONCE at apply time,
+  // so we can't observe it directly on rows that didn't exist then.
+  // Instead we seed a fresh activity (with proposed_id NULL) + a
+  // matching ACTIVITY_CREATED event whose payload carries the
+  // top-level activity_id + proposed_id correlation, then re-run the
+  // backfill SQL scoped to this row and assert the column populates.
+  //
+  // Why ACTIVITY_CREATED and not ACTIVITY_REGISTER_DRAFTED: the latter's
+  // payload nests proposed_id inside `proposed_activities[]` (no top-level
+  // `activity_id` either), so the original migration's filter on that
+  // kind silently no-op'd. The ActivityCreatedPayload zod schema
+  // (packages/schemas/src/event.ts) is the canonical correlation point.
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_37_ID}, ${TENANT_ID}, ${SUBJECT_ID},
+                               'P7 A.1 Project', '2026-01-01T00:00:00Z')
+                       ON CONFLICT (id) DO NOTHING`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
+                       VALUES (${CLAIM_37_ID}, ${TENANT_ID}, ${SUBJECT_ID}, 2025, ${PROJECT_37_ID})
+                       ON CONFLICT (id) DO NOTHING`;
+  // Activity 37C — proposed_id intentionally NULL at insert; the
+  // backfill must populate it.
+  // Code must match `^(CA|SA)-[0-9]{2,3}$` (activity_code_format CHECK
+  // from migration 0012). Use a 3-digit suffix distinct from CA-37 used
+  // by the trigger tests above.
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title,
+                                            fy_label, hypothesis_formed_at)
+                       VALUES (${ACTIVITY_37C_ID}, ${TENANT_ID}, ${PROJECT_37_ID}, ${CLAIM_37_ID},
+                               'CA-376', 'core', 'P7 A.1 Activity C', 'FY25',
+                               '2025-01-01T00:00:00Z'::timestamptz)`;
+
+  // Seed an ACTIVITY_CREATED event carrying the proposed_id correlation.
+  // Same canonical insert pattern as the 0026/0027 CHECK round-trip
+  // tests above (raw INSERT + ::text::jsonb payload cast).
+  await privilegedSql`
+    INSERT INTO event (
+      id, tenant_id, subject_tenant_id, kind, payload,
+      hash, captured_at, captured_by_user_id
+    ) VALUES (
+      ${EVENT_37C_ID}, ${TENANT_ID}, ${SUBJECT_ID}, 'ACTIVITY_CREATED',
+      ${JSON.stringify({
+        _v: 1,
+        activity_id: ACTIVITY_37C_ID,
+        code: 'CA-376',
+        kind: 'core',
+        title: 'P7 A.1 Activity C',
+        project_id: PROJECT_37_ID,
+        claim_id: CLAIM_37_ID,
+        proposed_id: PROPOSED_37C_ID,
+      })}::text::jsonb,
+      ${'37c'.padEnd(64, '0')}, '2026-05-02T00:00:00Z', ${USER_ID}
+    )
+  `;
+
+  // Re-run the migration's backfill UPDATE scoped to this activity.
+  // The SQL body is the same as 0037's lines 90-100 (post-fix); a
+  // copy-paste here is the deliberate documentation pattern (the test
+  // proves the very SQL the migration ran is correct, not a paraphrase).
+  await privilegedSql`
+    UPDATE activity a
+       SET proposed_id = (
+         SELECT (e.payload->>'proposed_id')::uuid
+           FROM event e
+          WHERE e.kind = 'ACTIVITY_CREATED'
+            AND e.payload->>'activity_id' = a.id::text
+            AND e.payload->>'proposed_id' IS NOT NULL
+          ORDER BY e.captured_at DESC, e.received_at DESC, e.id DESC
+          LIMIT 1
+       )
+     WHERE a.id = ${ACTIVITY_37C_ID} AND a.proposed_id IS NULL
+  `;
+
+  const rows = await privilegedSql<{ proposed_id: string | null }[]>`
+    SELECT proposed_id FROM activity WHERE id = ${ACTIVITY_37C_ID}
+  `;
+  assert.equal(
+    rows[0]!.proposed_id,
+    PROPOSED_37C_ID,
+    'proposed_id must backfill from ACTIVITY_CREATED event payload',
+  );
+});
+
 test('migration 0037: activity.fy_label (text NOT NULL)', async () => {
   const rows = await privilegedSql<{ data_type: string; is_nullable: string }[]>`
     SELECT data_type, is_nullable FROM information_schema.columns
@@ -1712,6 +1810,24 @@ test('migration 0037: activity.fy_label (text NOT NULL)', async () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.data_type, 'text');
   assert.equal(rows[0]!.is_nullable, 'NO');
+});
+
+test('migration 0037: fy_label backfill expression zero-pads to two digits', async () => {
+  // Regression for the migration-vs-app FY-label inconsistency:
+  // migration originally produced 'FY5' for fiscal_year=2005 while the
+  // application code uses padStart(2, '0') → 'FY05'. Re-run the same
+  // expression the migration uses (post-fix: LPAD(_, 2, '0')) and assert
+  // it matches the application's `FY${(fy - 2000).padStart(2, '0')}`.
+  const rows = await privilegedSql<{ fy_label: string }[]>`
+    SELECT 'FY' || LPAD((2005 - 2000)::text, 2, '0') AS fy_label
+  `;
+  assert.equal(rows[0]!.fy_label, 'FY05');
+  // Sanity: post-2010 years already had two digits, so behavior must
+  // be unchanged for them.
+  const post2010 = await privilegedSql<{ fy_label: string }[]>`
+    SELECT 'FY' || LPAD((2025 - 2000)::text, 2, '0') AS fy_label
+  `;
+  assert.equal(post2010[0]!.fy_label, 'FY25');
 });
 
 test('migration 0037: activity.hypothesis_formed_at (timestamptz NOT NULL)', async () => {

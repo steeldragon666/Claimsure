@@ -44,10 +44,6 @@ CREATE TABLE "narrative_segment" (
 );
 --> statement-breakpoint
 
-CREATE INDEX "narrative_segment_draft_idx"
-  ON "narrative_segment" ("narrative_draft_id", "segment_index");
---> statement-breakpoint
-
 -- Backfill from narrative_draft.segments jsonb. Each array element becomes
 -- a row. WITH ORDINALITY starts at 1; we shift to 0-based segment_index.
 -- Idempotency: this migration only runs once (Drizzle's journal prevents
@@ -87,14 +83,22 @@ SELECT
 ALTER TABLE "activity" ADD COLUMN "proposed_id" uuid;
 --> statement-breakpoint
 
+-- Source the proposed_id from ACTIVITY_CREATED events (which carry the
+-- top-level activity_id + optional proposed_id correlation), NOT from
+-- ACTIVITY_REGISTER_DRAFTED (whose payload nests proposed_id inside the
+-- proposed_activities[] array). See ActivityCreatedPayload in
+-- packages/schemas/src/event.ts. The full ORDER BY tiebreaker chain
+-- (captured_at, received_at, id) matches the determinism contract used
+-- by apps/api/src/routes/activity-register.ts when picking the latest
+-- event for a (tenant, project) pair.
 UPDATE "activity" a
    SET "proposed_id" = (
      SELECT (e.payload->>'proposed_id')::uuid
        FROM "event" e
-      WHERE e.kind = 'ACTIVITY_REGISTER_DRAFTED'
+      WHERE e.kind = 'ACTIVITY_CREATED'
         AND e.payload->>'activity_id' = a.id::text
         AND e.payload->>'proposed_id' IS NOT NULL
-      ORDER BY e.captured_at DESC
+      ORDER BY e.captured_at DESC, e.received_at DESC, e.id DESC
       LIMIT 1
    )
  WHERE a."proposed_id" IS NULL;
@@ -109,8 +113,12 @@ UPDATE "activity" a
 ALTER TABLE "activity" ADD COLUMN "fy_label" text;
 --> statement-breakpoint
 
+-- LPAD to 2 digits matches the application-side `padStart(2, '0')` in
+-- apps/api/src/routes/activities.ts and activity-register.ts so a row
+-- backfilled here and a row INSERTed by the API for the same fiscal_year
+-- carry identical labels (e.g. fiscal_year=2005 → 'FY05', not 'FY5').
 UPDATE "activity" a
-   SET "fy_label" = 'FY' || ((c.fiscal_year - 2000)::text)
+   SET "fy_label" = 'FY' || LPAD((c.fiscal_year - 2000)::text, 2, '0')
   FROM "claim" c
  WHERE a.claim_id = c.id
    AND a."fy_label" IS NULL;
@@ -167,11 +175,17 @@ CREATE OR REPLACE FUNCTION enforce_hypothesis_formed_at_immutability()
 RETURNS trigger AS $$
 BEGIN
   RAISE EXCEPTION
-    'hypothesis_formed_at is immutable; backdating attempt on activity % rejected (old=%, new=%)',
+    'hypothesis_formed_at is immutable; modification attempt on activity % rejected (old=%, new=%)',
     NEW.id, OLD.hypothesis_formed_at, NEW.hypothesis_formed_at
     USING ERRCODE = 'check_violation';
 END;
 $$ LANGUAGE plpgsql;
+--> statement-breakpoint
+
+-- DROP TRIGGER IF EXISTS makes the CREATE TRIGGER idempotent (the
+-- CREATE OR REPLACE FUNCTION above is already idempotent; the trigger
+-- itself is not, so a re-apply would otherwise fail with "already exists").
+DROP TRIGGER IF EXISTS "activity_hypothesis_formed_at_immutable" ON "activity";
 --> statement-breakpoint
 
 CREATE TRIGGER "activity_hypothesis_formed_at_immutable"

@@ -496,6 +496,10 @@ export function registerActivityRegister(app: FastifyInstance): void {
           // a real activity row) — that IS the moment of hypothesis
           // formation in the Body by Michael compliance argument.
           // postgres.js needs an ISO string for timestamptz parameters.
+          // TODO(p7-narrative-ui): replace `new Date()` with consultant-authored
+          // timestamp from UI form. Per migration 0037 commentary + Body by Michael
+          // compliance, this should reflect when the consultant *formed* the hypothesis,
+          // not when the row was created. See docs/plans/2026-05-03-p7-design.md §2.
           const hypothesisFormedAt = new Date().toISOString();
           const inserted = await sql.begin(async (tx) => {
             await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;

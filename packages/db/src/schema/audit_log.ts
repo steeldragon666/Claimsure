@@ -100,7 +100,10 @@ export const AUDIT_KINDS = [
   'MAPPING_RULE_ARCHIVED',
   // P7 Theme A Task A.1 (Q-Fix5=A locked decision). Mirror of the
   // `@cpa/schemas/audit.ts` enum + the `audit_log_kind_check` SQL CHECK
-  // added in migration 0037 — the three sites must stay in lock-step.
+  // added in migration 0037 — the three sites must stay in set-membership
+  // lock-step (declaration order is NOT enforced; the parity test uses
+  // sorted-array equality and `pg_get_constraintdef` does not preserve
+  // the original IN-list ordering anyway).
   // See the THREE-WAY PARITY note in the JSDoc above.
   'HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION',
 ] as const;

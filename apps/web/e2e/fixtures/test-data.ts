@@ -295,6 +295,12 @@ export interface SeedActivityInput {
   hypothesisFormedAt?: string;
 }
 
+/**
+ * Test-only helper. Production code MUST provide explicit values for
+ * fyLabel and hypothesisFormedAt at INSERT time per migration 0037
+ * (no DB-level DEFAULT). These fixture defaults exist solely for
+ * test ergonomics.
+ */
 export async function seedActivity(input: SeedActivityInput): Promise<string> {
   const id = crypto.randomUUID();
   const fyLabel = input.fyLabel ?? 'FY25';

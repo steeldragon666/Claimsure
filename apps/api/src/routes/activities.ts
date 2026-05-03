@@ -281,6 +281,10 @@ export function registerActivities(app: FastifyInstance): void {
     // captured at insert time as the contemporaneous formation timestamp.
     // postgres.js needs an ISO string for timestamptz parameters.
     const fyLabel = `FY${(guard.fiscal_year - 2000).toString().padStart(2, '0')}`;
+    // TODO(p7-narrative-ui): replace `new Date()` with consultant-authored
+    // timestamp from UI form. Per migration 0037 commentary + Body by Michael
+    // compliance, this should reflect when the consultant *formed* the hypothesis,
+    // not when the row was created. See docs/plans/2026-05-03-p7-design.md §2.
     const hypothesisFormedAt = new Date().toISOString();
 
     let inserted: RawActivityRow | null;
