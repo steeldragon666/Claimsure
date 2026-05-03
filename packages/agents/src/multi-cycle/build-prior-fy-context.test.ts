@@ -85,6 +85,7 @@ test('buildPriorFyContext returns null when the chain is empty', async () => {
   const result = await buildPriorFyContext({
     rootProposedId: randomUUID(),
     tenantId: TENANT_A,
+    excludeFyLabel: 'FY26',
     executor,
   });
   assert.equal(result, null);
@@ -349,4 +350,38 @@ test('buildPriorFyContext preserves segment text verbatim (no LLM transformation
   // Byte-for-byte equality with the seeded text — no trim, no
   // normalisation, no paraphrase.
   assert.equal(fy24.hypothesis_segment_excerpts[0], seededText);
+});
+
+/* ------------------------------------------------------------------ */
+/* Test 8 — duplicate fy_label in the chain throws (data corruption)   */
+/* ------------------------------------------------------------------ */
+
+test('buildPriorFyContext throws when two chain rows share an fy_label (data corruption)', async () => {
+  const proposedId = randomUUID();
+  // Seed two prior-FY chain rows that BOTH claim FY24. A real chain
+  // should have at most one activity per fiscal year — silently merging
+  // these into a single bucket (Map keyed on fy_label) would mask data
+  // corruption, so the helper must throw a clear error instead.
+  const chainResponse = [
+    chainRow({ proposed_id: proposedId, fy_label: 'FY24' }),
+    chainRow({ proposed_id: proposedId, fy_label: 'FY24' }),
+    chainRow({ proposed_id: proposedId, fy_label: 'FY26' }),
+  ];
+  const { executor } = makeQueuedExecutor([chainResponse]);
+
+  await assert.rejects(
+    () =>
+      buildPriorFyContext({
+        rootProposedId: proposedId,
+        tenantId: TENANT_A,
+        excludeFyLabel: 'FY26',
+        executor,
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /duplicate fy_label 'FY24'/);
+      assert.match(err.message, /data corruption/);
+      return true;
+    },
+  );
 });

@@ -155,6 +155,46 @@ test('v1.1.0 input rejects extra fields inside prior_fy_context (.strict on the 
   assert.equal(result.success, false);
 });
 
+test('v1.1.0 input rejects empty-string entries in hypothesis_segment_excerpts', () => {
+  // Empty-text guard: a corrupted/in-progress prior-FY draft with
+  // narrative_segment.text = '' must NOT silently leak in. The schema
+  // tightens the inner string to .min(1).
+  const result = draftNarrativeInputSchema.safeParse({
+    clustered_events: [],
+    prior_fy_context: {
+      proposed_id: VALID_UUID,
+      prior_fys: [
+        {
+          fy_label: 'FY24',
+          hypothesis_segment_excerpts: [''],
+          design_segment_excerpts: [],
+          transition_classification: null,
+        },
+      ],
+    },
+  });
+  assert.equal(result.success, false);
+});
+
+test('v1.1.0 input rejects empty-string entries in design_segment_excerpts', () => {
+  // Q-Map=A binding parity: same empty-text guard on the design side.
+  const result = draftNarrativeInputSchema.safeParse({
+    clustered_events: [],
+    prior_fy_context: {
+      proposed_id: VALID_UUID,
+      prior_fys: [
+        {
+          fy_label: 'FY24',
+          hypothesis_segment_excerpts: [],
+          design_segment_excerpts: [''],
+          transition_classification: null,
+        },
+      ],
+    },
+  });
+  assert.equal(result.success, false);
+});
+
 test('v1.1.0 input rejects extra fields inside a prior_fys[] entry (.strict on entry)', () => {
   const result = draftNarrativeInputSchema.safeParse({
     clustered_events: [],

@@ -104,18 +104,21 @@ export const PriorFyContextBlock = z
           /**
            * Verbatim text excerpts from prior-FY `narrative_segment`
            * rows whose parent `narrative_draft.section_kind = 'hypothesis'`.
-           * Never paraphrased.
+           * Never paraphrased. Empty strings are rejected at parse time so
+           * a corrupted/in-progress prior-FY draft with empty segment text
+           * fails loudly at the boundary instead of silently leaking in.
            */
-          hypothesis_segment_excerpts: z.array(z.string()),
+          hypothesis_segment_excerpts: z.array(z.string().min(1, 'segment text cannot be empty')),
           /**
            * Verbatim text excerpts from prior-FY `narrative_segment` rows
            * whose parent `narrative_draft.section_kind =
            * 'experiments_and_results'`. The design doc field name
            * "design" is preserved as a stable interface (Q-Map=A);
            * the codebase's `experiments_and_results` is the actual
-           * data source. Never paraphrased.
+           * data source. Never paraphrased. Empty strings are rejected at
+           * parse time (same boundary guard as `hypothesis_segment_excerpts`).
            */
-          design_segment_excerpts: z.array(z.string()),
+          design_segment_excerpts: z.array(z.string().min(1, 'segment text cannot be empty')),
           transition_classification: z.enum(MULTI_CYCLE_TRANSITION_KINDS).nullable(),
         })
         .strict(),

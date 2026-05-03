@@ -52,12 +52,14 @@ export interface BuildPriorFyContextOptions {
   /** Tenant scope; mirrors {@link walkProposedIdChain}. */
   tenantId: string;
   /**
-   * The current FY the consultant is drafting (e.g. `'FY26'`). The chain
-   * walker returns ALL FYs sharing this `proposed_id` — we filter rows
-   * matching this label out so only PRIOR FYs land in the context block.
-   * Optional: omit if the caller has already filtered the chain (rare).
+   * The FY label of the current draft (e.g. `'FY26'`). Required: the chain
+   * walker returns ALL FYs sharing this `proposed_id`, including the current
+   * FY's own row. We exclude the row matching this label so the helper
+   * returns only PRIOR FYs. Making this required prevents a footgun where
+   * a forgotten parameter would silently leak the current FY's segments
+   * back into "prior context" — a self-reinforcement risk.
    */
-  excludeFyLabel?: string;
+  excludeFyLabel: string;
   /** Test seam — overrides the default `@cpa/db/client` `sql`. */
   executor?: ChainWalkExecutor;
 }
@@ -87,14 +89,31 @@ export async function buildPriorFyContext(
   // 1. Walk the chain.
   const chainRows = await walkProposedIdChain(opts.rootProposedId, opts.tenantId, executor);
 
-  // 2. Filter out the current FY (PRIOR FYs only).
-  const priorRows = opts.excludeFyLabel
-    ? chainRows.filter((r) => r.fy_label !== opts.excludeFyLabel)
-    : chainRows;
+  // 2. Filter out the current FY (PRIOR FYs only). `excludeFyLabel` is
+  //    required on the options type — see `BuildPriorFyContextOptions`.
+  const priorRows = chainRows.filter((r) => r.fy_label !== opts.excludeFyLabel);
 
   // 3. Default-on logic: <= 0 prior FYs -> no context to surface.
   if (priorRows.length === 0) {
     return null;
+  }
+
+  // 3a. Detect duplicate fy_labels in the chain (data corruption). A
+  //     single proposed_id chain should have at most one activity per
+  //     fiscal year; if two rows share an FY label we'd silently merge
+  //     them into one bucket below (Map keyed on fy_label). Surface
+  //     loudly instead.
+  const seenFyLabels = new Set<string>();
+  for (const row of priorRows) {
+    if (seenFyLabels.has(row.fy_label)) {
+      throw new Error(
+        `buildPriorFyContext: duplicate fy_label '${row.fy_label}' in proposed_id chain ` +
+          `${opts.rootProposedId} (tenant ${opts.tenantId}). ` +
+          `This indicates data corruption — a single proposed_id chain should have at most ` +
+          `one activity per fiscal year.`,
+      );
+    }
+    seenFyLabels.add(row.fy_label);
   }
 
   const priorDraftIds = priorRows.map((r) => r.narrative_draft_id);
