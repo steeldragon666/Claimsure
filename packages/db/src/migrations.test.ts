@@ -127,6 +127,19 @@ const AUDIT_LOG_C1_ID = '00000000-0000-4000-8000-0000000c8831';
 // TENANT_D_ID), which works because TENANT_C / TENANT_D are dedicated
 // to this test segment (the c8800 UUID prefix is unique to the suite).
 
+// P7 Theme A Task A.1 — migration 0037 fixtures. Reuses the suite-wide
+// TENANT_ID / SUBJECT_ID seeded in before(); the activity / claim /
+// project rows are minted with `0037` UUID-segment ids so cleanup()
+// scopes cleanly. Two activity rows: one for the trigger-rejection test
+// (test 7) and one for the trigger-no-fire test (test 8). Plus a
+// throwaway draft to prove the narrative_segment backfill round-trips
+// against known data.
+const PROJECT_37_ID = '00000000-0000-4000-8000-000000000371';
+const CLAIM_37_ID = '00000000-0000-4000-8000-000000000372';
+const ACTIVITY_37A_ID = '00000000-0000-4000-8000-000000000373';
+const ACTIVITY_37B_ID = '00000000-0000-4000-8000-000000000374';
+const DRAFT_37_ID = '00000000-0000-4000-8000-000000000375';
+
 const cleanup = async (): Promise<void> => {
   // P6 follow-up cleanup (c8800 segment) — drop FIRST because event has
   // FK → tenant(id) and audit_log has FK → tenant(id). Event rows are
@@ -144,6 +157,16 @@ const cleanup = async (): Promise<void> => {
   await privilegedSql`DELETE FROM mapping_rule WHERE id IN (${MAPPING_RULE_61_CONDITIONS_ID}, ${MAPPING_RULE_61_ACTION_ID})`;
   await privilegedSql`DELETE FROM "user" WHERE id = ${MAPPING_RULE_61_USER_ID}`;
   await privilegedSql`DELETE FROM event WHERE id IN (${EVENT_26_ID}, ${EVENT_27_ID}, ${EVENT_28_ID})`;
+  // P7 Theme A Task A.1 (migration 0037) cleanup. Order: narrative_segment
+  // is cascaded by the narrative_draft delete below (FK ON DELETE CASCADE),
+  // but we list it explicitly for readability and idempotency. Drafts +
+  // activity + claim + project share the suite-wide TENANT_ID / SUBJECT_ID
+  // so they're scoped only by id.
+  await privilegedSql`DELETE FROM narrative_segment WHERE narrative_draft_id = ${DRAFT_37_ID}`;
+  await privilegedSql`DELETE FROM narrative_draft WHERE id = ${DRAFT_37_ID}`;
+  await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_37A_ID}, ${ACTIVITY_37B_ID})`;
+  await privilegedSql`DELETE FROM claim WHERE id = ${CLAIM_37_ID}`;
+  await privilegedSql`DELETE FROM project WHERE id = ${PROJECT_37_ID}`;
   // Versions first — FK to narrative_draft has ON DELETE CASCADE so
   // the draft delete below would clean these up too, but explicit
   // DELETE keeps the cleanup readable and idempotent across reruns.
@@ -1246,10 +1269,14 @@ test('migration 0034: mapping_rule scalar-string backfill re-encodes conditions 
 
 test('migration 0035: audit_log UPDATE rejected as cpa_app (append-only enforcement)', async () => {
   // Seed an audit_log row as cpa (privilegedSql bypasses RLS).
+  // Uses MAPPING_RULE_CREATED (a real AUDIT_KINDS value) so the
+  // audit_log_kind_check CHECK constraint added in migration 0037
+  // accepts it. The kind is incidental to this test — the assertion is
+  // about the GRANT-level UPDATE rejection, not the kind value.
   await privilegedSql`
     INSERT INTO audit_log (id, firm_id, kind, payload, actor_user_id)
     VALUES (
-      ${AUDIT_LOG_C1_ID}, ${TENANT_C_ID}, 'P6H_TEST_KIND',
+      ${AUDIT_LOG_C1_ID}, ${TENANT_C_ID}, 'MAPPING_RULE_CREATED',
       ${JSON.stringify({ note: 'p6h follow-up audit_log row' })}::text::jsonb,
       ${USER_C_ID}
     )
@@ -1292,7 +1319,7 @@ test('migration 0035: audit_log DELETE rejected as cpa_app (append-only enforcem
   await privilegedSql`
     INSERT INTO audit_log (id, firm_id, kind, payload, actor_user_id)
     VALUES (
-      ${AUDIT_LOG_C1_ID}, ${TENANT_C_ID}, 'P6H_TEST_KIND',
+      ${AUDIT_LOG_C1_ID}, ${TENANT_C_ID}, 'MAPPING_RULE_CREATED',
       ${JSON.stringify({ note: 'p6h follow-up audit_log row' })}::text::jsonb,
       ${USER_C_ID}
     )
@@ -1517,4 +1544,255 @@ test('migration 0036: other event kinds with the same payload key are NOT indexe
     2,
     'two HYPOTHESIS events with same (tenant_id, proposed_id) must coexist (partial index filters by kind)',
   );
+});
+
+// ---------------------------------------------------------------------------
+// P7 Theme A Task A.1 — migration 0037: schema foundation for the
+// multi-cycle narrative chain.
+//
+// Eight tests covering:
+//   1. narrative_segment table shape (column existence + nullability)
+//   2. narrative_segment backfill round-trip against a known draft
+//   3. activity.proposed_id column shape
+//   4. activity.fy_label column shape
+//   5. activity.hypothesis_formed_at column shape
+//   6. audit_log_kind_check constraint includes the new violation kind
+//   7. hypothesis_formed_at trigger rejects backdating
+//   8. hypothesis_formed_at trigger does NOT fire on other column updates
+//   9. AuditKind three-way parity (Zod ↔ db AUDIT_KINDS const ↔ SQL CHECK)
+//
+// Locked decisions (see docs/plans/2026-05-03-p7-implementation.md A.1):
+// Q-Fix1=A, Q-Fix2=A, Q-Fix3=A, Q-Fix4=B, Q-Fix5=A, Q-Extra1..3=A.
+// ---------------------------------------------------------------------------
+
+test('migration 0037: narrative_segment table exists with required columns', async () => {
+  const rows = await privilegedSql<
+    { column_name: string; data_type: string; is_nullable: string }[]
+  >`
+    SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns
+     WHERE table_name = 'narrative_segment'
+     ORDER BY ordinal_position
+  `;
+  const cols = Object.fromEntries(rows.map((r) => [r.column_name, r]));
+  assert.ok(cols.id, 'id column missing');
+  assert.ok(cols.narrative_draft_id, 'narrative_draft_id missing');
+  assert.ok(cols.segment_index, 'segment_index missing');
+  assert.ok(cols.section_kind, 'section_kind missing');
+  assert.ok(cols.type, 'type missing');
+  assert.ok(cols.text, 'text missing');
+  assert.ok(cols.citing_events, 'citing_events missing');
+  assert.ok(cols.content_hash, 'content_hash missing');
+  assert.ok(cols.first_recorded_at, 'first_recorded_at missing');
+  assert.equal(cols.first_recorded_at.is_nullable, 'NO');
+});
+
+test('migration 0037: narrative_segment backfill round-trips against a known draft', async () => {
+  // Approach: seed a project + claim + activity + narrative_draft with
+  // a known segment list in `segments` jsonb. The migration's backfill
+  // INSERT runs ONCE at apply time over rows that existed THEN; this
+  // test exercises the same backfill SQL path against a draft we
+  // control, then asserts the row count matches the segment count.
+  //
+  // Why not assert SUM(jsonb_array_length(segments)) over the whole
+  // narrative_draft table: drafts inserted by EARLIER tests (e.g. the
+  // 0029 RLS positive control inserting DRAFT_4A_ID with one prose
+  // segment) populate jsonb but NOT narrative_segment (the application
+  // layer that mirrors writes lands in a later P7 task). A whole-table
+  // count assertion would be brittle to test ordering.
+
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_37_ID}, ${TENANT_ID}, ${SUBJECT_ID},
+                               'P7 A.1 Project', '2026-01-01T00:00:00Z')`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
+                       VALUES (${CLAIM_37_ID}, ${TENANT_ID}, ${SUBJECT_ID}, 2025, ${PROJECT_37_ID})`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title, fy_label, hypothesis_formed_at)
+                       VALUES (${ACTIVITY_37A_ID}, ${TENANT_ID}, ${PROJECT_37_ID}, ${CLAIM_37_ID},
+                               'CA-37', 'core', 'P7 A.1 Activity A', 'FY25',
+                               '2025-01-01T00:00:00Z'::timestamptz)`;
+
+  const segments = [
+    { type: 'prose', text: 'first prose segment' },
+    { type: 'claim', text: 'a claim segment', citing_events: [] },
+    { type: 'prose', text: 'closing prose' },
+  ];
+  await privilegedSql`
+    INSERT INTO narrative_draft (
+      tenant_id, id, activity_id, section_kind, current_version, status,
+      segments, content_hash, model, prompt_version, idempotency_key,
+      created_by_user_id
+    ) VALUES (
+      ${TENANT_ID}, ${DRAFT_37_ID}, ${ACTIVITY_37A_ID}, 'new_knowledge', 1, 'complete',
+      ${JSON.stringify(segments)}::text::jsonb,
+      ${'7'.repeat(64)}, 'claude-sonnet-4-5', 'draft-narrative@1.0.0', NULL,
+      ${USER_ID}
+    )
+  `;
+
+  // Re-run the backfill SQL scoped to ONLY this draft. The migration's
+  // unscoped INSERT was a one-shot at apply time; this scoped re-run
+  // proves the SQL is correct and exercises the same shape against
+  // known data.
+  await privilegedSql`
+    INSERT INTO narrative_segment (
+      narrative_draft_tenant_id, narrative_draft_id, segment_index,
+      section_kind, type, text, citing_events, content_hash, first_recorded_at
+    )
+    SELECT
+      nd.tenant_id,
+      nd.id,
+      (seg.idx - 1)::int,
+      nd.section_kind,
+      COALESCE(seg.value->>'type', 'prose'),
+      COALESCE(seg.value->>'text', ''),
+      COALESCE(
+        (SELECT array_agg(e::uuid) FROM jsonb_array_elements_text(seg.value->'citing_events') e),
+        ARRAY[]::uuid[]
+      ),
+      md5(COALESCE(seg.value->>'text', '')),
+      nd.created_at
+      FROM narrative_draft nd,
+           LATERAL jsonb_array_elements(nd.segments) WITH ORDINALITY AS seg(value, idx)
+     WHERE nd.id = ${DRAFT_37_ID}
+       AND jsonb_typeof(nd.segments) = 'array'
+       AND jsonb_array_length(nd.segments) > 0
+    ON CONFLICT (narrative_draft_id, segment_index) DO NOTHING
+  `;
+
+  const counts = await privilegedSql<{ jsonb_total: number; row_total: number }[]>`
+    SELECT
+      jsonb_array_length((SELECT segments FROM narrative_draft WHERE id = ${DRAFT_37_ID}))::int AS jsonb_total,
+      (SELECT COUNT(*)::int FROM narrative_segment WHERE narrative_draft_id = ${DRAFT_37_ID}) AS row_total
+  `;
+  assert.equal(
+    counts[0]!.jsonb_total,
+    counts[0]!.row_total,
+    'every jsonb segment must have a narrative_segment row',
+  );
+  assert.equal(counts[0]!.row_total, segments.length);
+
+  // Verify ordered shape — segment_index 0,1,2; types match.
+  const rows = await privilegedSql<{ segment_index: number; type: string; text: string }[]>`
+    SELECT segment_index, type, text FROM narrative_segment
+     WHERE narrative_draft_id = ${DRAFT_37_ID}
+     ORDER BY segment_index
+  `;
+  assert.deepEqual(
+    rows.map((r) => ({ segment_index: r.segment_index, type: r.type, text: r.text })),
+    [
+      { segment_index: 0, type: 'prose', text: 'first prose segment' },
+      { segment_index: 1, type: 'claim', text: 'a claim segment' },
+      { segment_index: 2, type: 'prose', text: 'closing prose' },
+    ],
+  );
+});
+
+test('migration 0037: activity.proposed_id (uuid, nullable)', async () => {
+  const rows = await privilegedSql<{ data_type: string; is_nullable: string }[]>`
+    SELECT data_type, is_nullable FROM information_schema.columns
+     WHERE table_name = 'activity' AND column_name = 'proposed_id'
+  `;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.data_type, 'uuid');
+  assert.equal(rows[0]!.is_nullable, 'YES');
+});
+
+test('migration 0037: activity.fy_label (text NOT NULL)', async () => {
+  const rows = await privilegedSql<{ data_type: string; is_nullable: string }[]>`
+    SELECT data_type, is_nullable FROM information_schema.columns
+     WHERE table_name = 'activity' AND column_name = 'fy_label'
+  `;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.data_type, 'text');
+  assert.equal(rows[0]!.is_nullable, 'NO');
+});
+
+test('migration 0037: activity.hypothesis_formed_at (timestamptz NOT NULL)', async () => {
+  const rows = await privilegedSql<{ data_type: string; is_nullable: string }[]>`
+    SELECT data_type, is_nullable FROM information_schema.columns
+     WHERE table_name = 'activity' AND column_name = 'hypothesis_formed_at'
+  `;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.data_type, 'timestamp with time zone');
+  assert.equal(rows[0]!.is_nullable, 'NO');
+});
+
+test('migration 0037: audit_log_kind_check includes new violation kind', async () => {
+  const rows = await privilegedSql<{ pg_get_constraintdef: string }[]>`
+    SELECT pg_get_constraintdef(oid) AS pg_get_constraintdef
+      FROM pg_constraint
+     WHERE conname = 'audit_log_kind_check'
+       AND conrelid = 'audit_log'::regclass
+  `;
+  assert.equal(rows.length, 1, 'audit_log_kind_check must exist');
+  assert.match(rows[0]!.pg_get_constraintdef, /HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION/);
+});
+
+test('migration 0037: hypothesis_formed_at trigger rejects backdating', async () => {
+  // Reuse PROJECT_37_ID / CLAIM_37_ID seeded in the backfill round-trip
+  // test above. Activity 37A is also already seeded there. We only need
+  // to assert the UPDATE rejection — the trigger raises check_violation.
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_37_ID}, ${TENANT_ID}, ${SUBJECT_ID},
+                               'P7 A.1 Project', '2026-01-01T00:00:00Z')
+                       ON CONFLICT (id) DO NOTHING`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
+                       VALUES (${CLAIM_37_ID}, ${TENANT_ID}, ${SUBJECT_ID}, 2025, ${PROJECT_37_ID})
+                       ON CONFLICT (id) DO NOTHING`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title, fy_label, hypothesis_formed_at)
+                       VALUES (${ACTIVITY_37A_ID}, ${TENANT_ID}, ${PROJECT_37_ID}, ${CLAIM_37_ID},
+                               'CA-37', 'core', 'P7 A.1 Activity A', 'FY25',
+                               '2025-01-01T00:00:00Z'::timestamptz)
+                       ON CONFLICT (id) DO NOTHING`;
+
+  await assert.rejects(
+    () =>
+      privilegedSql`UPDATE activity SET hypothesis_formed_at = '2024-01-01T00:00:00Z'::timestamptz
+                     WHERE id = ${ACTIVITY_37A_ID}`,
+    /immutable/i,
+    'BEFORE UPDATE trigger must raise on hypothesis_formed_at change',
+  );
+});
+
+test('migration 0037: trigger does NOT fire on other column updates', async () => {
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_ID}, true)`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_37_ID}, ${TENANT_ID}, ${SUBJECT_ID},
+                               'P7 A.1 Project', '2026-01-01T00:00:00Z')
+                       ON CONFLICT (id) DO NOTHING`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
+                       VALUES (${CLAIM_37_ID}, ${TENANT_ID}, ${SUBJECT_ID}, 2025, ${PROJECT_37_ID})
+                       ON CONFLICT (id) DO NOTHING`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title, fy_label, hypothesis_formed_at)
+                       VALUES (${ACTIVITY_37B_ID}, ${TENANT_ID}, ${PROJECT_37_ID}, ${CLAIM_37_ID},
+                               'CA-38', 'core', 'before', 'FY25',
+                               '2025-01-01T00:00:00Z'::timestamptz)
+                       ON CONFLICT (id) DO NOTHING`;
+
+  // Updating an unrelated column (title) must succeed silently — the
+  // trigger's WHEN (OLD.hypothesis_formed_at IS DISTINCT FROM NEW...)
+  // gate filters out non-immutability-affecting updates.
+  await privilegedSql`UPDATE activity SET title = 'after' WHERE id = ${ACTIVITY_37B_ID}`;
+  const rows = await privilegedSql<{ title: string }[]>`
+    SELECT title FROM activity WHERE id = ${ACTIVITY_37B_ID}
+  `;
+  assert.equal(rows[0]!.title, 'after');
+});
+
+test('migration 0037: AuditKind three-way parity (Zod ↔ db AUDIT_KINDS const ↔ SQL CHECK)', async () => {
+  const { AUDIT_KINDS: zodKinds } = await import('@cpa/schemas');
+  const { AUDIT_KINDS: dbKinds } = await import('./schema/audit_log.js');
+
+  const constraintRow = await privilegedSql<{ pg_get_constraintdef: string }[]>`
+    SELECT pg_get_constraintdef(oid) AS pg_get_constraintdef FROM pg_constraint
+     WHERE conname = 'audit_log_kind_check' AND conrelid = 'audit_log'::regclass
+  `;
+  const sqlValues = (constraintRow[0]!.pg_get_constraintdef.match(/'([A-Z_]+)'/g) ?? []).map((s) =>
+    s.slice(1, -1),
+  );
+
+  assert.deepEqual([...zodKinds].sort(), [...dbKinds].sort(), 'Zod ↔ db const mismatch');
+  assert.deepEqual([...zodKinds].sort(), [...sqlValues].sort(), 'Zod ↔ SQL CHECK mismatch');
 });

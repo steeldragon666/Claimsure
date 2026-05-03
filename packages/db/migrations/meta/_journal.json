@@ -260,6 +260,13 @@
       "when": 1777892700000,
       "tag": "0036_event_proposed_id_unique_for_activity_created",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1777892760000,
+      "tag": "0037_multi_cycle_narrative",
+      "breakpoints": true
     }
   ]
 }

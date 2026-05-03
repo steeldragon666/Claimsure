@@ -21,6 +21,14 @@ export const AUDIT_KINDS = [
   'MAPPING_RULE_CREATED',
   'MAPPING_RULE_UPDATED',
   'MAPPING_RULE_ARCHIVED',
+  // P7 Theme A Task A.1 (Q-Fix5=A locked decision). Emitted by the
+  // application layer when the BEFORE UPDATE trigger
+  // `activity_hypothesis_formed_at_immutable` raises check_violation
+  // (see migration 0037). The trigger itself does NOT INSERT to
+  // audit_log (Q-Fix4=B); the wrapping API layer catches the
+  // exception, rolls back its parent tx, then writes this audit row in
+  // a separate tx so the violation has a durable record.
+  'HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION',
 ] as const;
 
 /**

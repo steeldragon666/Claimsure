@@ -74,6 +74,15 @@ export type AuditLogPayloadShape =
       mapping_rule_id: string;
       archived_by_user_id: string;
       reason?: string;
+    }
+  | {
+      // HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION (P7 Theme A Task A.1).
+      // Written by the application layer after catching the
+      // check_violation raised by the immutability trigger.
+      activity_id: string;
+      old_hypothesis_formed_at: string; // ISO 8601 timestamp
+      new_hypothesis_formed_at: string; // ISO 8601 timestamp
+      attempted_by_user_id?: string;
     };
 
 /**
@@ -89,6 +98,11 @@ export const AUDIT_KINDS = [
   'MAPPING_RULE_CREATED',
   'MAPPING_RULE_UPDATED',
   'MAPPING_RULE_ARCHIVED',
+  // P7 Theme A Task A.1 (Q-Fix5=A locked decision). Mirror of the
+  // `@cpa/schemas/audit.ts` enum + the `audit_log_kind_check` SQL CHECK
+  // added in migration 0037 — the three sites must stay in lock-step.
+  // See the THREE-WAY PARITY note in the JSDoc above.
+  'HYPOTHESIS_FORMED_AT_IMMUTABILITY_VIOLATION',
 ] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
