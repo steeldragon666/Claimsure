@@ -29,6 +29,10 @@
     "./narrative-drafter": {
       "types": "./dist/narrative-drafter/index.d.ts",
       "import": "./dist/narrative-drafter/index.js"
+    },
+    "./multi-cycle": {
+      "types": "./dist/multi-cycle/index.d.ts",
+      "import": "./dist/multi-cycle/index.js"
     }
   },
   "scripts": {
