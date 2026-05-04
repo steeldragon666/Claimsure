@@ -484,12 +484,21 @@ export function registerPromptSuggestions(app: FastifyInstance): void {
         // (here, 'dismissed'). 'triaged' is mid-flight.
         const resolveNow = body.status_after === 'dismissed';
 
+        // Race-safe UPDATE: include `status = 'open'` in the WHERE so that
+        // two consultants triaging the same suggestion concurrently can't
+        // both pass the SELECT-status guard above and both win the UPDATE.
+        // Under READ COMMITTED, the second writer's WHERE will see the
+        // first's committed status flip and return zero rows. We then
+        // surface 409 (conflict) rather than 404 — the row exists, but
+        // someone else already moved it out of `open`.
         const updatedRows = await tx<SuggestionRow[]>`
           UPDATE prompt_suggestion
              SET triage_classification = ${body.triage_classification},
                  status = ${body.status_after},
                  resolved_at = CASE WHEN ${resolveNow} THEN NOW() ELSE resolved_at END
-           WHERE id = ${id} AND tenant_id = ${tenantId}
+           WHERE id = ${id}
+             AND tenant_id = ${tenantId}
+             AND status = 'open'
           RETURNING id, tenant_id, flagged_by_user_id, flagged_at, source_kind,
                     source_payload, affected_prompt_module, affected_section_kind,
                     issue_summary, status, triage_classification, resolved_at,
@@ -497,20 +506,24 @@ export function registerPromptSuggestions(app: FastifyInstance): void {
         `;
         const row = updatedRows[0];
         if (!row) {
-          // Concurrent delete (in practice impossible — DELETE is REVOKEd
-          // on prompt_suggestion — but defensive).
-          return reply.status(404).send({
-            error: 'suggestion_not_found',
-            message: 'No suggestion with that id in this firm',
+          // Lost the race: another transaction committed a triage between
+          // our SELECT-status guard and this UPDATE.
+          return reply.status(409).send({
+            error: 'invalid_state_transition',
+            message: 'suggestion is no longer in open state',
             requestId: req.id,
           });
         }
-        // `notes` on the triage input is currently silently ignored —
-        // the prompt_suggestion table has no notes column. A future
-        // schema revision could add a triage_notes column or write the
-        // notes to a separate prompt_suggestion_triage table; for now
-        // they're accepted in the wire shape but not persisted. Logged
-        // at debug for observability.
+        // TODO(p7-theme-b-followup): `notes` on the triage input is
+        // currently silently dropped — the prompt_suggestion table has
+        // no triage_notes column. Code-quality review on B.3 flagged
+        // this as Important #2. Resolution options for a follow-up
+        // ticket: (a) add a `triage_notes text` column to
+        // prompt_suggestion, or (b) write notes to a separate
+        // prompt_suggestion_triage table keyed on (id, status_change_at).
+        // For now the wire shape accepts notes (so the admin UI keeps
+        // working) but they are only logged at debug for observability;
+        // they do NOT persist past this request.
         if (body.notes !== undefined) {
           req.log.debug(
             { id, notesLength: body.notes.length },
@@ -602,13 +615,30 @@ export function registerPromptSuggestions(app: FastifyInstance): void {
         // status as 'triaged' (the next event is generate-pr for
         // approve_for_pr; request_more_info / escalate_to_code_change
         // leave the suggestion in the queue for follow-up).
+        //
+        // Race-safety: include `status = 'triaged'` in the WHERE so we
+        // don't silently clobber a parallel B.5 `pr_drafted` flip that
+        // committed between our SELECT-status guard and this UPDATE. If
+        // zero rows update we log it but do NOT fail the request — the
+        // review row is already inserted; the dismiss side-effect has
+        // simply lost the race to another writer that already moved the
+        // suggestion past `triaged`.
         if (body.disposition === 'dismiss') {
-          await tx`
+          const dismissed = await tx`
             UPDATE prompt_suggestion
                SET status = 'dismissed',
                    resolved_at = NOW()
-             WHERE id = ${id} AND tenant_id = ${tenantId}
+             WHERE id = ${id}
+               AND tenant_id = ${tenantId}
+               AND status = 'triaged'
+            RETURNING id
           `;
+          if (dismissed.length === 0) {
+            req.log.warn(
+              { id, tenantId },
+              'dismiss-side-effect UPDATE affected 0 rows; concurrent writer moved suggestion past triaged. review row still inserted.',
+            );
+          }
         }
 
         return reply.status(200).send({ review: toReviewApi(review) });

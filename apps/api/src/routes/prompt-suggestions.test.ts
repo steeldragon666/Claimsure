@@ -22,12 +22,12 @@ import { _internals } from './prompt-suggestions.js';
 
 const SESSION_SECRET = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
 
-const TENANT_A = '00000000-0000-4000-8000-0000000ps001';
-const TENANT_B = '00000000-0000-4000-8000-0000000ps002';
-const ADMIN_USER = '00000000-0000-4000-8000-0000000ps010';
-const VIEWER_USER = '00000000-0000-4000-8000-0000000ps011';
-const CONSULTANT_USER = '00000000-0000-4000-8000-0000000ps012';
-const CONSULTANT_USER_B = '00000000-0000-4000-8000-0000000ps013';
+const TENANT_A = '00000000-0000-4000-8000-0000000b3001';
+const TENANT_B = '00000000-0000-4000-8000-0000000b3002';
+const ADMIN_USER = '00000000-0000-4000-8000-0000000b3010';
+const VIEWER_USER = '00000000-0000-4000-8000-0000000b3011';
+const CONSULTANT_USER = '00000000-0000-4000-8000-0000000b3012';
+const CONSULTANT_USER_B = '00000000-0000-4000-8000-0000000b3013';
 
 let dbAvailable = false;
 
@@ -386,7 +386,7 @@ describe('POST /v1/suggestions', () => {
       cookies: { cpa_session: await consultantJwt() },
       payload: dummyFlag({
         source_kind: 'rif_event',
-        source_payload: { event_id: '00000000-0000-4000-8000-0000000ps901', kind: 'X' },
+        source_payload: { event_id: '00000000-0000-4000-8000-0000000b3901', kind: 'X' },
       }),
     });
     assert.equal(res.statusCode, 201);
