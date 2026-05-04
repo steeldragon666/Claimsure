@@ -40,6 +40,11 @@ import { verifyHmacSha256 } from '@cpa/integrations/runtime';
  *         or merge bookkeeping.
  *       * `pull_request.closed` (not merged) when parent suggestion
  *         status is already `dismissed` → 200 with `action: 'already-dismissed'`.
+ *       * Row vanished between unlocked lookup and locked re-check (a
+ *         genuinely anomalous case since `cpa_app` has REVOKE DELETE on
+ *         `prompt_suggestion_pr`) → 200 with `action: 'row-vanished'`.
+ *         Distinct action label so operators can spot the anomaly in
+ *         logs vs the normal redelivery already-merged case.
  *   - The lookup-then-update is in a single `sql.begin` so the
  *     parent-status flip + child PR update share one transaction.
  *
@@ -123,7 +128,7 @@ function parseSignatureHeader(header: string | undefined): string | null {
 async function applyMergeFlip(opts: {
   prRow: PromptSuggestionPrLookupRow;
   payload: PullRequestPayload;
-}): Promise<'merged' | 'already-merged'> {
+}): Promise<'merged' | 'already-merged' | 'row-vanished'> {
   const { prRow, payload } = opts;
   const tenantId = prRow.tenant_id;
   const mergeCommitSha = payload.pull_request.merge_commit_sha;
@@ -145,9 +150,12 @@ async function applyMergeFlip(opts: {
     const lockedRow = locked[0];
     if (!lockedRow) {
       // Vanishingly rare — the row was deleted between our privileged
-      // lookup and the locking SELECT. Treat as unknown-pr; the caller
-      // will 200 + no-op.
-      return 'already-merged' as const;
+      // lookup and the locking SELECT. cpa_app has REVOKE DELETE on this
+      // table (migration 0038) so this should be unreachable in practice;
+      // any occurrence is genuinely anomalous (privileged DELETE, manual
+      // ops intervention, etc.) and operators should be able to spot it
+      // distinctly from the normal redelivery 'already-merged' case.
+      return 'row-vanished' as const;
     }
     if (lockedRow.merged_at !== null) {
       return 'already-merged' as const;
