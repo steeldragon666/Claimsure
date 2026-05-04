@@ -2212,6 +2212,13 @@ test('migration 0038: FK relationships — insert valid suggestion → review �
   assert.equal(reviewRow[0]!.disposition, 'approve_for_pr');
 
   const changedFiles = ['prompts/agent_a/system.md', 'prompts/agent_a/user.md'];
+  // NOTE: branch_name built in JS first. Don't inline `${...}` inside a
+  // SQL single-quoted string literal — the postgres-js template tag
+  // captures the placeholder as a parameter regardless, and the result
+  // is "could not determine data type of parameter $N" because nothing
+  // in SQL references the bound but un-templated $N. Build the string
+  // in JS, pass as one parameter.
+  const branchName = `auto/prompt-suggestion-${SUGGESTION_E_ID.slice(0, 8)}`;
   await privilegedSql`
     INSERT INTO prompt_suggestion_pr (
       tenant_id, id, suggestion_id, github_pr_number, github_pr_url,
@@ -2219,7 +2226,7 @@ test('migration 0038: FK relationships — insert valid suggestion → review �
     ) VALUES (
       ${TENANT_E_ID}, ${PR_E_ID}, ${SUGGESTION_E_ID}, 1234,
       'https://github.com/example/prompts/pull/1234',
-      'auto/prompt-suggestion-${SUGGESTION_E_ID.slice(0, 8)}',
+      ${branchName},
       ${JSON.stringify(changedFiles)}::text::jsonb
     )
   `;
