@@ -40,6 +40,29 @@ import { TriageForm } from './triage-form';
  * double-polling.
  */
 
+/**
+ * Feature flag for the Generate-PR button. Defaults OFF.
+ *
+ * Why: P7 Theme B Phase 1 ships the entire generate-PR pipeline (B.4
+ * evaluator agent + B.5 atomic GitHub-App choreography + B.6 webhook
+ * receiver) but does NOT wire the production evaluator into the API
+ * server. `apps/api/src/server.ts` calls `buildApp()` with no
+ * `promptSuggestions.evaluate` dep, so today the route returns
+ *   503 evaluator_not_configured
+ * for every authenticated request. Rendering the button as if it
+ * works would give consultants a non-functional CTA.
+ *
+ * Phase 2 (B.5.1 follow-up) wires the production evaluator + flips
+ * this flag on by default. Until then the button is hidden by default
+ * and can be enabled in dev/staging by setting
+ *   NEXT_PUBLIC_FEATURE_GENERATE_PR=true
+ * to exercise the dep-injection seam against a stubbed evaluator.
+ *
+ * The state-machine gate `canGeneratePr(status)` remains independent
+ * — it asserts "this transition is allowed", not "this feature ships".
+ */
+const FEATURE_GENERATE_PR = process.env['NEXT_PUBLIC_FEATURE_GENERATE_PR'] === 'true';
+
 export interface SuggestionDetailProps {
   suggestionId: string;
 }
@@ -245,7 +268,7 @@ export function SuggestionDetail({ suggestionId }: SuggestionDetailProps): React
             </Card>
           ) : null}
 
-          {canGeneratePr(suggestion.status) ? (
+          {FEATURE_GENERATE_PR && canGeneratePr(suggestion.status) ? (
             <Card>
               <CardHeader>
                 <CardTitle className="font-display text-base">Generate pull request</CardTitle>
