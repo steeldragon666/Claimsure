@@ -88,6 +88,15 @@ export default tseslint.config(
       // when eslint runs from there; this entry keeps the root invocation
       // consistent.
       '**/e2e/**',
+      // Same lint-staged-from-root issue for Node-side config files in
+      // apps/web. apps/web/eslint.config.mjs ignores these locally; this
+      // entry keeps the root invocation consistent so commits that touch
+      // these files don't fail pre-commit with "not found by the project
+      // service" parsing errors.
+      'apps/web/next.config.ts',
+      'apps/web/tailwind.config.ts',
+      'apps/web/postcss.config.mjs',
+      'apps/web/playwright.config.ts',
     ],
   },
 );

@@ -2,50 +2,95 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * CPA Platform — design system tokens.
+ * Source of truth: docs/design/system.md + docs/design/tokens.json
+ *
+ * shadcn semantic tokens (--background, --primary, etc.) are populated
+ * with design system values so every existing component picks up the
+ * new visual identity automatically. Brand-specific tokens are exposed
+ * separately as --brand-* for direct access.
+ */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    /* shadcn semantic mapping
+       --primary  = brand accent (patina green) — primary buttons, links, CTAs
+       --accent   = shadcn hover-state surface (NOT brand accent) — uses surface-muted
+       Don't be fooled by the name overlap. */
+
+    /* Surfaces */
+    --background: 43 36% 97%; /* base — warm cream paper #FAF8F3 */
+    --foreground: 36 9% 9%; /* ink — near-black warm #1A1814 */
+    --card: 0 0% 100%; /* surface — pure white card */
+    --card-foreground: 36 9% 9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    --popover-foreground: 36 9% 9%;
+
+    /* Primary = brand accent (patina green #5C7A6B) */
+    --primary: 141 14% 42%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary = surface-muted (warm cream tint #F5F1E8) */
+    --secondary: 43 30% 93%;
+    --secondary-foreground: 36 9% 9%;
+
+    /* Muted = surface-muted with ink-muted text */
+    --muted: 43 30% 93%;
+    --muted-foreground: 33 10% 38%; /* #6B6258 */
+
+    /* Accent (shadcn hover surface, NOT brand) = surface-muted */
+    --accent: 43 30% 93%;
+    --accent-foreground: 36 9% 9%;
+
+    /* Destructive = clay red #9E3838 */
+    --destructive: 0 49% 42%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders + focus */
+    --border: 40 28% 87%; /* hairline #E8E2D5 */
+    --input: 40 28% 87%;
+    --ring: 141 14% 42%; /* patina focus ring */
+
+    /* Radius — sharper than shadcn 8px default; matches design system spec */
+    --radius: 0.25rem; /* 4px — buttons, inputs */
+
+    /* CPA Platform brand-specific tokens (not part of shadcn surface) */
+    --brand-base: 43 36% 97%;
+    --brand-ink: 36 9% 9%;
+    --brand-ink-muted: 33 10% 38%;
+    --brand-ink-subtle: 33 9% 57%;
+    --brand-hairline: 40 28% 87%;
+    --brand-hairline-strong: 40 22% 77%;
+    --brand-accent: 141 14% 42%;
+    --brand-accent-strong: 143 16% 28%;
+    --brand-accent-subtle: 140 16% 87%;
+    --brand-warning: 28 63% 45%; /* terracotta #B8732B */
+    --brand-error: 0 49% 42%; /* clay red #9E3838 */
+    --brand-info: 220 14% 41%; /* slate #5A6478 */
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    /* Dark mode deferred to P9. Tokens scaffolded but not used. */
+    --background: 36 9% 9%;
+    --foreground: 43 36% 97%;
+    --card: 36 9% 14%;
+    --card-foreground: 43 36% 97%;
+    --popover: 36 9% 14%;
+    --popover-foreground: 43 36% 97%;
+    --primary: 140 12% 52%;
+    --primary-foreground: 36 9% 9%;
+    --secondary: 36 9% 18%;
+    --secondary-foreground: 43 36% 97%;
+    --muted: 36 9% 18%;
+    --muted-foreground: 33 10% 60%;
+    --accent: 36 9% 18%;
+    --accent-foreground: 43 36% 97%;
+    --destructive: 0 49% 52%;
+    --destructive-foreground: 43 36% 97%;
+    --border: 36 9% 22%;
+    --input: 36 9% 22%;
+    --ring: 140 12% 52%;
   }
 }
 
@@ -53,7 +98,50 @@
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-body antialiased;
+  }
+
+  /* Display headings inherit Fraunces by default */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-display;
+  }
+
+  /* Tabular figures by default in monospace surfaces */
+  .font-mono,
+  code,
+  kbd,
+  samp,
+  pre {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/*
+ * Forensic-metadata chip: chain-verify pulse animation.
+ * The single signature flourish per design system; communicates the
+ * system is *checking its work* on hash chain verification.
+ */
+@layer utilities {
+  @keyframes verify-pulse {
+    0% {
+      border-color: hsl(var(--brand-hairline));
+    }
+    50% {
+      border-color: hsl(var(--brand-accent));
+    }
+    100% {
+      border-color: hsl(var(--brand-accent));
+    }
+  }
+
+  .animate-verify-pulse {
+    animation: verify-pulse 200ms ease-out forwards;
   }
 }
