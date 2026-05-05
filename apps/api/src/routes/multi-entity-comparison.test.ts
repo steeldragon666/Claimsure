@@ -135,6 +135,7 @@ describe('GET /v1/multi-entity-comparison/:activityId', () => {
       url: `/v1/multi-entity-comparison/${ACTIVITY_A_ID}`,
       cookies: { cpa_session: await consultantJwt() },
     });
+    if (res.statusCode !== 200) console.error('MULTI-ENTITY 500 BODY:', res.payload);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload) as {
       activities: { id: string; title: string; code: string }[];
