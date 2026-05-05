@@ -177,6 +177,7 @@ describe('GET /v1/audit/activity/:activityId/timeline', () => {
       url: `/v1/audit/activity/${ACTIVITY_ID}/timeline`,
       cookies: { cpa_session: await consultantJwt() },
     });
+    if (res.statusCode !== 200) console.error('TIMELINE 500 BODY:', res.payload);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload) as {
       timeline: { kind: string; timestamp: string; chain_verified?: boolean }[];

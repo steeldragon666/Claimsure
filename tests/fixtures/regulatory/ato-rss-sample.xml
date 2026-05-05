@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ATO - Tax Alerts</title>
+    <link>https://www.ato.gov.au</link>
+    <item>
+      <title>TA 2025/1 - R&amp;D Tax Incentive: Revised expenditure thresholds</title>
+      <link>https://www.ato.gov.au/law/view/document?docid=TXA/TA20251/NAT/ATO/00001</link>
+      <guid>https://www.ato.gov.au/law/view/document?docid=TXA/TA20251/NAT/ATO/00001</guid>
+      <description><![CDATA[The ATO has revised the R&D expenditure thresholds for the 2025 income year. Companies with aggregated turnover below $20 million will now receive a 43.5% refundable tax offset.]]></description>
+      <pubDate>Mon, 15 Jan 2025 00:00:00 +1100</pubDate>
+    </item>
+    <item>
+      <title>TA 2025/2 - GST: Digital supply changes</title>
+      <link>https://www.ato.gov.au/law/view/document?docid=TXA/TA20252/NAT/ATO/00001</link>
+      <guid>https://www.ato.gov.au/law/view/document?docid=TXA/TA20252/NAT/ATO/00001</guid>
+      <description>Changes to GST for digital supplies from 1 July 2025.</description>
+      <pubDate>Tue, 20 Jan 2025 00:00:00 +1100</pubDate>
+    </item>
+  </channel>
+</rss>

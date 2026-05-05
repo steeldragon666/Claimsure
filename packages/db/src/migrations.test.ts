@@ -2346,3 +2346,288 @@ test('migration 0038: indexes exist for queue / source / suggestion / PR lookups
     'prompt_suggestion_status_idx',
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// P7 Theme D Task D.1 — migration 0039 compliance capture tables.
+// Five tables: beneficial_ownership, knowledge_search_record,
+// multi_entity_similarity_score, r_and_d_facility, rd_forecast.
+// UUID segment: `d100` to isolate from other test suites.
+// ---------------------------------------------------------------------------
+
+const TENANT_D1_ID = '00000000-0000-4000-8000-0000d1000001';
+const USER_D1_ID = '00000000-0000-4000-8000-0000d1000002';
+const SUBJECT_D1_ID = '00000000-0000-4000-8000-0000d1000003';
+const PROJECT_D1_ID = '00000000-0000-4000-8000-0000d1000004';
+const CLAIM_D1_ID = '00000000-0000-4000-8000-0000d1000005';
+const ACTIVITY_D1A_ID = '00000000-0000-4000-8000-0000d1000006';
+const ACTIVITY_D1B_ID = '00000000-0000-4000-8000-0000d1000007';
+const BO_D1_ID = '00000000-0000-4000-8000-0000d1000010';
+const KSR_D1_ID = '00000000-0000-4000-8000-0000d1000020';
+const MESS_D1_ID = '00000000-0000-4000-8000-0000d1000030';
+const FACILITY_D1_ID = '00000000-0000-4000-8000-0000d1000040';
+const FORECAST_D1_ID = '00000000-0000-4000-8000-0000d1000050';
+
+// Ensure ACTIVITY_D1A_ID < ACTIVITY_D1B_ID for the ordered-pair test.
+// UUID comparison: '...0006' < '...0007' ✓
+
+test('migration 0039: setup — seed tenant, user, subject, project, claim, activities for compliance tests', async () => {
+  // Cleanup first (idempotent re-run safety).
+  await privilegedSql`DELETE FROM multi_entity_similarity_score WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM knowledge_search_record WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM beneficial_ownership WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM r_and_d_facility WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM rd_forecast WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_D1A_ID}, ${ACTIVITY_D1B_ID})`;
+  await privilegedSql`DELETE FROM claim WHERE id = ${CLAIM_D1_ID}`;
+  await privilegedSql`DELETE FROM project WHERE id = ${PROJECT_D1_ID}`;
+  await privilegedSql`DELETE FROM subject_tenant WHERE id = ${SUBJECT_D1_ID}`;
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM "user" WHERE id = ${USER_D1_ID}`;
+  await privilegedSql`DELETE FROM tenant WHERE id = ${TENANT_D1_ID}`;
+
+  // Seed hierarchy.
+  await privilegedSql`INSERT INTO tenant (id, name, slug, primary_idp)
+                       VALUES (${TENANT_D1_ID}, 'D1 Test Tenant', 'd1-test-tenant', 'mixed')`;
+  await privilegedSql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+                       VALUES (${USER_D1_ID}, 'd1test@example.com', 'microsoft',
+                               'microsoft:d1test', 'D1 Test User')`;
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_D1_ID}, true)`;
+  await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
+                       VALUES (${SUBJECT_D1_ID}, ${TENANT_D1_ID}, 'D1 Subject', 'claimant')`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID},
+                               'D1 Project', '2024-01-01T00:00:00Z')`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
+                       VALUES (${CLAIM_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, 2025, ${PROJECT_D1_ID})`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title,
+                                            fy_label, hypothesis_formed_at)
+                       VALUES (${ACTIVITY_D1A_ID}, ${TENANT_D1_ID}, ${PROJECT_D1_ID},
+                               ${CLAIM_D1_ID}, 'CA-01', 'core', 'Activity A',
+                               'FY25', '2024-07-01T00:00:00Z')`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title,
+                                            fy_label, hypothesis_formed_at)
+                       VALUES (${ACTIVITY_D1B_ID}, ${TENANT_D1_ID}, ${PROJECT_D1_ID},
+                               ${CLAIM_D1_ID}, 'CA-02', 'core', 'Activity B',
+                               'FY25', '2024-07-01T00:00:00Z')`;
+
+  // If we get here, seeding succeeded.
+  assert.ok(true);
+});
+
+test('migration 0039: beneficial_ownership table exists with correct columns + RLS', async () => {
+  const cols = await privilegedSql<{ column_name: string }[]>`
+    SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'beneficial_ownership'
+     ORDER BY ordinal_position
+  `;
+  const names = cols.map((r) => r.column_name);
+  assert.ok(names.includes('id'));
+  assert.ok(names.includes('tenant_id'));
+  assert.ok(names.includes('subject_tenant_id'));
+  assert.ok(names.includes('fy_label'));
+  assert.ok(names.includes('owner_kind'));
+  assert.ok(names.includes('owner_name'));
+  assert.ok(names.includes('ownership_pct'));
+  assert.ok(names.includes('is_associate'));
+  assert.ok(names.includes('is_foreign_related'));
+  assert.ok(names.includes('ta_2023_4_flag'));
+  assert.ok(names.includes('ta_2023_5_flag'));
+  assert.ok(names.includes('first_recorded_at'));
+
+  // RLS enabled
+  const rls = await privilegedSql<{ relrowsecurity: boolean }[]>`
+    SELECT relrowsecurity FROM pg_class WHERE relname = 'beneficial_ownership'
+  `;
+  assert.equal(rls[0].relrowsecurity, true, 'RLS must be enabled on beneficial_ownership');
+});
+
+test('migration 0039: beneficial_ownership GENERATED STORED columns reflect source booleans', async () => {
+  // INSERT with is_associate=true, is_foreign_related=false
+  await privilegedSql`
+    INSERT INTO beneficial_ownership (id, tenant_id, subject_tenant_id, fy_label, owner_kind, owner_name, ownership_pct, is_associate, is_foreign_related)
+    VALUES (${BO_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, '2024-25', 'individual', 'Test Owner', 50.00, true, false)
+  `;
+
+  const row1 = await privilegedSql<{ ta_2023_4_flag: boolean; ta_2023_5_flag: boolean }[]>`
+    SELECT ta_2023_4_flag, ta_2023_5_flag FROM beneficial_ownership WHERE id = ${BO_D1_ID}
+  `;
+  assert.equal(row1[0].ta_2023_4_flag, true, 'ta_2023_4_flag must mirror is_associate');
+  assert.equal(row1[0].ta_2023_5_flag, false, 'ta_2023_5_flag must mirror is_foreign_related');
+
+  // UPDATE source booleans — GENERATED columns must reflect the change.
+  await privilegedSql`
+    UPDATE beneficial_ownership SET is_associate = false, is_foreign_related = true WHERE id = ${BO_D1_ID}
+  `;
+
+  const row2 = await privilegedSql<{ ta_2023_4_flag: boolean; ta_2023_5_flag: boolean }[]>`
+    SELECT ta_2023_4_flag, ta_2023_5_flag FROM beneficial_ownership WHERE id = ${BO_D1_ID}
+  `;
+  assert.equal(row2[0].ta_2023_4_flag, false, 'ta_2023_4_flag must update after source change');
+  assert.equal(row2[0].ta_2023_5_flag, true, 'ta_2023_5_flag must update after source change');
+});
+
+test('migration 0039: beneficial_ownership owner_kind CHECK rejects invalid values', async () => {
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO beneficial_ownership (id, tenant_id, subject_tenant_id, fy_label, owner_kind, owner_name, ownership_pct, is_associate, is_foreign_related)
+      VALUES (gen_random_uuid(), ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, '2024-25', 'invalid_kind', 'Bad Owner', 10.00, false, false)
+    `,
+    /check constraint|beneficial_ownership_owner_kind_valid/i,
+    'invalid owner_kind must violate CHECK constraint',
+  );
+});
+
+test('migration 0039: knowledge_search_record table exists with RLS', async () => {
+  const rls = await privilegedSql<{ relrowsecurity: boolean }[]>`
+    SELECT relrowsecurity FROM pg_class WHERE relname = 'knowledge_search_record'
+  `;
+  assert.equal(rls[0].relrowsecurity, true, 'RLS must be enabled on knowledge_search_record');
+
+  // Insert a valid record
+  const sourcesJson = JSON.stringify([
+    { url: 'https://example.com', title: 'Example', accessed_at: '2024-01-15' },
+  ]);
+  await privilegedSql`
+    INSERT INTO knowledge_search_record (id, tenant_id, subject_tenant_id, activity_id, search_date, search_query, sources_consulted, finding_summary, recorded_by_user_id)
+    VALUES (${KSR_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, ${ACTIVITY_D1A_ID}, '2024-01-15', 'prior art search', ${sourcesJson}::text::jsonb, 'No prior art found', ${USER_D1_ID})
+  `;
+  const row = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM knowledge_search_record WHERE id = ${KSR_D1_ID}
+  `;
+  assert.equal(row.length, 1, 'knowledge_search_record row must be insertable');
+});
+
+test('migration 0039: multi_entity_similarity_score activity_pair_ordered CHECK — valid ordered pair', async () => {
+  // ACTIVITY_D1A_ID < ACTIVITY_D1B_ID (0006 < 0007) — must succeed.
+  await privilegedSql`
+    INSERT INTO multi_entity_similarity_score (id, tenant_id, activity_a_id, activity_b_id, similarity_score, similarity_kind)
+    VALUES (${MESS_D1_ID}, ${TENANT_D1_ID}, ${ACTIVITY_D1A_ID}, ${ACTIVITY_D1B_ID}, 0.850, 'semantic')
+  `;
+  const row = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM multi_entity_similarity_score WHERE id = ${MESS_D1_ID}
+  `;
+  assert.equal(row.length, 1, 'correctly ordered pair must be insertable');
+});
+
+test('migration 0039: multi_entity_similarity_score activity_pair_ordered CHECK — rejects reversed pair', async () => {
+  // ACTIVITY_D1B_ID > ACTIVITY_D1A_ID — reversed pair must be rejected.
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO multi_entity_similarity_score (id, tenant_id, activity_a_id, activity_b_id, similarity_score, similarity_kind)
+      VALUES (gen_random_uuid(), ${TENANT_D1_ID}, ${ACTIVITY_D1B_ID}, ${ACTIVITY_D1A_ID}, 0.900, 'lexical')
+    `,
+    /check constraint|multi_entity_similarity_score_pair_ordered/i,
+    'reversed activity pair must violate the ordered-pair CHECK constraint',
+  );
+});
+
+test('migration 0039: multi_entity_similarity_score allows NULL activity_b_id (vs_historical_rejection)', async () => {
+  await privilegedSql`
+    INSERT INTO multi_entity_similarity_score (id, tenant_id, activity_a_id, activity_b_id, similarity_score, similarity_kind)
+    VALUES (gen_random_uuid(), ${TENANT_D1_ID}, ${ACTIVITY_D1A_ID}, NULL, 0.780, 'vs_historical_rejection')
+  `;
+  const rows = await privilegedSql<{ similarity_kind: string }[]>`
+    SELECT similarity_kind FROM multi_entity_similarity_score
+     WHERE tenant_id = ${TENANT_D1_ID} AND activity_b_id IS NULL
+  `;
+  assert.ok(rows.length >= 1, 'NULL activity_b_id must be allowed for vs_historical_rejection');
+  assert.equal(rows[0].similarity_kind, 'vs_historical_rejection');
+});
+
+test('migration 0039: multi_entity_similarity_score similarity_kind CHECK rejects invalid', async () => {
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO multi_entity_similarity_score (id, tenant_id, activity_a_id, activity_b_id, similarity_score, similarity_kind)
+      VALUES (gen_random_uuid(), ${TENANT_D1_ID}, ${ACTIVITY_D1A_ID}, ${ACTIVITY_D1B_ID}, 0.500, 'invalid_kind')
+    `,
+    /check constraint|multi_entity_similarity_score_kind_valid/i,
+    'invalid similarity_kind must violate CHECK constraint',
+  );
+});
+
+test('migration 0039: r_and_d_facility table exists with RLS', async () => {
+  const rls = await privilegedSql<{ relrowsecurity: boolean }[]>`
+    SELECT relrowsecurity FROM pg_class WHERE relname = 'r_and_d_facility'
+  `;
+  assert.equal(rls[0].relrowsecurity, true, 'RLS must be enabled on r_and_d_facility');
+
+  await privilegedSql`
+    INSERT INTO r_and_d_facility (id, tenant_id, subject_tenant_id, fy_label, facility_name, address, is_owned, used_for_activity_ids)
+    VALUES (${FACILITY_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, '2024-25', 'Lab Alpha', '123 Research St', true, ARRAY[${ACTIVITY_D1A_ID}]::uuid[])
+  `;
+  const row = await privilegedSql<{ facility_name: string }[]>`
+    SELECT facility_name FROM r_and_d_facility WHERE id = ${FACILITY_D1_ID}
+  `;
+  assert.equal(row[0].facility_name, 'Lab Alpha');
+});
+
+test('migration 0039: rd_forecast UNIQUE constraint on (subject_tenant_id, base_fy_label, forecast_year_offset)', async () => {
+  await privilegedSql`
+    INSERT INTO rd_forecast (id, tenant_id, subject_tenant_id, base_fy_label, forecast_year_offset, projected_spend_aud, projected_headcount, confidence)
+    VALUES (${FORECAST_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, '2024-25', 1, 500000.00, 5, 'medium')
+  `;
+
+  // Duplicate must fail.
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO rd_forecast (id, tenant_id, subject_tenant_id, base_fy_label, forecast_year_offset, projected_spend_aud, projected_headcount, confidence)
+      VALUES (gen_random_uuid(), ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, '2024-25', 1, 600000.00, 6, 'high')
+    `,
+    /unique|duplicate|rd_forecast_subject_fy_offset_uniq/i,
+    'duplicate (subject, fy, offset) must violate the UNIQUE constraint',
+  );
+});
+
+test('migration 0039: rd_forecast confidence CHECK rejects invalid values', async () => {
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO rd_forecast (id, tenant_id, subject_tenant_id, base_fy_label, forecast_year_offset, projected_spend_aud, projected_headcount, confidence)
+      VALUES (gen_random_uuid(), ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, '2024-25', 2, 300000.00, 3, 'very_high')
+    `,
+    /check constraint|rd_forecast_confidence_valid/i,
+    'invalid confidence must violate CHECK constraint',
+  );
+});
+
+test('migration 0039: rd_forecast forecast_year_offset CHECK rejects values outside 1-3', async () => {
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO rd_forecast (id, tenant_id, subject_tenant_id, base_fy_label, forecast_year_offset, projected_spend_aud, projected_headcount, confidence)
+      VALUES (gen_random_uuid(), ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, '2024-25', 4, 100000.00, 2, 'low')
+    `,
+    /check constraint|rd_forecast_year_offset_valid/i,
+    'forecast_year_offset outside 1-3 must violate CHECK constraint',
+  );
+});
+
+test('migration 0039: indexes exist for all compliance tables', async () => {
+  const indexes = await privilegedSql<{ indexname: string }[]>`
+    SELECT indexname FROM pg_indexes
+     WHERE indexname IN (
+       'beneficial_ownership_subject_fy_idx',
+       'knowledge_search_record_activity_idx',
+       'multi_entity_similarity_score_activity_a_idx',
+       'multi_entity_similarity_score_activity_b_idx',
+       'r_and_d_facility_subject_fy_idx',
+       'rd_forecast_subject_fy_idx'
+     )
+     ORDER BY indexname
+  `;
+  assert.equal(indexes.length, 6, 'all six indexes from the D.1 spec must exist');
+});
+
+test('migration 0039: cleanup — remove D.1 test fixtures', async () => {
+  await privilegedSql`DELETE FROM multi_entity_similarity_score WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM knowledge_search_record WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM beneficial_ownership WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM r_and_d_facility WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM rd_forecast WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_D1A_ID}, ${ACTIVITY_D1B_ID})`;
+  await privilegedSql`DELETE FROM claim WHERE id = ${CLAIM_D1_ID}`;
+  await privilegedSql`DELETE FROM project WHERE id = ${PROJECT_D1_ID}`;
+  await privilegedSql`DELETE FROM subject_tenant WHERE id = ${SUBJECT_D1_ID}`;
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id = ${TENANT_D1_ID}`;
+  await privilegedSql`DELETE FROM "user" WHERE id = ${USER_D1_ID}`;
+  await privilegedSql`DELETE FROM tenant WHERE id = ${TENANT_D1_ID}`;
+  assert.ok(true);
+});

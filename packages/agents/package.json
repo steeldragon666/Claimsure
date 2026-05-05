@@ -37,6 +37,14 @@
     "./suggestion-evaluator": {
       "types": "./dist/suggestion-evaluator/index.d.ts",
       "import": "./dist/suggestion-evaluator/index.js"
+    },
+    "./multi-entity-similarity": {
+      "types": "./dist/multi-entity-similarity/index.d.ts",
+      "import": "./dist/multi-entity-similarity/index.js"
+    },
+    "./regulatory-classifier": {
+      "types": "./dist/regulatory-classifier/index.d.ts",
+      "import": "./dist/regulatory-classifier/index.js"
     }
   },
   "scripts": {

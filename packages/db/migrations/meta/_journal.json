@@ -274,6 +274,20 @@
       "when": 1777892820000,
       "tag": "0038_prompt_suggestion_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1777892880000,
+      "tag": "0039_compliance_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1777979280000,
+      "tag": "0040_regulatory_intelligence",
+      "breakpoints": true
     }
   ]
 }

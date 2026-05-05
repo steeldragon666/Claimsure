@@ -9,11 +9,8 @@ import { buildApp } from '../app.js';
  *
  * Tests the GET /v1/multi-entity-comparison/:activityId endpoint which:
  *   1. Fetches activities in the same project as the target activity
- *   2. Joins multi_entity_similarity_score if the table exists (p7d)
- *   3. Returns null scores gracefully when the table doesn't exist
- *
- * The key pre-p7d test: when `multi_entity_similarity_score` does not exist,
- * the endpoint returns an empty scores array with a "not_available" status.
+ *   2. Joins multi_entity_similarity_score (created by migration 0039)
+ *   3. Returns empty scores gracefully when no similarity data exists
  */
 
 const SESSION_SECRET = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
@@ -138,6 +135,7 @@ describe('GET /v1/multi-entity-comparison/:activityId', () => {
       url: `/v1/multi-entity-comparison/${ACTIVITY_A_ID}`,
       cookies: { cpa_session: await consultantJwt() },
     });
+    if (res.statusCode !== 200) console.error('MULTI-ENTITY 500 BODY:', res.payload);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload) as {
       activities: { id: string; title: string; code: string }[];
@@ -149,11 +147,10 @@ describe('GET /v1/multi-entity-comparison/:activityId', () => {
     assert.ok(Array.isArray(body.activities), 'activities should be an array');
     assert.equal(body.activities.length, 2, 'should have 2 activities in comparison');
 
-    // Since multi_entity_similarity_score table doesn't exist (pre-p7d),
-    // scores should be empty and similarity_available should be false
-    assert.equal(body.similarity_available, false, 'similarity not available pre-p7d');
+    // Table exists (migration 0039) but has no data — similarity_available=true, scores empty
+    assert.equal(body.similarity_available, true, 'similarity available when table exists');
     assert.ok(Array.isArray(body.scores), 'scores should be an array');
-    assert.equal(body.scores.length, 0, 'no scores pre-p7d');
+    assert.equal(body.scores.length, 0, 'no scores when table is empty');
 
     await app.close();
   });

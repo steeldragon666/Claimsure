@@ -78,19 +78,22 @@ export function registerMultiEntityComparison(app: FastifyInstance): void {
       `;
       const similarityAvailable = !!tableCheck[0]?.exists;
 
-      // 4. Fetch scores if the table exists
+      // 4. Fetch scores if the table exists. Migration 0039 names the
+      //    score column `similarity_score` — alias to `score` for the
+      //    response shape. activity_b_id can be NULL (vs_historical_rejection
+      //    rows), so the b-side filter excludes those NULL rows naturally.
       let scores: SimilarityScore[] = [];
       if (similarityAvailable) {
         const activityIds = activities.map((a) => a.id);
         scores = await sql.begin(async (tx) => {
           await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
           return tx<SimilarityScore[]>`
-            SELECT activity_a_id, activity_b_id, score
+            SELECT activity_a_id, activity_b_id, similarity_score AS score
               FROM multi_entity_similarity_score
              WHERE activity_a_id = ANY(${activityIds})
                AND activity_b_id = ANY(${activityIds})
                AND tenant_id = ${tenantId}
-             ORDER BY score DESC
+             ORDER BY similarity_score DESC
           `;
         });
       }

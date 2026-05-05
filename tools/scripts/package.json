@@ -11,6 +11,7 @@
     "reconcile-prompt-suggestion-prs": "tsx --env-file-if-exists=../../.env reconcile-prompt-suggestion-prs.ts"
   },
   "dependencies": {
+    "@cpa/agents": "workspace:*",
     "@cpa/db": "workspace:*",
     "@cpa/integrations": "workspace:*"
   },
