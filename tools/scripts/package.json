@@ -7,10 +7,12 @@
     "test": "tsx --env-file-if-exists=../../.env --test \"*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "onboard-tenant": "tsx --env-file-if-exists=../../.env onboard-tenant.ts"
+    "onboard-tenant": "tsx --env-file-if-exists=../../.env onboard-tenant.ts",
+    "reconcile-prompt-suggestion-prs": "tsx --env-file-if-exists=../../.env reconcile-prompt-suggestion-prs.ts"
   },
   "dependencies": {
-    "@cpa/db": "workspace:*"
+    "@cpa/db": "workspace:*",
+    "@cpa/integrations": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

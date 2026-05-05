@@ -41,10 +41,15 @@ import { registerExpenditures } from './routes/expenditures.js';
 import { registerIntegrations } from './routes/integrations.js';
 import { registerProjects } from './routes/projects.js';
 import { registerSigning, registerDocuSignWebhookPlugin } from './routes/signing.js';
+import { registerGithubWebhookPlugin } from './routes/webhooks/github.js';
 import { registerSubjectTenants } from './routes/subject-tenants.js';
 import { registerTimeEntries } from './routes/time-entries.js';
 import { registerMappingRules } from './routes/mapping-rules.js';
 import { registerPreviewRules } from './routes/preview-rules.js';
+import {
+  registerPromptSuggestions,
+  type PromptSuggestionsRouteDeps,
+} from './routes/prompt-suggestions.js';
 import { registerListTenants } from './routes/tenants/list.js';
 import { registerSwitchTenant } from './routes/tenants/switch.js';
 import { registerAddUser } from './routes/users/add.js';
@@ -96,7 +101,17 @@ export type App = FastifyInstance<
  * `loggerInstance`, which would otherwise leak the pino dependency
  * through our public signature.
  */
-export function buildApp(): App {
+/**
+ * Optional dependency-injection bag for buildApp. Production callers
+ * (server.ts) leave this empty and let the app read env vars at request
+ * time. Tests pass mocks here — particularly for the prompt-suggestions
+ * generate-pr endpoint (Task B.5), which calls Anthropic + GitHub.
+ */
+export interface BuildAppOptions {
+  promptSuggestions?: PromptSuggestionsRouteDeps;
+}
+
+export function buildApp(options: BuildAppOptions = {}): App {
   const logger = createLogger({ serviceName: 'api' });
 
   const app = Fastify({
@@ -285,11 +300,22 @@ export function buildApp(): App {
     registerPreviewRules(instance);
     done();
   });
+  app.register((instance, _opts, done) => {
+    registerPromptSuggestions(instance, options.promptSuggestions);
+    done();
+  });
   // DocuSign Connect webhook is registered as its own plugin so the
   // application/json content-type parser is encapsulated to that one
   // route (the handler needs the raw Buffer to HMAC-verify).
   app.register((instance, _opts, done) => {
     registerDocuSignWebhookPlugin(instance);
+    done();
+  });
+  // GitHub webhook receiver (Task B.6). Same encapsulation pattern as
+  // the DocuSign webhook — the application/json parser is overridden to
+  // give us the raw Buffer for HMAC-SHA256 verification.
+  app.register((instance, _opts, done) => {
+    registerGithubWebhookPlugin(instance);
     done();
   });
 

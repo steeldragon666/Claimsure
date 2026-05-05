@@ -4,6 +4,11 @@
     "noEmit": true,
     "rootDir": "./src"
   },
-  "references": [{ "path": "../db" }, { "path": "../observability" }, { "path": "../schemas" }],
+  "references": [
+    { "path": "../agents" },
+    { "path": "../db" },
+    { "path": "../observability" },
+    { "path": "../schemas" }
+  ],
   "include": ["src/**/*.test.ts"]
 }

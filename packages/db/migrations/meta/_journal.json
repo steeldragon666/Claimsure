@@ -267,6 +267,13 @@
       "when": 1777892760000,
       "tag": "0037_multi_cycle_narrative",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1777892820000,
+      "tag": "0038_prompt_suggestion_queue",
+      "breakpoints": true
     }
   ]
 }

@@ -29,3 +29,6 @@ export * from './audit_log.js';
 export * from './narrative_draft.js';
 export * from './narrative_draft_version.js';
 export * from './narrative_segment.js';
+export * from './prompt_suggestion.js';
+export * from './prompt_suggestion_review.js';
+export * from './prompt_suggestion_pr.js';

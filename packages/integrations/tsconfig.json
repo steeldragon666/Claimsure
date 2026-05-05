@@ -6,7 +6,12 @@
     "tsBuildInfoFile": "./dist/.tsbuildinfo",
     "composite": true
   },
-  "references": [{ "path": "../db" }, { "path": "../observability" }, { "path": "../schemas" }],
+  "references": [
+    { "path": "../agents" },
+    { "path": "../db" },
+    { "path": "../observability" },
+    { "path": "../schemas" }
+  ],
   "include": ["src/**/*"],
   "exclude": ["src/**/*.test.ts", "dist", "node_modules"]
 }

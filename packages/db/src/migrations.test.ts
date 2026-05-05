@@ -28,6 +28,12 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { sql, privilegedSql } from './client.js';
 import { insertEventWithChain } from './chain.js';
+import {
+  PROMPT_SUGGESTION_SOURCE_KINDS,
+  PROMPT_SUGGESTION_STATUSES,
+  PROMPT_SUGGESTION_TRIAGE_CLASSIFICATIONS,
+} from './schema/prompt_suggestion.js';
+import { PROMPT_SUGGESTION_REVIEW_DISPOSITIONS } from './schema/prompt_suggestion_review.js';
 
 // ---------------------------------------------------------------------------
 // Fixture identifiers (hex-only UUIDs; 8-4-4-4-12 layout). The `5a0`
@@ -147,7 +153,35 @@ const ACTIVITY_37C_ID = '00000000-0000-4000-8000-000000000376';
 const EVENT_37C_ID = '00000000-0000-4000-8000-000000000377';
 const PROPOSED_37C_ID = '00000000-0000-4000-8000-000000000378';
 
+// P7 Theme B Task B.1 — migration 0038 prompt_suggestion +
+// prompt_suggestion_review + prompt_suggestion_pr fixtures. Dedicated
+// `c8800-0000-0038-...` segment so cleanup() targets only these rows
+// and there's no overlap with any other suite. Two tenants for the
+// cross-tenant RLS probe.
+const TENANT_E_ID = '00000000-0000-4000-0038-0000000c8801';
+const TENANT_F_ID = '00000000-0000-4000-0038-0000000c8802';
+const USER_E_ID = '00000000-0000-4000-0038-0000000c8811';
+const USER_F_ID = '00000000-0000-4000-0038-0000000c8812';
+const SUGGESTION_E_ID = '00000000-0000-4000-0038-0000000c8821';
+const SUGGESTION_F_ID = '00000000-0000-4000-0038-0000000c8822';
+const REVIEW_E_ID = '00000000-0000-4000-0038-0000000c8831';
+const PR_E_ID = '00000000-0000-4000-0038-0000000c8841';
+
 const cleanup = async (): Promise<void> => {
+  // P7 Theme B Task B.1 cleanup (0038 segment) — child tables first so
+  // the composite FK to prompt_suggestion(tenant_id, id) doesn't trip.
+  // Reviews and PRs are append-only / no-DELETE for cpa_app, but
+  // privilegedSql is the table owner (cpa) which CAN delete (the GRANT
+  // discipline only restricts cpa_app). Cross-tenant cleanup via
+  // tenant_id IN (...) so we don't have to enumerate every test's
+  // ad-hoc PR / review IDs.
+  await privilegedSql`DELETE FROM prompt_suggestion_pr WHERE tenant_id IN (${TENANT_E_ID}, ${TENANT_F_ID})`;
+  await privilegedSql`DELETE FROM prompt_suggestion_review WHERE tenant_id IN (${TENANT_E_ID}, ${TENANT_F_ID})`;
+  await privilegedSql`DELETE FROM prompt_suggestion WHERE tenant_id IN (${TENANT_E_ID}, ${TENANT_F_ID})`;
+  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (${TENANT_E_ID}, ${TENANT_F_ID})`;
+  await privilegedSql`DELETE FROM "user" WHERE id IN (${USER_E_ID}, ${USER_F_ID})`;
+  await privilegedSql`DELETE FROM tenant WHERE id IN (${TENANT_E_ID}, ${TENANT_F_ID})`;
+
   // P6 follow-up cleanup (c8800 segment) — drop FIRST because event has
   // FK → tenant(id) and audit_log has FK → tenant(id). Event rows are
   // tenant-scoped delete (rather than id-list) because
@@ -244,6 +278,22 @@ before(async () => {
   await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_D_ID}, true)`;
   await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
                        VALUES (${SUBJECT_D_ID}, ${TENANT_D_ID}, 'P6H Tenant D Claimant', 'claimant')`;
+
+  // P7 Theme B Task B.1 — fixtures for migration 0038 prompt_suggestion
+  // tests below. Two tenants for the cross-tenant RLS probe; each
+  // tenant gets one user (FK target on prompt_suggestion.flagged_by_user_id
+  // and prompt_suggestion_review.reviewer_user_id). No subject_tenant
+  // is needed — prompt_suggestion has no subject_tenant_id column.
+  await privilegedSql`INSERT INTO tenant (id, name, slug, primary_idp)
+                       VALUES (${TENANT_E_ID}, 'P7B Tenant E', 'p7b-tenant-e', 'mixed')`;
+  await privilegedSql`INSERT INTO tenant (id, name, slug, primary_idp)
+                       VALUES (${TENANT_F_ID}, 'P7B Tenant F', 'p7b-tenant-f', 'mixed')`;
+  await privilegedSql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+                       VALUES (${USER_E_ID}, 'p7b-tenant-e@example.com', 'microsoft',
+                               'microsoft:p7b-tenant-e', 'P7B Tenant E User')`;
+  await privilegedSql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+                       VALUES (${USER_F_ID}, 'p7b-tenant-f@example.com', 'microsoft',
+                               'microsoft:p7b-tenant-f', 'P7B Tenant F User')`;
 });
 
 after(async () => {
@@ -1917,4 +1967,380 @@ test('migration 0037: AuditKind three-way parity (Zod ↔ db AUDIT_KINDS const �
 
   assert.deepEqual([...zodKinds].sort(), [...dbKinds].sort(), 'Zod ↔ db const mismatch');
   assert.deepEqual([...zodKinds].sort(), [...sqlValues].sort(), 'Zod ↔ SQL CHECK mismatch');
+});
+
+// P7 Theme B Task B.1 — migration 0038 prompt_suggestion + prompt_suggestion_review
+// + prompt_suggestion_pr tables.
+//
+// Eight tests covering:
+//   1. prompt_suggestion table exists with all columns + correct types.
+//   2. prompt_suggestion_review table exists.
+//   3. prompt_suggestion_pr table exists.
+//   4. CHECK constraint values match the TS enum arrays (three-way parity
+//      sketch — full parity test ships with Task B.4 / B.8 once the
+//      Zod enums land in @cpa/schemas).
+//   5. RLS is enabled on all 3 tables; cross-tenant SELECT blocked.
+//   6. FK relationships work (insert valid suggestion → review → pr).
+//   7. NO CASCADE: deleting parent suggestion does NOT cascade to
+//      review / pr (suggestions become metadata orphans by design).
+//   8. Indexes exist as designed for queue / source / suggestion / PR
+//      lookups.
+//
+// Pattern mirrors the 0029 / 0030 migration tests above. Fixtures live in
+// the `0038-c8800` UUID segment so cleanup() targets only these rows.
+// ---------------------------------------------------------------------------
+
+test('migration 0038: prompt_suggestion table exists with expected columns', async () => {
+  const cols = await privilegedSql<{ column_name: string; data_type: string }[]>`
+    SELECT column_name, data_type FROM information_schema.columns
+     WHERE table_name = 'prompt_suggestion'
+     ORDER BY ordinal_position
+  `;
+  const expected = [
+    'tenant_id',
+    'id',
+    'flagged_by_user_id',
+    'flagged_at',
+    'source_kind',
+    'source_payload',
+    'affected_prompt_module',
+    'affected_section_kind',
+    'issue_summary',
+    'status',
+    'triage_classification',
+    'resolved_at',
+    'first_recorded_at',
+  ];
+  assert.deepEqual(
+    cols.map((c) => c.column_name),
+    expected,
+    'prompt_suggestion columns must match the Task B.1 spec in declared order',
+  );
+
+  // Spot-check: source_payload is jsonb, not json or text.
+  const payloadCol = cols.find((c) => c.column_name === 'source_payload');
+  assert.equal(payloadCol?.data_type, 'jsonb', 'source_payload must be jsonb');
+});
+
+test('migration 0038: prompt_suggestion_review table exists with expected columns', async () => {
+  const cols = await privilegedSql<{ column_name: string }[]>`
+    SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'prompt_suggestion_review'
+     ORDER BY ordinal_position
+  `;
+  const expected = [
+    'tenant_id',
+    'id',
+    'suggestion_id',
+    'reviewer_user_id',
+    'reviewed_at',
+    'disposition',
+    'notes',
+  ];
+  assert.deepEqual(
+    cols.map((c) => c.column_name),
+    expected,
+    'prompt_suggestion_review columns must match the Task B.1 spec in declared order',
+  );
+});
+
+test('migration 0038: prompt_suggestion_pr table exists with expected columns', async () => {
+  const cols = await privilegedSql<{ column_name: string }[]>`
+    SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'prompt_suggestion_pr'
+     ORDER BY ordinal_position
+  `;
+  const expected = [
+    'tenant_id',
+    'id',
+    'suggestion_id',
+    'github_pr_number',
+    'github_pr_url',
+    'branch_name',
+    'changed_files',
+    'created_at',
+    'merged_at',
+    'merge_commit_sha',
+  ];
+  assert.deepEqual(
+    cols.map((c) => c.column_name),
+    expected,
+    'prompt_suggestion_pr columns must match the Task B.1 spec in declared order',
+  );
+});
+
+test('migration 0038: CHECK constraints exist on all three tables (three-way parity sketch)', async () => {
+  // Pull each CHECK constraint's definition from pg_catalog and assert
+  // the literal values match the canonical TS enum arrays. This is
+  // the SQL ↔ TS half of the three-way parity test.
+  //
+  // The full three-way parity (SQL ↔ `@cpa/db` const ↔ inline Zod enum
+  // in `apps/api/src/routes/prompt-suggestions.ts` exposed via
+  // `_internals`) ships in Task B.8's contract test at
+  // `apps/api/src/routes/prompt-suggestions.contract.test.ts`. Theme B
+  // deliberately did NOT promote these enums to `@cpa/schemas` (per
+  // B.3's "inline Zod" decision), so the third leg lives at the API
+  // package layer where the inline Zod schemas are defined.
+  const checks = await privilegedSql<{ conname: string; pg_get_constraintdef: string }[]>`
+    SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint
+     WHERE conname IN (
+       'prompt_suggestion_source_kind_valid',
+       'prompt_suggestion_status_valid',
+       'prompt_suggestion_triage_classification_valid',
+       'prompt_suggestion_review_disposition_valid'
+     )
+     ORDER BY conname
+  `;
+  assert.equal(checks.length, 4, 'all four CHECK constraints must exist');
+
+  const byName = new Map(checks.map((c) => [c.conname, c.pg_get_constraintdef]));
+
+  // Each TS enum value must appear in the matching CHECK definition.
+  // Reverse direction (every literal in the CHECK appears in the TS
+  // enum) ships with the full parity test in Task B.4 — for now we
+  // only assert the forward direction.
+  for (const v of PROMPT_SUGGESTION_SOURCE_KINDS) {
+    assert.match(
+      byName.get('prompt_suggestion_source_kind_valid') ?? '',
+      new RegExp(`'${v}'`),
+      `source_kind CHECK must include '${v}'`,
+    );
+  }
+  for (const v of PROMPT_SUGGESTION_STATUSES) {
+    assert.match(
+      byName.get('prompt_suggestion_status_valid') ?? '',
+      new RegExp(`'${v}'`),
+      `status CHECK must include '${v}'`,
+    );
+  }
+  for (const v of PROMPT_SUGGESTION_TRIAGE_CLASSIFICATIONS) {
+    assert.match(
+      byName.get('prompt_suggestion_triage_classification_valid') ?? '',
+      new RegExp(`'${v}'`),
+      `triage_classification CHECK must include '${v}'`,
+    );
+  }
+  for (const v of PROMPT_SUGGESTION_REVIEW_DISPOSITIONS) {
+    assert.match(
+      byName.get('prompt_suggestion_review_disposition_valid') ?? '',
+      new RegExp(`'${v}'`),
+      `disposition CHECK must include '${v}'`,
+    );
+  }
+});
+
+test('migration 0038: RLS isolation — cross-tenant SELECT blocked on all 3 tables', async () => {
+  // Seed one suggestion + review + PR per tenant via privilegedSql
+  // (cpa is the table owner so RLS still applies even with FORCE —
+  // except when the role is a superuser, which cpa IS in the dev
+  // harness — that's why migrations.test.ts inserts run privileged).
+  // Then exercise the policy from the cpa_app role (sql), which is
+  // non-superuser, non-owner — RLS DOES apply.
+  const payloadE = { reason: 'tenant-E test payload' };
+  const payloadF = { reason: 'tenant-F test payload' };
+
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_E_ID}, true)`;
+  await privilegedSql`
+    INSERT INTO prompt_suggestion (
+      tenant_id, id, flagged_by_user_id, source_kind, source_payload, issue_summary
+    ) VALUES (
+      ${TENANT_E_ID}, ${SUGGESTION_E_ID}, ${USER_E_ID}, 'consultant_flag',
+      ${JSON.stringify(payloadE)}::text::jsonb, 'tenant-E suggestion'
+    )
+  `;
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_F_ID}, true)`;
+  await privilegedSql`
+    INSERT INTO prompt_suggestion (
+      tenant_id, id, flagged_by_user_id, source_kind, source_payload, issue_summary
+    ) VALUES (
+      ${TENANT_F_ID}, ${SUGGESTION_F_ID}, ${USER_F_ID}, 'rif_event',
+      ${JSON.stringify(payloadF)}::text::jsonb, 'tenant-F suggestion'
+    )
+  `;
+
+  // TENANT_E session (cpa_app, RLS applies) must see ONLY its own
+  // suggestion, NOT the tenant-F row.
+  const visibleAsE = await sql.begin(async (tx) => {
+    await tx`SELECT set_config('app.current_tenant_id', ${TENANT_E_ID}, true)`;
+    return tx<{ id: string }[]>`SELECT id FROM prompt_suggestion ORDER BY id`;
+  });
+  assert.equal(visibleAsE.length, 1, 'TENANT_E session must see exactly one suggestion via RLS');
+  assert.equal(
+    visibleAsE[0]!.id,
+    SUGGESTION_E_ID,
+    'TENANT_E session must see only its own suggestion (tenant-F row invisible)',
+  );
+
+  // Symmetric assertion — guards against an accidental policy that
+  // always returned tenant-E regardless of GUC.
+  const visibleAsF = await sql.begin(async (tx) => {
+    await tx`SELECT set_config('app.current_tenant_id', ${TENANT_F_ID}, true)`;
+    return tx<{ id: string }[]>`SELECT id FROM prompt_suggestion ORDER BY id`;
+  });
+  assert.equal(visibleAsF.length, 1, 'TENANT_F session must see exactly one suggestion via RLS');
+  assert.equal(visibleAsF[0]!.id, SUGGESTION_F_ID);
+
+  // RLS enabled on all three tables — pg_class.relrowsecurity flag.
+  const rlsRows = await privilegedSql<{ relname: string; relrowsecurity: boolean }[]>`
+    SELECT relname, relrowsecurity FROM pg_class
+     WHERE relname IN ('prompt_suggestion', 'prompt_suggestion_review', 'prompt_suggestion_pr')
+     ORDER BY relname
+  `;
+  assert.equal(rlsRows.length, 3, 'all three tables must exist');
+  for (const r of rlsRows) {
+    assert.equal(r.relrowsecurity, true, `${r.relname} must have ENABLE ROW LEVEL SECURITY`);
+  }
+});
+
+test('migration 0038: FK relationships — insert valid suggestion → review → pr', async () => {
+  // Reuses SUGGESTION_E_ID seeded by the previous test — Node's test
+  // runner preserves declaration order within a file. Seeds a review
+  // and a PR pointing at the suggestion to exercise the composite FK.
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_E_ID}, true)`;
+  await privilegedSql`
+    INSERT INTO prompt_suggestion_review (
+      tenant_id, id, suggestion_id, reviewer_user_id, disposition, notes
+    ) VALUES (
+      ${TENANT_E_ID}, ${REVIEW_E_ID}, ${SUGGESTION_E_ID}, ${USER_E_ID},
+      'approve_for_pr', 'looks reasonable, opening PR'
+    )
+  `;
+  const reviewRow = await privilegedSql<{ disposition: string; notes: string | null }[]>`
+    SELECT disposition, notes FROM prompt_suggestion_review WHERE id = ${REVIEW_E_ID}
+  `;
+  assert.equal(reviewRow.length, 1, 'review row must round-trip');
+  assert.equal(reviewRow[0]!.disposition, 'approve_for_pr');
+
+  const changedFiles = ['prompts/agent_a/system.md', 'prompts/agent_a/user.md'];
+  // NOTE: branch_name built in JS first. Don't inline `${...}` inside a
+  // SQL single-quoted string literal — the postgres-js template tag
+  // captures the placeholder as a parameter regardless, and the result
+  // is "could not determine data type of parameter $N" because nothing
+  // in SQL references the bound but un-templated $N. Build the string
+  // in JS, pass as one parameter.
+  const branchName = `auto/prompt-suggestion-${SUGGESTION_E_ID.slice(0, 8)}`;
+  await privilegedSql`
+    INSERT INTO prompt_suggestion_pr (
+      tenant_id, id, suggestion_id, github_pr_number, github_pr_url,
+      branch_name, changed_files
+    ) VALUES (
+      ${TENANT_E_ID}, ${PR_E_ID}, ${SUGGESTION_E_ID}, 1234,
+      'https://github.com/example/prompts/pull/1234',
+      ${branchName},
+      ${JSON.stringify(changedFiles)}::text::jsonb
+    )
+  `;
+  const prRow = await privilegedSql<{ github_pr_number: number; merged_at: Date | null }[]>`
+    SELECT github_pr_number, merged_at FROM prompt_suggestion_pr WHERE id = ${PR_E_ID}
+  `;
+  assert.equal(prRow.length, 1, 'pr row must round-trip');
+  assert.equal(prRow[0]!.github_pr_number, 1234);
+  assert.equal(prRow[0]!.merged_at, null, 'merged_at must be NULL until the PR merges');
+
+  // FK violation: trying to insert a review pointing at a non-existent
+  // suggestion must fail. Tests the COMPOSITE FK shape — using a real
+  // tenant but a never-seen suggestion_id should trigger the FK.
+  const orphanReviewId = '00000000-0000-4000-0038-0000000c8832';
+  const orphanSuggestionId = '00000000-0000-4000-0038-0000000c8898';
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO prompt_suggestion_review (
+        tenant_id, id, suggestion_id, reviewer_user_id, disposition
+      ) VALUES (
+        ${TENANT_E_ID}, ${orphanReviewId}, ${orphanSuggestionId}, ${USER_E_ID}, 'dismiss'
+      )
+    `,
+    /foreign key|violates/i,
+    'review pointing at non-existent suggestion must violate the composite FK',
+  );
+});
+
+test('migration 0038: CHECK constraint rejects invalid status / disposition / source_kind', async () => {
+  // Three negative checks — one per CHECK constraint — to confirm the
+  // CHECK constraints are actually enforced (not just present).
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_E_ID}, true)`;
+
+  const invalidSourceId = '00000000-0000-4000-0038-0000000c8851';
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO prompt_suggestion (
+        tenant_id, id, flagged_by_user_id, source_kind, source_payload, issue_summary
+      ) VALUES (
+        ${TENANT_E_ID}, ${invalidSourceId}, ${USER_E_ID}, 'NOT_A_VALID_SOURCE',
+        ${JSON.stringify({})}::text::jsonb, 'invalid source_kind'
+      )
+    `,
+    /check constraint|prompt_suggestion_source_kind_valid/i,
+    'invalid source_kind must violate the CHECK constraint',
+  );
+
+  const invalidStatusId = '00000000-0000-4000-0038-0000000c8852';
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO prompt_suggestion (
+        tenant_id, id, flagged_by_user_id, source_kind, source_payload, issue_summary, status
+      ) VALUES (
+        ${TENANT_E_ID}, ${invalidStatusId}, ${USER_E_ID}, 'consultant_flag',
+        ${JSON.stringify({})}::text::jsonb, 'invalid status', 'NOT_A_VALID_STATUS'
+      )
+    `,
+    /check constraint|prompt_suggestion_status_valid/i,
+    'invalid status must violate the CHECK constraint',
+  );
+
+  const invalidReviewId = '00000000-0000-4000-0038-0000000c8853';
+  await assert.rejects(
+    () => privilegedSql`
+      INSERT INTO prompt_suggestion_review (
+        tenant_id, id, suggestion_id, reviewer_user_id, disposition
+      ) VALUES (
+        ${TENANT_E_ID}, ${invalidReviewId}, ${SUGGESTION_E_ID}, ${USER_E_ID},
+        'NOT_A_VALID_DISPOSITION'
+      )
+    `,
+    /check constraint|prompt_suggestion_review_disposition_valid/i,
+    'invalid disposition must violate the CHECK constraint',
+  );
+});
+
+test('migration 0038: NO CASCADE — deleting suggestion is blocked while children exist', async () => {
+  // The design choice was ON DELETE NO ACTION (the default) on both
+  // child FKs. Deleting a parent suggestion that still has children
+  // must FAIL with a foreign-key violation rather than silently
+  // cascading. This pins the "suggestions become metadata orphans
+  // by design — the row is the audit record" decision in the schema.
+  //
+  // Uses privilegedSql (cpa is the table owner — DELETE granted at the
+  // owner level even though cpa_app's DELETE was REVOKEd via the
+  // migration's GRANT discipline).
+  await assert.rejects(
+    () => privilegedSql`
+      DELETE FROM prompt_suggestion WHERE id = ${SUGGESTION_E_ID}
+    `,
+    /foreign key|violates/i,
+    'deleting a suggestion with extant review / pr children must violate the FK (NO CASCADE)',
+  );
+});
+
+test('migration 0038: indexes exist for queue / source / suggestion / PR lookups', async () => {
+  const indexes = await privilegedSql<{ indexname: string }[]>`
+    SELECT indexname FROM pg_indexes
+     WHERE indexname IN (
+       'prompt_suggestion_status_idx',
+       'prompt_suggestion_source_kind_idx',
+       'prompt_suggestion_review_suggestion_idx',
+       'prompt_suggestion_pr_suggestion_idx',
+       'prompt_suggestion_pr_github_pr_number_idx'
+     )
+     ORDER BY indexname
+  `;
+  assert.equal(indexes.length, 5, 'all five indexes from the Task B.1 spec must exist');
+  const names = indexes.map((r) => r.indexname).sort();
+  assert.deepEqual(names, [
+    'prompt_suggestion_pr_github_pr_number_idx',
+    'prompt_suggestion_pr_suggestion_idx',
+    'prompt_suggestion_review_suggestion_idx',
+    'prompt_suggestion_source_kind_idx',
+    'prompt_suggestion_status_idx',
+  ]);
 });
