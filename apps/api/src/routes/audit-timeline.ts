@@ -134,18 +134,23 @@ export function registerAuditTimeline(app: FastifyInstance): void {
            ORDER BY flagged_at ASC
         `;
 
-        // 3e. Multi-entity similarity scores — only if the table exists (p7d)
+        // 3e. Multi-entity similarity scores — only if the table exists (p7d).
+        //     Match the activity in EITHER role of the pair (activity_a OR
+        //     activity_b). Column names match migration 0039:
+        //     similarity_score (not "score"), flagged_at (not "created_at"),
+        //     activity_a_id / activity_b_id (no flat "activity_id"). Re-aliased
+        //     in the SELECT for the timeline row shape.
         let similarityFlags: { id: string; score: number; created_at: Date | string }[] = [];
         const tableCheck = await tx<{ exists: unknown }[]>`
           SELECT to_regclass('multi_entity_similarity_score') AS exists
         `;
         if (tableCheck[0]?.exists) {
           similarityFlags = await tx<{ id: string; score: number; created_at: Date | string }[]>`
-            SELECT id, score, created_at
+            SELECT id, similarity_score AS score, flagged_at AS created_at
               FROM multi_entity_similarity_score
-             WHERE activity_id = ${activityId}
+             WHERE (activity_a_id = ${activityId} OR activity_b_id = ${activityId})
                AND tenant_id = ${tenantId}
-             ORDER BY created_at ASC
+             ORDER BY flagged_at ASC
           `;
         }
 
