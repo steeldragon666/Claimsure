@@ -189,6 +189,7 @@ const cleanup = async (): Promise<void> => {
   await privilegedSql`DELETE FROM event WHERE tenant_id IN (${TENANT_C_ID}, ${TENANT_D_ID})`;
   await privilegedSql`DELETE FROM audit_log WHERE id = ${AUDIT_LOG_C1_ID}`;
   await privilegedSql`DELETE FROM audit_log WHERE firm_id IN (${TENANT_C_ID}, ${TENANT_D_ID})`;
+  await privilegedSql`DELETE FROM audit_score_snapshot WHERE subject_tenant_id IN (${SUBJECT_C_ID}, ${SUBJECT_D_ID})`;
   await privilegedSql`DELETE FROM subject_tenant WHERE id IN (${SUBJECT_C_ID}, ${SUBJECT_D_ID})`;
   await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (${TENANT_C_ID}, ${TENANT_D_ID})`;
   await privilegedSql`DELETE FROM "user" WHERE id IN (${USER_C_ID}, ${USER_D_ID})`;
@@ -226,6 +227,7 @@ const cleanup = async (): Promise<void> => {
   await privilegedSql`DELETE FROM activity WHERE id IN (${ACTIVITY_1_ID}, ${ACTIVITY_4A_ID}, ${ACTIVITY_4B_ID})`;
   await privilegedSql`DELETE FROM claim WHERE id IN (${CLAIM_1_WITH_ACTIVITY}, ${CLAIM_1_NO_ACTIVITY}, ${CLAIM_2_ID}, ${CLAIM_4A_ID}, ${CLAIM_4B_ID})`;
   await privilegedSql`DELETE FROM project WHERE id IN (${PROJECT_1_ID}, ${PROJECT_2_ID}, ${PROJECT_4A_ID}, ${PROJECT_4B_ID})`;
+  await privilegedSql`DELETE FROM audit_score_snapshot WHERE subject_tenant_id IN (${SUBJECT_ID}, ${SUBJECT_B_ID})`;
   await privilegedSql`DELETE FROM subject_tenant WHERE id IN (${SUBJECT_ID}, ${SUBJECT_B_ID})`;
   await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (${TENANT_ID}, ${TENANT_B_ID})`;
   await privilegedSql`DELETE FROM "user" WHERE id IN (${USER_ID}, ${USER_B_ID})`;
