@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { use } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AuthGuard } from '@/components/auth-guard';
+import { AuditTimeline } from '@/components/audit-timeline';
 import { Button } from '@/components/ui/button';
 import { MultiCycleTimelineSection } from '@/components/multi-cycle-timeline-section';
 import { getActivity, listActivityArtefacts } from '../_lib/api';
@@ -126,6 +127,11 @@ function Inner({ claimId, activityId }: { claimId: string; activityId: string })
         follow-up task — until it lands, the section silently no-ops.
       */}
       <MultiCycleTimelineSection activityId={activityId} />
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold">Audit timeline</h2>
+        <AuditTimeline activityId={activityId} />
+      </section>
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Edit narrative</h2>
