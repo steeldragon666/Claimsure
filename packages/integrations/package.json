@@ -53,6 +53,10 @@
     "./github-app": {
       "types": "./dist/github-app/index.d.ts",
       "import": "./dist/github-app/index.js"
+    },
+    "./regulatory": {
+      "types": "./dist/regulatory/index.d.ts",
+      "import": "./dist/regulatory/index.js"
     }
   },
   "scripts": {

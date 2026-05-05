@@ -6,6 +6,7 @@ import { evaluate as defaultEvaluate } from '@cpa/agents/suggestion-evaluator';
 import { generatePullRequest } from '@cpa/integrations/github-app';
 import { buildContractTestRunner } from './lib/contract-test-runner.js';
 import { getBoss, stopBoss } from './lib/pg-boss-client.js';
+import { registerRifDailyScrapeJob } from './jobs/rif-daily-scrape.js';
 
 const repoRoot = process.env['REPO_ROOT'] ?? process.cwd();
 
@@ -27,8 +28,11 @@ const port = Number(process.env.API_PORT ?? 3000);
 // already sets — see apps/api/package.json `test` script.
 if (process.env['NODE_ENV'] !== 'test') {
   try {
-    await getBoss();
+    const boss = await getBoss();
     app.log.info('pg-boss started');
+    // Register cron jobs
+    await registerRifDailyScrapeJob(boss);
+    app.log.info('rif-daily-scrape job registered');
   } catch (err) {
     app.log.error(err, 'pg-boss start failed');
     await sdk.shutdown();
