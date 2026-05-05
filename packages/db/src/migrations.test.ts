@@ -2386,14 +2386,29 @@ test('migration 0039: setup — seed tenant, user, subject, project, claim, acti
   await privilegedSql`DELETE FROM tenant WHERE id = ${TENANT_D1_ID}`;
 
   // Seed hierarchy.
-  await privilegedSql`INSERT INTO tenant (id, name) VALUES (${TENANT_D1_ID}, 'D1 Test Tenant')`;
-  await privilegedSql`INSERT INTO "user" (id, email, name) VALUES (${USER_D1_ID}, 'd1test@example.com', 'D1 User')`;
-  await privilegedSql`INSERT INTO tenant_user (tenant_id, user_id, role) VALUES (${TENANT_D1_ID}, ${USER_D1_ID}, 'admin')`;
-  await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, abn) VALUES (${SUBJECT_D1_ID}, ${TENANT_D1_ID}, 'D1 Subject', '00000000001')`;
-  await privilegedSql`INSERT INTO project (id, tenant_id, name) VALUES (${PROJECT_D1_ID}, ${TENANT_D1_ID}, 'D1 Project')`;
-  await privilegedSql`INSERT INTO claim (id, tenant_id, project_id, subject_tenant_id, fy_label) VALUES (${CLAIM_D1_ID}, ${TENANT_D1_ID}, ${PROJECT_D1_ID}, ${SUBJECT_D1_ID}, '2024-25')`;
-  await privilegedSql`INSERT INTO activity (id, tenant_id, claim_id, title) VALUES (${ACTIVITY_D1A_ID}, ${TENANT_D1_ID}, ${CLAIM_D1_ID}, 'Activity A')`;
-  await privilegedSql`INSERT INTO activity (id, tenant_id, claim_id, title) VALUES (${ACTIVITY_D1B_ID}, ${TENANT_D1_ID}, ${CLAIM_D1_ID}, 'Activity B')`;
+  await privilegedSql`INSERT INTO tenant (id, name, slug, primary_idp)
+                       VALUES (${TENANT_D1_ID}, 'D1 Test Tenant', 'd1-test-tenant', 'mixed')`;
+  await privilegedSql`INSERT INTO "user" (id, email, primary_idp, external_id, display_name)
+                       VALUES (${USER_D1_ID}, 'd1test@example.com', 'microsoft',
+                               'microsoft:d1test', 'D1 Test User')`;
+  await privilegedSql`SELECT set_config('app.current_tenant_id', ${TENANT_D1_ID}, true)`;
+  await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
+                       VALUES (${SUBJECT_D1_ID}, ${TENANT_D1_ID}, 'D1 Subject', 'claimant')`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID},
+                               'D1 Project', '2024-01-01T00:00:00Z')`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
+                       VALUES (${CLAIM_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, 2025, ${PROJECT_D1_ID})`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title,
+                                            fy_label, hypothesis_formed_at)
+                       VALUES (${ACTIVITY_D1A_ID}, ${TENANT_D1_ID}, ${PROJECT_D1_ID},
+                               ${CLAIM_D1_ID}, 'CA-01', 'core', 'Activity A',
+                               'FY25', '2024-07-01T00:00:00Z')`;
+  await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title,
+                                            fy_label, hypothesis_formed_at)
+                       VALUES (${ACTIVITY_D1B_ID}, ${TENANT_D1_ID}, ${PROJECT_D1_ID},
+                               ${CLAIM_D1_ID}, 'CA-02', 'core', 'Activity B',
+                               'FY25', '2024-07-01T00:00:00Z')`;
 
   // If we get here, seeding succeeded.
   assert.ok(true);
@@ -2420,10 +2435,10 @@ test('migration 0039: beneficial_ownership table exists with correct columns + R
   assert.ok(names.includes('first_recorded_at'));
 
   // RLS enabled
-  const rls = await privilegedSql<{ rowsecurity: boolean }[]>`
-    SELECT rowsecurity FROM pg_class WHERE relname = 'beneficial_ownership'
+  const rls = await privilegedSql<{ relrowsecurity: boolean }[]>`
+    SELECT relrowsecurity FROM pg_class WHERE relname = 'beneficial_ownership'
   `;
-  assert.equal(rls[0].rowsecurity, true, 'RLS must be enabled on beneficial_ownership');
+  assert.equal(rls[0].relrowsecurity, true, 'RLS must be enabled on beneficial_ownership');
 });
 
 test('migration 0039: beneficial_ownership GENERATED STORED columns reflect source booleans', async () => {
@@ -2463,15 +2478,18 @@ test('migration 0039: beneficial_ownership owner_kind CHECK rejects invalid valu
 });
 
 test('migration 0039: knowledge_search_record table exists with RLS', async () => {
-  const rls = await privilegedSql<{ rowsecurity: boolean }[]>`
-    SELECT rowsecurity FROM pg_class WHERE relname = 'knowledge_search_record'
+  const rls = await privilegedSql<{ relrowsecurity: boolean }[]>`
+    SELECT relrowsecurity FROM pg_class WHERE relname = 'knowledge_search_record'
   `;
-  assert.equal(rls[0].rowsecurity, true, 'RLS must be enabled on knowledge_search_record');
+  assert.equal(rls[0].relrowsecurity, true, 'RLS must be enabled on knowledge_search_record');
 
   // Insert a valid record
+  const sourcesJson = JSON.stringify([
+    { url: 'https://example.com', title: 'Example', accessed_at: '2024-01-15' },
+  ]);
   await privilegedSql`
     INSERT INTO knowledge_search_record (id, tenant_id, subject_tenant_id, activity_id, search_date, search_query, sources_consulted, finding_summary, recorded_by_user_id)
-    VALUES (${KSR_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, ${ACTIVITY_D1A_ID}, '2024-01-15', 'prior art search', '${sql.unsafe(`[{"url":"https://example.com","title":"Example","accessed_at":"2024-01-15"}]`)}' ::jsonb, 'No prior art found', ${USER_D1_ID})
+    VALUES (${KSR_D1_ID}, ${TENANT_D1_ID}, ${SUBJECT_D1_ID}, ${ACTIVITY_D1A_ID}, '2024-01-15', 'prior art search', ${sourcesJson}::text::jsonb, 'No prior art found', ${USER_D1_ID})
   `;
   const row = await privilegedSql<{ id: string }[]>`
     SELECT id FROM knowledge_search_record WHERE id = ${KSR_D1_ID}
@@ -2528,10 +2546,10 @@ test('migration 0039: multi_entity_similarity_score similarity_kind CHECK reject
 });
 
 test('migration 0039: r_and_d_facility table exists with RLS', async () => {
-  const rls = await privilegedSql<{ rowsecurity: boolean }[]>`
-    SELECT rowsecurity FROM pg_class WHERE relname = 'r_and_d_facility'
+  const rls = await privilegedSql<{ relrowsecurity: boolean }[]>`
+    SELECT relrowsecurity FROM pg_class WHERE relname = 'r_and_d_facility'
   `;
-  assert.equal(rls[0].rowsecurity, true, 'RLS must be enabled on r_and_d_facility');
+  assert.equal(rls[0].relrowsecurity, true, 'RLS must be enabled on r_and_d_facility');
 
   await privilegedSql`
     INSERT INTO r_and_d_facility (id, tenant_id, subject_tenant_id, fy_label, facility_name, address, is_owned, used_for_activity_ids)
