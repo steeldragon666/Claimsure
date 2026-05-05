@@ -102,7 +102,8 @@ Create `packages/agents/src/suggestion-evaluator/evaluate.ts`:
 
 ```ts
 import type Anthropic from '@anthropic-ai/sdk';
-import type { PromptSuggestionForChoreography, PromptSuggestionEvaluation } from './types.js';
+import type { PromptSuggestionForChoreography } from '@cpa/integrations/github-app';
+import type { PromptSuggestionEvaluation } from './types.js';
 
 export interface EvaluateInput {
   suggestion: PromptSuggestionForChoreography;
