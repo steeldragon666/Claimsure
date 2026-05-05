@@ -79,12 +79,12 @@ before(async () => {
                        VALUES (${SUBJECT_D2}, ${TENANT_D2}, 'Test Claimant Pty Ltd', 'claimant')`;
 
   // Project
-  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name)
-                       VALUES (${PROJECT_D2}, ${TENANT_D2}, ${SUBJECT_D2}, 'Test Project')`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_D2}, ${TENANT_D2}, ${SUBJECT_D2}, 'Test Project', NOW())`;
 
   // Claim
-  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year)
-                       VALUES (${CLAIM_D2}, ${TENANT_D2}, ${SUBJECT_D2}, 2025)`;
+  await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, project_id, fiscal_year, stage)
+                       VALUES (${CLAIM_D2}, ${TENANT_D2}, ${SUBJECT_D2}, ${PROJECT_D2}, 2025, 'activity_capture')`;
 
   // Activities
   await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title,

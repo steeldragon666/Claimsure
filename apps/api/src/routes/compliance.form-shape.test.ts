@@ -98,8 +98,8 @@ before(async () => {
                        VALUES (gen_random_uuid(), ${TENANT_D7}, ${USER_D7}, 'consultant', true)`;
   await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
                        VALUES (${SUBJECT_D7}, ${TENANT_D7}, 'Form Shape Entity', 'claimant')`;
-  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name)
-                       VALUES (${PROJECT_D7}, ${TENANT_D7}, ${SUBJECT_D7}, 'Shape Project')`;
+  await privilegedSql`INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+                       VALUES (${PROJECT_D7}, ${TENANT_D7}, ${SUBJECT_D7}, 'Shape Project', NOW())`;
   await privilegedSql`INSERT INTO claim (id, tenant_id, subject_tenant_id, fiscal_year, project_id)
                        VALUES (${CLAIM_D7}, ${TENANT_D7}, ${SUBJECT_D7}, 2025, ${PROJECT_D7})`;
   // `activity` has no subject_tenant_id column — it links to its subject via
