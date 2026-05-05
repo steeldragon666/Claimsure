@@ -11,3 +11,8 @@ export type {
 export { registerConnector, getConnector, registeredKinds } from './connector-factory.js';
 export { classifyError } from './error-classifier.js';
 export { runDailyScrape, type ScrapeResult } from './scrape-orchestrator.js';
+export {
+  dispatchClassifiedEvent,
+  type DispatchInput,
+  type DispatchResult,
+} from './webhook-dispatch.js';
