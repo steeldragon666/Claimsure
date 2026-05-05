@@ -336,10 +336,22 @@ describe('prompt-suggestions: auth gating (no DB)', () => {
 // DB-gated integration tests — exercise the full route + DB.
 // ===========================================================================
 
+/** Deps stub needed so buildApp() actually mounts the /v1/suggestions routes. */
+const suggestionsStub = (): {
+  evaluate: () => Promise<PromptSuggestionEvaluation>;
+  choreograph: () => Promise<ChoreographyResult>;
+  runContractTest: () => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+} => ({
+  evaluate: () => Promise.reject(new Error('stub: not wired in DB-gated tests')),
+  choreograph: () => Promise.reject(new Error('stub: not wired in DB-gated tests')),
+  runContractTest: () => Promise.resolve({ exitCode: 0, stdout: '', stderr: '' }),
+});
+const buildAppWithSuggestions = () => buildApp({ promptSuggestions: suggestionsStub() });
+
 describe('POST /v1/suggestions', () => {
   test('400 on invalid body (missing source_kind)', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -352,7 +364,7 @@ describe('POST /v1/suggestions', () => {
 
   test('400 on issue_summary too short', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -365,7 +377,7 @@ describe('POST /v1/suggestions', () => {
 
   test('201 happy path — flag a suggestion', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -396,7 +408,7 @@ describe('POST /v1/suggestions', () => {
 
   test('201 with rif_event source_kind', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -414,7 +426,7 @@ describe('POST /v1/suggestions', () => {
 describe('GET /v1/suggestions', () => {
   test('200 happy path — lists tenant rows only', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
 
     // Seed two suggestions in firm A and one in firm B.
     const aRes1 = await app.inject({
@@ -466,7 +478,7 @@ describe('GET /v1/suggestions', () => {
 
   test('200 with status filter narrows result set', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'GET',
       url: '/v1/suggestions?status=open',
@@ -480,7 +492,7 @@ describe('GET /v1/suggestions', () => {
 
   test('400 on invalid status filter', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'GET',
       url: '/v1/suggestions?status=not-a-real-status',
@@ -492,7 +504,7 @@ describe('GET /v1/suggestions', () => {
 
   test('400 on malformed cursor', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'GET',
       url: '/v1/suggestions?cursor=not-a-real-cursor',
@@ -504,7 +516,7 @@ describe('GET /v1/suggestions', () => {
 
   test('cursor pagination — limit=1 returns next_cursor', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'GET',
       url: '/v1/suggestions?limit=1',
@@ -521,7 +533,7 @@ describe('GET /v1/suggestions', () => {
 describe('GET /v1/suggestions/:id', () => {
   test('400 on non-uuid id', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'GET',
       url: '/v1/suggestions/not-a-uuid',
@@ -533,7 +545,7 @@ describe('GET /v1/suggestions/:id', () => {
 
   test('404 for unknown id', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'GET',
       url: '/v1/suggestions/00000000-0000-4000-8000-000000000999',
@@ -545,7 +557,7 @@ describe('GET /v1/suggestions/:id', () => {
 
   test('200 with reviews:[] and pr:null on fresh suggestion', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const flagRes = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -573,7 +585,7 @@ describe('GET /v1/suggestions/:id', () => {
 
   test('404 for cross-tenant id (RLS isolation)', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     // Firm B inserts a suggestion.
     const bRes = await app.inject({
       method: 'POST',
@@ -596,7 +608,7 @@ describe('GET /v1/suggestions/:id', () => {
 describe('POST /v1/suggestions/:id/triage', () => {
   test('403 for viewer role', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions/00000000-0000-4000-8000-000000000001/triage',
@@ -609,7 +621,7 @@ describe('POST /v1/suggestions/:id/triage', () => {
 
   test('400 on invalid body', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions/00000000-0000-4000-8000-000000000001/triage',
@@ -622,7 +634,7 @@ describe('POST /v1/suggestions/:id/triage', () => {
 
   test('404 for unknown suggestion id', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions/00000000-0000-4000-8000-000000000999/triage',
@@ -635,7 +647,7 @@ describe('POST /v1/suggestions/:id/triage', () => {
 
   test('200 happy path — open → triaged', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const flagRes = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -665,7 +677,7 @@ describe('POST /v1/suggestions/:id/triage', () => {
 
   test('200 dismissal — open → dismissed populates resolved_at', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const flagRes = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -691,7 +703,7 @@ describe('POST /v1/suggestions/:id/triage', () => {
 
   test('409 on re-triage of already-triaged suggestion', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const flagRes = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -721,7 +733,7 @@ describe('POST /v1/suggestions/:id/triage', () => {
 describe('POST /v1/suggestions/:id/review', () => {
   test('403 for viewer role', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions/00000000-0000-4000-8000-000000000001/review',
@@ -734,7 +746,7 @@ describe('POST /v1/suggestions/:id/review', () => {
 
   test('409 if suggestion is still open (not yet triaged)', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const flagRes = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -754,7 +766,7 @@ describe('POST /v1/suggestions/:id/review', () => {
 
   test('200 happy path — review row inserted, suggestion stays triaged on approve_for_pr', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const flagRes = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -796,7 +808,7 @@ describe('POST /v1/suggestions/:id/review', () => {
 
   test('200 dismissal review flips suggestion status to dismissed', async (t) => {
     if (skipIfNoDb(t)) return;
-    const app = buildApp();
+    const app = buildAppWithSuggestions();
     const flagRes = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',

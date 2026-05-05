@@ -260,6 +260,8 @@ test('GET /v1/integrations/:provider/callback: success → encrypts tokens, upse
 });
 
 test('DELETE /v1/integrations/:provider: archives the row', async () => {
+  // Ensure no leftover rows from prior tests (cross-package pollution under --concurrency=1).
+  await privilegedSql`DELETE FROM integration_connection WHERE tenant_id = ${TENANT_A} AND provider = 'docusign'`;
   // Seed an active connection.
   await privilegedSql`
     INSERT INTO integration_connection (
