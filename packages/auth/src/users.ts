@@ -64,41 +64,70 @@ export interface ActiveTenantResult {
  * If recovery returns no row, that means we hit `user_email_unique` for
  * a DIFFERENT user (two distinct external_ids trying to claim the same
  * email — a real integrity error, not a race). We re-throw.
+ *
+ * Concurrency: wrapped in `sql.begin` with `pg_advisory_xact_lock(hashtext(...))`
+ * keyed on `(primary_idp, external_id)`. Concurrent same-user logins are
+ * serialized at the DB layer, eliminating the pg-pool scheduling artefact
+ * that previously caused intermittent flakes (see
+ * docs/plans/2026-05-05-ci-test-isolation-design.md). Different external_ids
+ * hash to different lock keys → still parallelize.
  */
 export async function findOrCreateUser(input: FindOrCreateUserInput): Promise<UserRow> {
-  const newId = crypto.randomUUID();
-  try {
-    const rows = await sql<UserRow[]>`
-      INSERT INTO "user" (id, email, display_name, primary_idp, external_id, last_login_at)
-      VALUES (${newId}, ${input.email}, ${input.displayName}, ${input.primaryIdp}, ${input.externalId}, NOW())
-      ON CONFLICT (primary_idp, external_id) WHERE deleted_at IS NULL
-      DO UPDATE SET last_login_at = NOW()
-      RETURNING id, email, display_name AS "displayName", primary_idp AS "primaryIdp", external_id AS "externalId"
-    `;
-    if (!rows[0]) throw new Error('findOrCreateUser: INSERT/ON CONFLICT did not return a row');
-    return rows[0];
-  } catch (err) {
-    if (!isEmailUniqueViolation(err)) throw err;
-    // Lost the race on user_email_unique. The other concurrent caller's
-    // row is already committed; UPDATE-RETURNING produces the same end
-    // state as the lucky-path ON CONFLICT branch (bump last_login_at +
-    // return row).
-    const recovered = await sql<UserRow[]>`
-      UPDATE "user"
-         SET last_login_at = NOW()
-       WHERE primary_idp = ${input.primaryIdp}
-         AND external_id = ${input.externalId}
-         AND deleted_at IS NULL
-      RETURNING id, email, display_name AS "displayName", primary_idp AS "primaryIdp", external_id AS "externalId"
-    `;
-    if (!recovered[0]) {
-      // No matching (primary_idp, external_id) row → the email collision
-      // is between two DIFFERENT users, not a race. Real integrity
-      // violation; re-throw the original error.
-      throw err;
+  return await sql.begin(async (tx) => {
+    // Serialize concurrent same-user logins at the DB layer.
+    //
+    // hashtext() is deterministic and produces a 32-bit int. Collisions
+    // across different (primary_idp, external_id) pairs are harmless: the
+    // worst case is two unrelated logins serialize on the same lock key
+    // momentarily — no correctness impact, only a tiny throughput penalty
+    // for that pair.
+    //
+    // Why advisory lock instead of relying on ON CONFLICT alone: the
+    // existing impl has TWO unique constraints to handle (primary_idp +
+    // external_id, AND user_email_unique). Under pg-pool scheduling
+    // pressure the email-unique recovery branch occasionally surfaces,
+    // and intermittently the recovery query sees state that confuses it.
+    // The advisory lock makes only ONE caller per (idp, external_id)
+    // active at a time, eliminating the pg-pool-dependent timing entirely.
+    //
+    // pg_advisory_xact_lock is xact-scoped: postgres releases the lock
+    // automatically at COMMIT or ROLLBACK. There is no manual release path.
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`${input.primaryIdp}:${input.externalId}`}))`;
+
+    const newId = crypto.randomUUID();
+    try {
+      const rows = await tx<UserRow[]>`
+        INSERT INTO "user" (id, email, display_name, primary_idp, external_id, last_login_at)
+        VALUES (${newId}, ${input.email}, ${input.displayName}, ${input.primaryIdp}, ${input.externalId}, NOW())
+        ON CONFLICT (primary_idp, external_id) WHERE deleted_at IS NULL
+        DO UPDATE SET last_login_at = NOW()
+        RETURNING id, email, display_name AS "displayName", primary_idp AS "primaryIdp", external_id AS "externalId"
+      `;
+      if (!rows[0]) throw new Error('findOrCreateUser: INSERT/ON CONFLICT did not return a row');
+      return rows[0];
+    } catch (err) {
+      if (!isEmailUniqueViolation(err)) throw err;
+      // Lost the race on user_email_unique. The other concurrent caller's
+      // row is already committed; UPDATE-RETURNING produces the same end
+      // state as the lucky-path ON CONFLICT branch (bump last_login_at +
+      // return row).
+      const recovered = await tx<UserRow[]>`
+        UPDATE "user"
+           SET last_login_at = NOW()
+         WHERE primary_idp = ${input.primaryIdp}
+           AND external_id = ${input.externalId}
+           AND deleted_at IS NULL
+        RETURNING id, email, display_name AS "displayName", primary_idp AS "primaryIdp", external_id AS "externalId"
+      `;
+      if (!recovered[0]) {
+        // No matching (primary_idp, external_id) row → the email collision
+        // is between two DIFFERENT users, not a race. Real integrity
+        // violation; re-throw the original error.
+        throw err;
+      }
+      return recovered[0];
     }
-    return recovered[0];
-  }
+  });
 }
 
 /**

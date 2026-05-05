@@ -74,6 +74,60 @@ test('findOrCreateUser: concurrent calls for same external_id resolve to same us
   }
 });
 
+test('findOrCreateUser: 5 concurrent same-external_id calls all resolve to same user', async () => {
+  // Higher-concurrency variant of the 2-call race test above. Exercises
+  // the pg_advisory_xact_lock under heavier contention.
+  const RACE_5X_EXTERNAL_ID = 'microsoft:test-t6-race-5x-oid';
+  try {
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        findOrCreateUser({
+          primaryIdp: 'microsoft',
+          externalId: RACE_5X_EXTERNAL_ID,
+          email: 'race5x@example.com',
+          displayName: null,
+        }),
+      ),
+    );
+    const uniqueIds = new Set(results.map((r) => r.id));
+    assert.equal(uniqueIds.size, 1, 'all 5 calls return same user_id');
+  } finally {
+    await sql`DELETE FROM "user" WHERE external_id = ${RACE_5X_EXTERNAL_ID}`;
+  }
+});
+
+test('findOrCreateUser: different external_ids parallelize (advisory lock keys differ)', async () => {
+  // Verifies the advisory lock doesn't over-serialize: different
+  // (primary_idp, external_id) pairs hash to different lock keys, so
+  // concurrent logins for unrelated users still parallelize. We can't
+  // measure parallelism in a unit test, but we CAN prove correctness
+  // under different-key concurrency, which is the property the lock
+  // claims to preserve.
+  const PARALLEL_A = 'microsoft:test-t6-parallel-a-oid';
+  const PARALLEL_B = 'microsoft:test-t6-parallel-b-oid';
+  try {
+    const results = await Promise.all([
+      findOrCreateUser({
+        primaryIdp: 'microsoft',
+        externalId: PARALLEL_A,
+        email: 'parallel-a@example.com',
+        displayName: null,
+      }),
+      findOrCreateUser({
+        primaryIdp: 'microsoft',
+        externalId: PARALLEL_B,
+        email: 'parallel-b@example.com',
+        displayName: null,
+      }),
+    ]);
+    assert.notEqual(results[0].id, results[1].id, 'different external_ids → different user_ids');
+    assert.equal(results[0].externalId, PARALLEL_A);
+    assert.equal(results[1].externalId, PARALLEL_B);
+  } finally {
+    await sql`DELETE FROM "user" WHERE external_id IN (${PARALLEL_A}, ${PARALLEL_B})`;
+  }
+});
+
 test('findOrCreateUser: bumps last_login_at on existing user', async () => {
   // postgres-js may return timestamptz as string OR Date depending on parser
   // registration timing in this workspace; normalise via new Date(...).

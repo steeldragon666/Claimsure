@@ -78,33 +78,41 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      # Test step is wrapped in nick-fields/retry@v3 to absorb known
-      # one-off CI transients without papering over real failures.
+      # Tests run with `turbo run test --concurrency=1` so packages execute
+      # one at a time, eliminating cross-package state pollution against the
+      # shared CI postgres service. Within a package, `tsx --test` runs
+      # sequentially, so this is the only concurrent-write surface that
+      # mattered.
       #
-      # Why retry: the test suite has a small set of intermittently-flaky
-      # tests with no clean structural fix:
-      #   - findOrCreateUser concurrent race (impl is correct; failure is
-      #     a transient pg-pool scheduling artefact under load)
-      #   - subject-tenants / integrations DELETE (one-off CI noise on
-      #     ~1 in 10 runs each, never reproduces consecutively)
-      # See `chore/test-stability-sprint` PR for the full audit.
+      # Previous structural flake sources, all addressed:
+      #   - expenditure_line cross-package pollution: fixed by --concurrency=1
+      #   - subject-tenants / integrations DELETE one-off noise: fixed by
+      #     --concurrency=1 (was cross-package state racing same shared DB)
+      #   - findOrCreateUser concurrent race: fixed by pg_advisory_xact_lock
+      #     in packages/auth/src/users.ts
+      #   - fire-and-forget enqueueExpenditureClassify: fixed by
+      #     drainPendingClassifyJobs() in expenditures.test.ts:beforeEach
+      #     (PR #31)
       #
-      # The fire-and-forget enqueueExpenditureClassify race (the most
-      # common flake before this sprint) is now structurally fixed via
-      # `drainPendingClassifyJobs()` in expenditures.test.ts:beforeEach.
-      # Retry is a safety net for the residual one-off transients only.
+      # nick-fields/retry@v3 stays in place for ONE observation window. PR-B
+      # (separate follow-up) deletes this block after ≥5 PRs land green with
+      # zero retry warnings. The contract after PR-B: tests must pass
+      # deterministically on the first run; any future flake is a real bug
+      # to investigate, not absorb.
       #
-      # max_attempts:2 means a deterministic failure still fails CI on
-      # the second run. on_retry_command logs the retry so flake rate is
-      # observable from CI history; escalate if the same test fails twice
-      # in succession or appears in retries on multiple PRs.
+      # Note: the e2e job (below) uses Playwright directly with its own
+      # postgres service, so it doesn't share the cross-package issue and
+      # is not affected by --concurrency=1.
+      #
+      # See docs/plans/2026-05-05-ci-test-isolation-design.md for full
+      # design and observation-window protocol.
       - name: Test
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 15
           max_attempts: 2
           retry_on: error
-          command: pnpm test
+          command: pnpm test -- --concurrency=1
           on_retry_command: |
             echo "::warning::pnpm test failed on attempt 1; retrying."
             echo "::warning::If the same test fails on attempt 2 it is a real failure, not a flake."
