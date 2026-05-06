@@ -106,10 +106,12 @@ before(async () => {
   // `claim.subject_tenant_id`. The form-completeness endpoint does the JOIN
   // server-side; the test only needs the (tenant, project, claim, code,
   // kind, title, fy_label, hypothesis_formed_at) NOT NULL columns.
+  // Activity codes must match `^(CA|SA)-\d+$` per the activity_code_format
+  // check constraint — kind='core' uses CA prefix, kind='supporting' uses SA.
   await privilegedSql`INSERT INTO activity (id, tenant_id, project_id, claim_id, code, kind, title,
                                             fy_label, hypothesis_formed_at)
                        VALUES (${ACTIVITY_D7}, ${TENANT_D7}, ${PROJECT_D7}, ${CLAIM_D7},
-                               'FS-01', 'core', 'Form Shape Activity',
+                               'CA-01', 'core', 'Form Shape Activity',
                                ${FY}, '2025-01-01T00:00:00Z')`;
 });
 
