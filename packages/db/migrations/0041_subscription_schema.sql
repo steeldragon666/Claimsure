@@ -179,21 +179,34 @@ CREATE INDEX "floor_topup_invoice_tenant_idx" ON "floor_topup_invoice" ("tenant_
 
 -- ---------------------------------------------------------------------------
 -- New table: founding_partner_slots
--- First 10 rows represent available founding partner slots.
--- Claiming a slot: UPDATE SET tenant_id = <id> WHERE tenant_id IS NULL LIMIT 1.
+-- First 10 rows represent available founding partner slots (seeded).
+-- Claiming a slot (race-safe):
+--   UPDATE SET claimed_by_tenant_id = <id> WHERE id = (
+--     SELECT id FROM founding_partner_slots
+--     WHERE claimed_by_tenant_id IS NULL LIMIT 1 FOR UPDATE SKIP LOCKED
+--   ) RETURNING id
 -- No RLS — global allocation table (no tenant scope).
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE "founding_partner_slots" (
-  "slot_number" integer PRIMARY KEY NOT NULL,
-  "tenant_id" uuid REFERENCES "tenant" ("id"),
-  "claimed_at" timestamp with time zone,
-  "stripe_coupon_id" text
+  "id" uuid PRIMARY KEY NOT NULL DEFAULT gen_random_uuid(),
+  "claimed_by_tenant_id" uuid REFERENCES "tenant" ("id"),
+  "claimed_at" timestamp with time zone
 );
 
 -- Seed 10 available slots
-INSERT INTO "founding_partner_slots" ("slot_number")
-VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10);
+INSERT INTO "founding_partner_slots" ("id")
+VALUES
+  (gen_random_uuid()),
+  (gen_random_uuid()),
+  (gen_random_uuid()),
+  (gen_random_uuid()),
+  (gen_random_uuid()),
+  (gen_random_uuid()),
+  (gen_random_uuid()),
+  (gen_random_uuid()),
+  (gen_random_uuid()),
+  (gen_random_uuid());
 
 -- ---------------------------------------------------------------------------
 -- New table: processed_webhook_events
