@@ -30,7 +30,11 @@ const RLS_EXEMPT_TABLES = new Set([
   'mobile_session', // accessed via employee_id; transitive RLS via subject_tenant_employee (0008)
   'expenditure_line', // child of expenditure; tenant_id on parent which IS RLS-enforced (0013)
   'narrative_segment', // child of narrative_draft; tenant scope via JOIN to parent (0037)
-  '__drizzle_migrations', // migration metadata; admin-only
+  'regulatory_source', // global reference data shared across all tenants; consultant role only at app layer (0040)
+  'regulatory_event', // global reference data shared across all tenants; consultant role only at app layer (0040)
+  // NOTE: drizzle-kit's __drizzle_migrations table lives in the `drizzle` schema by default,
+  // NOT `public`. This audit only inspects public-schema tables, so __drizzle_migrations is
+  // correctly invisible here and does not need an exempt-list entry.
 ]);
 
 let dbAvailable = false;

@@ -43,6 +43,11 @@ const ACTIVITY = '00000000-0000-4000-8000-0000000b0090';
 const cleanup = async (): Promise<void> => {
   await privilegedSql`DELETE FROM agent_call_cache WHERE agent_name = 'activity-register-synthesizer'`;
   await privilegedSql`DELETE FROM event WHERE tenant_id IN (${TENANT}, ${TENANT_OTHER})`;
+  // audit_score_snapshot must be cleared BEFORE subject_tenant — there is a
+  // FK from audit_score_snapshot.subject_tenant_id → subject_tenant(id) that
+  // otherwise blocks the subject_tenant delete with constraint
+  // `audit_score_snapshot_subject_tenant_id_subject_tenant_id_fk`.
+  await privilegedSql`DELETE FROM audit_score_snapshot WHERE tenant_id IN (${TENANT}, ${TENANT_OTHER})`;
   await privilegedSql`DELETE FROM activity WHERE tenant_id = ${TENANT}`;
   await privilegedSql`DELETE FROM claim WHERE tenant_id = ${TENANT}`;
   await privilegedSql`DELETE FROM project WHERE tenant_id IN (${TENANT}, ${TENANT_OTHER})`;
