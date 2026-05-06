@@ -55,6 +55,7 @@ import {
 } from './routes/prompt-suggestions.js';
 import { registerBilling, type BillingRouteDeps } from './routes/billing.js';
 import { registerBillingPlan } from './routes/billing-plan.js';
+import { registerBillingPortal } from './routes/billing-portal.js';
 import {
   registerBillingWebhookPlugin,
   type BillingWebhookRouteDeps,
@@ -360,6 +361,7 @@ export function buildApp(options: BuildAppOptions = {}): App {
     app.register((instance, _opts, done) => {
       registerBilling(instance, options.billing!);
       registerBillingPlan(instance, options.billing!);
+      registerBillingPortal(instance, options.billing!);
       done();
     });
   }
