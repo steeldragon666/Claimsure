@@ -103,10 +103,9 @@ after(async () => {
            claimed_at           = NULL
      WHERE claimed_by_tenant_id = ${SENTINEL_TENANT}
   `;
-  // Also remove any ad-hoc test slots inserted during the tests.
-  await privilegedSql`DELETE FROM founding_partner_slots WHERE claimed_by_tenant_id IS NULL AND id NOT IN (
-    SELECT id FROM founding_partner_slots WHERE claimed_by_tenant_id IS NOT NULL
-  )`;
+  // Note: ad-hoc test slots are deleted inline in each test's finally block,
+  // so no further slot cleanup is needed here. DO NOT delete unclaimed rows —
+  // that would wipe the 10 seeded slots that migration 0041 requires.
 
   await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (${TENANT_P9B}, ${SENTINEL_TENANT})`;
   await sql`DELETE FROM "user" WHERE id = ${ADMIN_USER_P9B}`;

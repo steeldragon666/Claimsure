@@ -32,6 +32,8 @@ const RLS_EXEMPT_TABLES = new Set([
   'narrative_segment', // child of narrative_draft; tenant scope via JOIN to parent (0037)
   'regulatory_source', // global reference data shared across all tenants; consultant role only at app layer (0040)
   'regulatory_event', // global reference data shared across all tenants; consultant role only at app layer (0040)
+  'founding_partner_slots', // global allocation table; no tenant scope; claimed by FK to tenant.id (0041)
+  'processed_webhook_events', // system deduplication table; stripe_event_id PK; tenant_id indexed for ops but not tenant-scoped (0041)
   // NOTE: drizzle-kit's __drizzle_migrations table lives in the `drizzle` schema by default,
   // NOT `public`. This audit only inspects public-schema tables, so __drizzle_migrations is
   // correctly invisible here and does not need an exempt-list entry.
