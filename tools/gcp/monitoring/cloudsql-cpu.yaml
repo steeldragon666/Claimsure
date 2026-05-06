@@ -1,0 +1,51 @@
+displayName: "CPA Platform — Cloud SQL CPU utilisation > 80%"
+documentation:
+  content: |
+    ## Alert: Cloud SQL CPU Utilisation
+
+    **Severity:** P2 — respond within 30 minutes.
+
+    **What this means:** The Cloud SQL Postgres instance has sustained CPU utilisation
+    above 80% for 5 minutes. This is typically caused by a slow or missing-index query,
+    a sudden traffic spike, or an unoptimised batch job (e.g. the RIF daily scrape).
+
+    **First response:**
+    1. Open Supabase SQL editor → run the pg_stat_statements diagnostic:
+       ```sql
+       SELECT left(query, 100) AS query, calls, mean_exec_time::bigint AS mean_ms,
+              total_exec_time::bigint AS total_ms
+       FROM pg_stat_statements
+       ORDER BY total_exec_time DESC LIMIT 10;
+       ```
+    2. Check for long-running queries:
+       ```sql
+       SELECT pid, query_start, state, left(query, 100) AS query
+       FROM pg_stat_activity
+       WHERE state != 'idle' AND query_start < now() - interval '1 minute'
+       ORDER BY query_start;
+       ```
+    3. If a rogue query is the cause, terminate it with `SELECT pg_terminate_backend(pid)`.
+    4. See docs/monitoring/alert-runbook.md — P2 section (slow queries).
+
+    **Runbook:** docs/monitoring/alert-runbook.md
+  mimeType: text/markdown
+alertStrategy:
+  autoClose: 1800s
+combiner: OR
+conditions:
+  - displayName: "Cloud SQL CPU > 80% for 5 min"
+    conditionThreshold:
+      filter: |
+        resource.type = "cloudsql_database"
+        AND metric.type = "cloudsql.googleapis.com/database/cpu/utilization"
+      aggregations:
+        - alignmentPeriod: 300s
+          crossSeriesReducer: REDUCE_MEAN
+          perSeriesAligner: ALIGN_MEAN
+      comparison: COMPARISON_GT
+      thresholdValue: 0.80
+      duration: 300s
+      trigger:
+        count: 1
+notificationChannels: []  # populated by monitoring-setup.sh with email channel ID
+severity: WARNING

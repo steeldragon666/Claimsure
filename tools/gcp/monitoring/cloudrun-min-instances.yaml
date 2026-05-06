@@ -1,0 +1,59 @@
+displayName: "CPA Platform — cpa-api instance count dropped to 0"
+documentation:
+  content: |
+    ## Alert: cpa-api Instance Count = 0
+
+    **Severity:** P1 — page on-call immediately.
+
+    **What this means:** The cpa-api Cloud Run service has zero active instances.
+    This should not happen in production because min-instances=1 is configured in
+    cloudrun-deploy.sh. If this fires, it indicates either:
+      - A Cloud Run service misconfiguration (min-instances was reset to 0)
+      - A Cloud Run quota or billing suspension
+      - An infrastructure-level outage
+
+    cpa-api must maintain at least 1 instance for pg-boss to reliably process
+    background jobs (pg-boss relies on persistent in-process scheduler state).
+
+    **First response:**
+    1. Check Cloud Run service config:
+       ```bash
+       gcloud run services describe cpa-api \
+         --region=australia-southeast1 \
+         --format="value(spec.template.metadata.annotations)"
+       ```
+    2. If min-instances is 0, redeploy immediately:
+       ```bash
+       export IMAGE_TAG=$(gcloud run services describe cpa-api \
+         --region=australia-southeast1 \
+         --format="value(spec.template.spec.containers[0].image)" \
+         | awk -F: '{print $2}')
+       bash tools/gcp/cloudrun-deploy.sh
+       ```
+    3. Check GCP billing console for any suspension.
+    4. See docs/monitoring/alert-runbook.md — P1 scenario A (Cloud Run crashed).
+
+    **Runbook:** docs/monitoring/alert-runbook.md
+  mimeType: text/markdown
+alertStrategy:
+  autoClose: 1800s
+combiner: OR
+conditions:
+  - displayName: "cpa-api active instance count = 0"
+    conditionThreshold:
+      filter: |
+        resource.type = "cloud_run_revision"
+        AND metric.type = "run.googleapis.com/container/instance_count"
+        AND resource.label.service_name = "cpa-api"
+        AND metric.labels.state = "active"
+      aggregations:
+        - alignmentPeriod: 60s
+          crossSeriesReducer: REDUCE_SUM
+          perSeriesAligner: ALIGN_MAX
+      comparison: COMPARISON_LT
+      thresholdValue: 1
+      duration: 60s
+      trigger:
+        count: 1
+notificationChannels: []  # populated by monitoring-setup.sh with PagerDuty channel ID
+severity: CRITICAL

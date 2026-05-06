@@ -1,0 +1,46 @@
+displayName: "CPA Platform — Cloud Run 5xx error rate > 5%/min"
+documentation:
+  content: |
+    ## Alert: Cloud Run 5xx Error Rate
+
+    **Severity:** P1 — page on-call immediately.
+
+    **What this means:** The cpa-api or cpa-web Cloud Run service is returning HTTP 5xx
+    responses for more than 5% of requests over the last 60 seconds. This typically
+    indicates a code regression, crashed dependency, or database connectivity failure.
+
+    **First response:**
+    1. Open Sentry → cpa-api project → check for a spike in new errors.
+    2. Open Grafana → API health dashboard → correlate with recent deploy.
+    3. If a recent deploy is the cause: roll back via `gcloud run services update-traffic`.
+    4. See docs/monitoring/alert-runbook.md — P1 scenario C (high error rate from deploy).
+
+    **Runbook:** docs/monitoring/alert-runbook.md
+  mimeType: text/markdown
+alertStrategy:
+  autoClose: 1800s  # auto-resolve after 30 min if metric drops
+combiner: OR
+conditions:
+  - displayName: "5xx response rate > 5% (cpa-api or cpa-web)"
+    conditionThreshold:
+      filter: |
+        resource.type = "cloud_run_revision"
+        AND metric.type = "run.googleapis.com/request_count"
+        AND metric.labels.response_code_class = "5xx"
+      aggregations:
+        - alignmentPeriod: 60s
+          crossSeriesReducer: REDUCE_SUM
+          groupByFields:
+            - resource.label.service_name
+          perSeriesAligner: ALIGN_RATE
+      comparison: COMPARISON_GT
+      # Threshold: 5% of requests. Because this condition uses the raw 5xx count rate,
+      # pair it with a denominator condition or tune the threshold after observing
+      # baseline request volumes. At typical traffic (e.g. 10 req/s = 600 req/min),
+      # 5% = 30 errors/min = 0.5 errors/s. Adjust threshold value to match prod volume.
+      thresholdValue: 0.5
+      duration: 60s
+      trigger:
+        count: 1
+notificationChannels: []  # populated by monitoring-setup.sh with PagerDuty channel ID
+severity: CRITICAL

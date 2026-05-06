@@ -1,6 +1,18 @@
 // MUST be the first import — registers OTel auto-instrumentations before
 // any module that fastify/pino/postgres-js depends on is loaded.
 import { sdk } from './tracer-init.js';
+
+// TODO(P9.1): Initialize Sentry SDK here using process.env.SENTRY_DSN_API
+// SENTRY_DSN_API is already injected by cloudrun-deploy.sh via Secret Manager.
+// Prerequisites before activating:
+//   pnpm --filter @cpa/api add @sentry/node @sentry/opentelemetry
+// Then replace this comment with:
+//   import * as Sentry from '@sentry/node';
+//   import { buildApiSentryOptions } from '../../../tools/monitoring/sentry-config.js';
+//   Sentry.init(buildApiSentryOptions());
+// Sentry must init AFTER the OTel SDK starts (above) and BEFORE Fastify loads.
+// See tools/monitoring/sentry-config.ts for the canonical options reference.
+
 import { buildApp } from './app.js';
 import { evaluate as defaultEvaluate } from '@cpa/agents/suggestion-evaluator';
 import { generatePullRequest } from '@cpa/integrations/github-app';

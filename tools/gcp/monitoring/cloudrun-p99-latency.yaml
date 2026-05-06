@@ -1,0 +1,43 @@
+displayName: "CPA Platform — Cloud Run p99 latency > 2s"
+documentation:
+  content: |
+    ## Alert: Cloud Run p99 Latency
+
+    **Severity:** P2 — respond within 30 minutes.
+
+    **What this means:** The 99th percentile request latency for cpa-api or cpa-web
+    has exceeded 2000ms sustained over the last 5 minutes. This affects the slowest
+    1% of users and typically signals a slow database query, an overloaded service,
+    or a downstream dependency bottleneck.
+
+    **First response:**
+    1. Open Grafana → API health dashboard → check P95/P99 latency panel.
+    2. Open Sentry → check for slow transaction traces correlated with the time window.
+    3. Open Supabase → SQL editor → run the slow-query diagnostic from the runbook.
+    4. Check Cloud Run instance count — if low, a cold-start spike may be the cause.
+    5. See docs/monitoring/alert-runbook.md — P2 section (slow queries degrading API).
+
+    **Runbook:** docs/monitoring/alert-runbook.md
+  mimeType: text/markdown
+alertStrategy:
+  autoClose: 1800s
+combiner: OR
+conditions:
+  - displayName: "p99 request latency > 2000ms over 5 min"
+    conditionThreshold:
+      filter: |
+        resource.type = "cloud_run_revision"
+        AND metric.type = "run.googleapis.com/request_latencies"
+      aggregations:
+        - alignmentPeriod: 300s
+          crossSeriesReducer: REDUCE_PERCENTILE_99
+          groupByFields:
+            - resource.label.service_name
+          perSeriesAligner: ALIGN_DELTA
+      comparison: COMPARISON_GT
+      thresholdValue: 2000
+      duration: 300s
+      trigger:
+        count: 1
+notificationChannels: []  # populated by monitoring-setup.sh with PagerDuty channel ID
+severity: WARNING
