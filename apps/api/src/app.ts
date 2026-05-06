@@ -53,6 +53,10 @@ import {
   type PromptSuggestionsRouteDeps,
 } from './routes/prompt-suggestions.js';
 import { registerBilling, type BillingRouteDeps } from './routes/billing.js';
+import {
+  registerBillingWebhookPlugin,
+  type BillingWebhookRouteDeps,
+} from './routes/billing-webhook.js';
 import { registerCompliance } from './routes/compliance.js';
 import { registerIntelligence } from './routes/intelligence.js';
 import { registerListTenants } from './routes/tenants/list.js';
@@ -115,6 +119,7 @@ export type App = FastifyInstance<
 export interface BuildAppOptions {
   promptSuggestions?: PromptSuggestionsRouteDeps;
   billing?: BillingRouteDeps;
+  billingWebhook?: BillingWebhookRouteDeps;
 }
 
 export function buildApp(options: BuildAppOptions = {}): App {
@@ -336,6 +341,12 @@ export function buildApp(options: BuildAppOptions = {}): App {
   if (options.billing) {
     app.register((instance, _opts, done) => {
       registerBilling(instance, options.billing!);
+      done();
+    });
+  }
+  if (options.billingWebhook) {
+    app.register((instance, _opts, done) => {
+      registerBillingWebhookPlugin(instance, options.billingWebhook!);
       done();
     });
   }
