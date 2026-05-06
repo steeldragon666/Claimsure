@@ -1,4 +1,5 @@
 export * from './activity-application.js';
+export * from './activity-register.js';
 export * from './apportionment-report.js';
 export * from './claim-summary.js';
 export * from './content-hash.js';
