@@ -9,6 +9,7 @@ Trigger → Severity → First Response → Escalation → Resolution → Post-i
 | [first-incident.md](./first-incident.md)                     | First time being paged                     | Reference |
 | [backup-restore.md](./backup-restore.md)                     | Database corruption or data loss suspected | Sev 1-2   |
 | [pentest-finding-response.md](./pentest-finding-response.md) | Pen-test finding received                  | Varies    |
+| [gcp-project-bootstrap.md](./gcp-project-bootstrap.md)       | GCP project provisioning / re-provisioning | Ops       |
 
 ## Quick links
 
