@@ -28,7 +28,7 @@ set -euo pipefail
 
 PROD_PROJECT="${PROD_PROJECT:-cpa-platform-prod}"
 REGION="${REGION:-australia-southeast1}"
-IMAGE_TAG="${IMAGE_TAG:-latest}"
+IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG must be set (e.g. export IMAGE_TAG=\$(git rev-parse --short HEAD))}"
 
 REGISTRY="gcr.io/${PROD_PROJECT}"
 API_IMAGE="${REGISTRY}/cpa-api:${IMAGE_TAG}"
