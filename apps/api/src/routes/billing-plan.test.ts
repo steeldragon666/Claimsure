@@ -82,6 +82,7 @@ const setup = async (): Promise<void> => {
   }
 
   // Clean up any leftover fixtures (including P9.2.7 mobile-seat tables)
+  await privilegedSql`DELETE FROM floor_topup_invoice WHERE tenant_id = ${TENANT_P92}`;
   await privilegedSql`DELETE FROM claimant_mobile_subscription WHERE tenant_id = ${TENANT_P92}`;
   await privilegedSql`DELETE FROM subject_tenant WHERE tenant_id = ${TENANT_P92}`;
   await privilegedSql`DELETE FROM subscription_item WHERE tenant_id = ${TENANT_P92}`;
@@ -120,6 +121,7 @@ const setup = async (): Promise<void> => {
 const teardown = async (): Promise<void> => {
   if (!dbAvailable) return;
   // Clean mobile-seat tables before subscription rows (FK order)
+  await privilegedSql`DELETE FROM floor_topup_invoice WHERE tenant_id = ${TENANT_P92}`;
   await privilegedSql`DELETE FROM claimant_mobile_subscription WHERE tenant_id = ${TENANT_P92}`;
   await privilegedSql`DELETE FROM subject_tenant WHERE tenant_id = ${TENANT_P92}`;
   await privilegedSql`DELETE FROM subscription_item WHERE tenant_id = ${TENANT_P92}`;
