@@ -512,9 +512,17 @@ test('missing external_account_id → sync_state=failed without calling sync fun
   assert.ok(update_calls[0]!.sql.includes("sync_state = 'failed'"));
 });
 
-test('registerXeroAccountingSyncJob wires schedule + work with the right cron', async () => {
-  const calls: Array<{ kind: 'schedule' | 'work'; name: string; cron?: string }> = [];
+test('registerXeroAccountingSyncJob wires createQueue + work + schedule in correct order', async () => {
+  // pg-boss v12+ requires createQueue first, then work (which uses the
+  // queue), then schedule (which has a FK on queue.name). Asserting the
+  // order regresses the original bug where schedule ran before either.
+  const calls: Array<{ kind: 'createQueue' | 'schedule' | 'work'; name: string; cron?: string }> =
+    [];
   const boss: PgBossLike = {
+    createQueue: (name): Promise<void> => {
+      calls.push({ kind: 'createQueue', name });
+      return Promise.resolve();
+    },
     schedule: (name, cron): Promise<void> => {
       calls.push({ kind: 'schedule', name, cron });
       return Promise.resolve();
@@ -526,14 +534,15 @@ test('registerXeroAccountingSyncJob wires schedule + work with the right cron', 
   };
 
   await registerXeroAccountingSyncJob(boss);
-  assert.equal(calls.length, 2);
-  assert.deepEqual(calls[0], {
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0], { kind: 'createQueue', name: 'xero-accounting-sync' });
+  assert.equal(calls[1]!.kind, 'work');
+  assert.equal(calls[1]!.name, 'xero-accounting-sync');
+  assert.deepEqual(calls[2], {
     kind: 'schedule',
     name: 'xero-accounting-sync',
     cron: '*/15 * * * *',
   });
-  assert.equal(calls[1]!.kind, 'work');
-  assert.equal(calls[1]!.name, 'xero-accounting-sync');
 });
 
 test('advisory lock is released after sync (try/finally)', async () => {

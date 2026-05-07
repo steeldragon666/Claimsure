@@ -97,6 +97,11 @@ export const XERO_ACCOUNTING_SYNC_CADENCE = '*/15 * * * *';
  * methods (the real `PgBoss` instance is) satisfies this type.
  */
 export interface PgBossLike {
+  /**
+   * pg-boss v12+ requires explicit queue creation before work() or
+   * schedule(). Idempotent — re-running is a no-op once created.
+   */
+  createQueue(name: string, options?: unknown): Promise<void>;
   schedule(name: string, cron: string, data?: unknown, options?: unknown): Promise<void>;
   work<T = unknown>(name: string, handler: (job: { data: T }) => unknown): Promise<string>;
 }
@@ -387,7 +392,12 @@ export async function runXeroAccountingSyncForAllConnections(
  * an empty body and the orchestrator pulls its own work list from the DB.
  */
 export async function registerXeroAccountingSyncJob(boss: PgBossLike): Promise<void> {
-  await boss.schedule(XERO_ACCOUNTING_SYNC_JOB_NAME, XERO_ACCOUNTING_SYNC_CADENCE);
+  // pg-boss v12+: createQueue must run BEFORE work() or schedule(),
+  // and work() must run before schedule() so the queue row exists for
+  // schedule's FK to schedule.name → queue.name. Calling either out of
+  // order produces "Queue ... does not exist" / 23503 FK errors.
+  // createQueue is idempotent.
+  await boss.createQueue(XERO_ACCOUNTING_SYNC_JOB_NAME);
   await boss.work(XERO_ACCOUNTING_SYNC_JOB_NAME, async () => {
     const result = await runXeroAccountingSyncForAllConnections();
     console.log(
@@ -395,4 +405,5 @@ export async function registerXeroAccountingSyncJob(boss: PgBossLike): Promise<v
     );
     return result;
   });
+  await boss.schedule(XERO_ACCOUNTING_SYNC_JOB_NAME, XERO_ACCOUNTING_SYNC_CADENCE);
 }

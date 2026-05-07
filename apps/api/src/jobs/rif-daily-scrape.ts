@@ -21,10 +21,14 @@ export const RIF_DAILY_SCRAPE_CRON = '0 3 * * *';
  * The cron schedule uses Australia/Sydney timezone context.
  */
 export async function registerRifDailyScrapeJob(boss: PgBoss): Promise<void> {
-  // Register the worker FIRST so the queue row exists in pg-boss's
-  // schema. boss.schedule() has a foreign key on schedule.name →
-  // queue.name; calling schedule before work fails with a 23503 FK
-  // violation on a fresh database where the queue hasn't been seen yet.
+  // pg-boss v12+ requires explicit queue creation before work() or
+  // schedule() — boss.work() does NOT auto-create the queue, contrary
+  // to older pg-boss versions. Without createQueue first, both work()
+  // and schedule() fail because the pgboss.queue row doesn't exist
+  // (FK violation on schedule.name → queue.name; "Queue does not
+  // exist" on work()).
+  // createQueue is idempotent — re-running is a no-op once created.
+  await boss.createQueue(RIF_DAILY_SCRAPE_JOB_NAME);
   await boss.work(RIF_DAILY_SCRAPE_JOB_NAME, async () => {
     const result = await runDailyScrape();
     console.log(
