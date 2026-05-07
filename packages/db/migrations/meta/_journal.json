@@ -302,6 +302,27 @@
       "when": 1778065680000,
       "tag": "0044_activity_portal_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1778152080000,
+      "tag": "0070_federation",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1778152140000,
+      "tag": "0071_federation_rls_extension",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1778152200000,
+      "tag": "0072_federation_read_event_kind",
+      "breakpoints": true
     }
   ]
 }

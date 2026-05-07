@@ -145,6 +145,12 @@ export const EVIDENCE_KINDS = [
   // rebuilt to admit it by 0028_narrative_drafted_kind.sql; this
   // list tracks the CHECK byte-for-byte.
   'NARRATIVE_DRAFTED',
+  // P9 Phase 3 Task 3.4 — emitted by the federation audit hook when a
+  // financier partner reads data via a federation_share. One event per
+  // federated read response. The `event_kind_valid` CHECK is rebuilt
+  // to admit it by 0072_federation_read_event_kind.sql; this list
+  // tracks the CHECK byte-for-byte.
+  'FEDERATION_READ',
 ] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 

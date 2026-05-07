@@ -39,3 +39,6 @@ export * from './r_and_d_facility.js';
 export * from './rd_forecast.js';
 export * from './regulatory_source.js';
 export * from './regulatory_event.js';
+export * from './federation_share.js';
+export * from './federation_invitation.js';
+export * from './federation_audit.js';

@@ -73,6 +73,7 @@ import { registerListUsers } from './routes/users/list.js';
 import { registerRemoveUser } from './routes/users/remove.js';
 import { registerUpdateUser } from './routes/users/update.js';
 import { registerWhoami } from './routes/whoami.js';
+import { registerFederation } from './routes/federation/index.js';
 
 const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
 const DEFAULT_SESSION_COOKIE_NAME = 'cpa_session';
@@ -345,6 +346,11 @@ export function buildApp(options: BuildAppOptions = {}): App {
   });
   app.register((instance, _opts, done) => {
     registerIntelligence(instance);
+    done();
+  });
+  // P9.3 Federation routes — cross-tenant read sharing.
+  app.register((instance, _opts, done) => {
+    registerFederation(instance);
     done();
   });
   // Prompt-suggestions routes require explicit deps (esp. `runContractTest`,
