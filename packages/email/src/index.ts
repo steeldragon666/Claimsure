@@ -27,3 +27,6 @@ export type { FinalWarningData } from './templates/final-warning.js';
 
 export { subscriptionCancelledEmail } from './templates/subscription-cancelled.js';
 export type { SubscriptionCancelledData } from './templates/subscription-cancelled.js';
+
+export { federationInvitationEmail } from './templates/federation-invitation.js';
+export type { FederationInvitationEmailData } from './templates/federation-invitation.js';
