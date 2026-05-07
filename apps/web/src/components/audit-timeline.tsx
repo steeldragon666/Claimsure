@@ -4,6 +4,13 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { ForensicChip, truncateHash as forensicChipTruncateHash } from './forensic-chip.js';
+
+// Re-export so existing call sites (audit-timeline.test.tsx + downstream
+// consumers that imported `truncateHash` from this module before the
+// canonical helper landed in `./forensic-chip.tsx`) keep working without
+// migration churn. New code should import directly from `./forensic-chip`.
+export const truncateHash = forensicChipTruncateHash;
 
 /**
  * P7 Theme C Tasks C.2 + C.3 — Activity audit timeline component.
@@ -70,11 +77,6 @@ const KIND_LABELS: Record<TimelineRow['kind'], string> = {
   similarity_flag: 'Similarity flag',
 };
 
-/** Truncate a hex hash to 8 chars for display. */
-export function truncateHash(hash: string): string {
-  return hash.length > 8 ? hash.slice(0, 8) : hash;
-}
-
 async function fetchTimeline(activityId: string): Promise<TimelineResponse> {
   return apiFetch<TimelineResponse>(`/v1/audit/activity/${activityId}/timeline`);
 }
@@ -136,25 +138,54 @@ function TimelineItem({ row }: { row: TimelineRow }) {
         {row.event_kind && (
           <span className="font-mono text-xs text-muted-foreground">{row.event_kind}</span>
         )}
-        {row.kind === 'event' && row.chain_verified !== undefined && (
-          <span
-            className={cn('text-xs', row.chain_verified ? 'text-green-600' : 'text-red-600')}
-            data-testid="chain-verified-indicator"
-          >
-            {row.chain_verified ? '✓' : '✗'}
-          </span>
-        )}
-        {row.forensic && (
-          <button
-            type="button"
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        {/*
+         * When the row carries a content hash, render a ForensicChip
+         * (canonical signature component, design system §"Forensic-metadata
+         * chip"). The chip:
+         *   - displays the truncated hash + timestamp + chain state inline
+         *   - clicking expands the ForensicCard below (replaces the prior
+         *     standalone 🔬 toggle button)
+         *   - state is derived from chain_verified: verified → patina ✓,
+         *     broken → clay-red ✗, undefined → default
+         *
+         * For rows that have *forensic metadata but no content_hash* (rare —
+         * e.g. similarity_flag rows), fall back to the legacy 🔬 toggle so
+         * the expandable card is still reachable.
+         */}
+        {row.forensic?.content_hash ? (
+          <ForensicChip
+            hash={row.forensic.content_hash}
+            capturedAt={row.timestamp}
+            size="sm"
+            state={
+              row.chain_verified === true
+                ? 'verified'
+                : row.chain_verified === false
+                  ? 'broken'
+                  : 'default'
+            }
             onClick={() => setShowForensic((v) => !v)}
-            aria-expanded={showForensic}
-            aria-label="Toggle forensic metadata"
-            data-testid="forensic-toggle"
-          >
-            🔬
-          </button>
+            ariaLabel={`Forensic metadata for ${KIND_LABELS[row.kind]} — ${
+              row.chain_verified === true
+                ? 'chain verified'
+                : row.chain_verified === false
+                  ? 'chain broken'
+                  : 'click to expand'
+            }`}
+          />
+        ) : (
+          row.forensic && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => setShowForensic((v) => !v)}
+              aria-expanded={showForensic}
+              aria-label="Toggle forensic metadata"
+              data-testid="forensic-toggle"
+            >
+              🔬
+            </button>
+          )
         )}
       </div>
 
