@@ -18,3 +18,12 @@ export { magicLinkEmail } from './templates/magic-link.js';
 export { claimStatusEmail } from './templates/claim-status.js';
 export { trialDay23ReminderEmail } from './templates/trial-day-23-reminder.js';
 export type { TrialDay23ReminderData } from './templates/trial-day-23-reminder.js';
+
+export { paymentFailedEmail } from './templates/payment-failed.js';
+export type { PaymentFailedData } from './templates/payment-failed.js';
+
+export { finalWarningEmail } from './templates/final-warning.js';
+export type { FinalWarningData } from './templates/final-warning.js';
+
+export { subscriptionCancelledEmail } from './templates/subscription-cancelled.js';
+export type { SubscriptionCancelledData } from './templates/subscription-cancelled.js';
