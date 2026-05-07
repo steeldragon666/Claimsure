@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { registerFederationAuditHook } from './audit-hook.js';
 import { registerFederationInvitations } from './invitations.js';
+import { registerFederationRevocation } from './revocation.js';
 import { registerFederationShares } from './shares.js';
 
 /**
@@ -12,5 +13,6 @@ import { registerFederationShares } from './shares.js';
 export function registerFederation(app: FastifyInstance): void {
   registerFederationAuditHook(app);
   registerFederationInvitations(app);
+  registerFederationRevocation(app);
   registerFederationShares(app);
 }
