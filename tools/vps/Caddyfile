@@ -1,0 +1,76 @@
+# Caddy reverse proxy + auto-TLS for the cpa-platform staging VPS.
+#
+# Caddy auto-issues + renews a Let's Encrypt cert for the {$DOMAIN}
+# value provided via the docker-compose env. First request to https://
+# triggers ACME challenge; needs the domain's DNS A-record pointing at
+# this VPS's public IP first, otherwise the challenge fails and Caddy
+# falls back to its self-signed cert.
+#
+# Routing:
+#   /v1/*      → api:3000    (REST API surface)
+#   /webhook/* → api:3000    (Stripe webhooks; raw body preserved by
+#                              Caddy since it's a transparent reverse
+#                              proxy, not a body-modifying middleware)
+#   everything else → web:5173 (Next.js)
+#
+# Security headers:
+#   - HSTS (max-age 1 year, includeSubDomains)
+#   - X-Content-Type-Options nosniff
+#   - X-Frame-Options DENY (no embedding by other sites)
+#   - Referrer-Policy strict-origin-when-cross-origin
+#
+# To swap domains: change {$DOMAIN} env var in .env.production and
+# restart caddy: `docker compose -f tools/vps/docker-compose.prod.yml
+# restart caddy`. Caddy keeps existing certs cached so new domain
+# triggers fresh ACME but old cert is preserved (revoke manually if
+# leaving the old domain entirely).
+
+{
+	# Production-grade defaults
+	email {$ACME_EMAIL}
+	# Optional: uncomment to use Let's Encrypt staging while testing
+	# (avoids hitting LE rate limits on misconfigured domains).
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+	# Compress responses where it matters (HTML, JS, JSON)
+	encode zstd gzip
+
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		# Hide that we're using Caddy
+		-Server
+	}
+
+	# API surface
+	handle /v1/* {
+		reverse_proxy api:3000
+	}
+
+	# Stripe + other webhook endpoints — same target as /v1/* but
+	# called out separately so future webhook routing stays explicit.
+	handle /webhook/* {
+		reverse_proxy api:3000
+	}
+
+	# Health check endpoint passthrough (uptime monitors)
+	handle /health {
+		reverse_proxy api:3000
+	}
+
+	# Everything else → Next.js web
+	handle {
+		reverse_proxy web:5173
+	}
+
+	# Access log to stdout — captured by docker logs
+	log {
+		output stdout
+		format json
+	}
+}

@@ -1,0 +1,70 @@
+# Multi-stage Dockerfile for apps/api — pnpm monorepo aware.
+#
+# Stage 1: install deps + build workspace packages
+# Stage 2: minimal runtime image with only what apps/api needs
+#
+# Designed to be built from the repo root:
+#   docker build -f tools/vps/Dockerfile.api -t cpa-api .
+
+# ──────────────────── Stage 1: builder ───────────────────────────────────
+FROM node:22-bookworm-slim AS builder
+
+# Install pnpm via corepack (locked to the project's version)
+RUN corepack enable && corepack prepare pnpm@10.26.0 --activate
+
+WORKDIR /app
+
+# Copy workspace manifests first for better Docker layer caching —
+# changes to source don't invalidate the install layer.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY apps/mobile/package.json apps/mobile/
+COPY packages/agents/package.json packages/agents/
+COPY packages/audit-score/package.json packages/audit-score/
+COPY packages/auth/package.json packages/auth/
+COPY packages/db/package.json packages/db/
+COPY packages/documents/package.json packages/documents/
+COPY packages/email/package.json packages/email/
+COPY packages/integrations/package.json packages/integrations/
+COPY packages/observability/package.json packages/observability/
+COPY packages/schemas/package.json packages/schemas/
+
+RUN pnpm install --frozen-lockfile
+
+# Now copy source + build the workspace packages api depends on
+COPY . .
+RUN pnpm -r --filter "./packages/*" build
+
+# Build the api itself
+RUN pnpm --filter @cpa/api build
+
+# ──────────────────── Stage 2: runtime ───────────────────────────────────
+FROM node:22-bookworm-slim AS runtime
+
+RUN corepack enable && corepack prepare pnpm@10.26.0 --activate
+
+# wget for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy workspace structure + node_modules from builder
+COPY --from=builder /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
+COPY --from=builder /app/node_modules ./node_modules
+
+# Built workspace packages (api consumes their dist/)
+COPY --from=builder /app/packages ./packages
+
+# api source + build artifacts
+COPY --from=builder /app/apps/api ./apps/api
+
+# DB migrations + scripts (api needs them at runtime to run drizzle migrate)
+COPY --from=builder /app/packages/db/migrations ./packages/db/migrations
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+WORKDIR /app/apps/api
+CMD ["node", "dist/server.js"]

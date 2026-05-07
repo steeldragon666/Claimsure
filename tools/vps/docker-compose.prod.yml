@@ -1,0 +1,152 @@
+# ─────────────────────────────────────────────────────────────────────────
+# VPS staging deployment — single-host docker-compose for Ubuntu 24.04+.
+#
+# Additive to the existing GCP production path (tools/gcp/*); does NOT
+# replace it. Use this for staging/demo URLs on a $5-15/mo VPS while GCP
+# remains the production target.
+#
+# Provider-agnostic: works on Hetzner, DigitalOcean, Vultr, Binary Lane,
+# Linode, AWS Lightsail, etc. Any 4 GB+ Ubuntu host with a public IP and
+# the chosen domain's DNS A-record pointing at it.
+#
+# Usage:
+#   1. Provision Ubuntu 24.04 VPS (4 GB RAM minimum)
+#   2. Run tools/vps/bootstrap.sh once on the host
+#   3. Copy tools/vps/.env.production.example → .env.production on the host
+#      and fill in secrets (NEVER commit .env.production)
+#   4. docker compose -f tools/vps/docker-compose.prod.yml up -d --build
+#   5. Caddy auto-issues Let's Encrypt cert on first request to the domain
+#
+# What ships:
+#   postgres   — pgvector/pgvector:0.8.0-pg16 with persistent volume
+#   api        — apps/api built from source (Dockerfile.api)
+#   web        — apps/web Next.js standalone build (Dockerfile.web)
+#   caddy      — auto-TLS reverse proxy; routes /v1/* to api, everything
+#                else to web
+#
+# What does NOT ship:
+#   - Sentry collector (use the SaaS endpoint directly via API_DSN env)
+#   - Resend (SaaS — set RESEND_API_KEY in .env.production)
+#   - Stripe (SaaS — STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET)
+#   - Anthropic (SaaS — ANTHROPIC_API_KEY)
+#   - Backups (set up via a cron job + restic to S3-compat storage; see
+#     README §"Backups" for the recommended pattern)
+# ─────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg16
+    container_name: cpa-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cpa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-cpa_prod}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../../tools/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # NOT exposed to host — only the api container reaches postgres on
+    # the internal network. Removes a class of accidental external
+    # exposure ("oops, default password on the internet").
+    expose:
+      - '5432'
+    networks:
+      - cpa-internal
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-cpa} -d ${POSTGRES_DB:-cpa_prod}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: tools/vps/Dockerfile.api
+    container_name: cpa-api-prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: '3000'
+      # Constructed from POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB so
+      # there's a single source of truth for the password.
+      DATABASE_URL: postgres://${POSTGRES_USER:-cpa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cpa_prod}
+      DATABASE_URL_APP: postgres://cpa_app:${CPA_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-cpa_prod}
+      SESSION_JWT_SECRET: ${SESSION_JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-common}
+      SENTRY_DSN: ${SENTRY_DSN}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+    expose:
+      - '3000'
+    networks:
+      - cpa-internal
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:3000/v1/health']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  web:
+    build:
+      context: ../..
+      dockerfile: tools/vps/Dockerfile.web
+    container_name: cpa-web-prod
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: '5173'
+      # Web hits api over the internal network via the caddy-routed
+      # PUBLIC_BASE_URL — no direct container-to-container coupling
+      # beyond the same docker network.
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_BASE_URL}
+      SESSION_JWT_SECRET: ${SESSION_JWT_SECRET}
+    expose:
+      - '5173'
+    networks:
+      - cpa-internal
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: cpa-caddy-prod
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    networks:
+      - cpa-internal
+
+networks:
+  cpa-internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    name: cpa-postgres-data-prod
+  caddy-data:
+    name: cpa-caddy-data
+  caddy-config:
+    name: cpa-caddy-config

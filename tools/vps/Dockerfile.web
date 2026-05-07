@@ -1,0 +1,55 @@
+# Multi-stage Dockerfile for apps/web — Next.js 15 standalone build.
+#
+# Designed to be built from the repo root:
+#   docker build -f tools/vps/Dockerfile.web -t cpa-web .
+#
+# Uses Next.js's standalone output mode which produces a self-contained
+# bundle (~50 MB instead of pulling in all of node_modules at runtime).
+
+# ──────────────────── Stage 1: builder ───────────────────────────────────
+FROM node:22-bookworm-slim AS builder
+
+RUN corepack enable && corepack prepare pnpm@10.26.0 --activate
+
+WORKDIR /app
+
+# Same dep-caching pattern as Dockerfile.api
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY apps/mobile/package.json apps/mobile/
+COPY packages/agents/package.json packages/agents/
+COPY packages/audit-score/package.json packages/audit-score/
+COPY packages/auth/package.json packages/auth/
+COPY packages/db/package.json packages/db/
+COPY packages/documents/package.json packages/documents/
+COPY packages/email/package.json packages/email/
+COPY packages/integrations/package.json packages/integrations/
+COPY packages/observability/package.json packages/observability/
+COPY packages/schemas/package.json packages/schemas/
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm -r --filter "./packages/*" build
+RUN pnpm --filter @cpa/web build
+
+# ──────────────────── Stage 2: runtime ───────────────────────────────────
+FROM node:22-bookworm-slim AS runtime
+
+WORKDIR /app
+
+# Next.js standalone output is at apps/web/.next/standalone/ — already
+# includes only the deps the runtime needs.
+COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /app/apps/web/public ./apps/web/public
+
+ENV NODE_ENV=production
+ENV PORT=5173
+ENV HOSTNAME="0.0.0.0"
+EXPOSE 5173
+
+# Standalone mode generates apps/web/server.js as the entry point
+WORKDIR /app/apps/web
+CMD ["node", "server.js"]
