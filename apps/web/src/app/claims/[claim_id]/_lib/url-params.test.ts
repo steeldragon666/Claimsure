@@ -65,39 +65,42 @@ test('TAB_LABELS: defines a label for every CLAIM_TAB_VALUES entry', () => {
 // Playwright concern — apps/web has no jsdom. Here we exercise the
 // branching: each key maps to the right neighbour, wraps at boundaries,
 // returns null for non-handled keys.
+//
+// Current CLAIM_TAB_VALUES order:
+//   analysis, activities, review, evidence, expenditure, documents, timeline, final-draft
 
-test('nextTabFromKey: ArrowRight from "activities" → "evidence"', () => {
-  assert.equal(nextTabFromKey('ArrowRight', 'activities'), 'evidence');
+test('nextTabFromKey: ArrowRight from "activities" → "review"', () => {
+  assert.equal(nextTabFromKey('ArrowRight', 'activities'), 'review');
 });
 
 test('nextTabFromKey: ArrowDown is treated the same as ArrowRight (next)', () => {
-  assert.equal(nextTabFromKey('ArrowDown', 'activities'), 'evidence');
+  assert.equal(nextTabFromKey('ArrowDown', 'activities'), 'review');
 });
 
 test('nextTabFromKey: ArrowRight from last tab wraps to first', () => {
-  assert.equal(nextTabFromKey('ArrowRight', 'timeline'), 'activities');
+  assert.equal(nextTabFromKey('ArrowRight', 'final-draft'), 'analysis');
 });
 
-test('nextTabFromKey: ArrowLeft from "evidence" → "activities"', () => {
-  assert.equal(nextTabFromKey('ArrowLeft', 'evidence'), 'activities');
+test('nextTabFromKey: ArrowLeft from "evidence" → "review"', () => {
+  assert.equal(nextTabFromKey('ArrowLeft', 'evidence'), 'review');
 });
 
 test('nextTabFromKey: ArrowUp is treated the same as ArrowLeft (previous)', () => {
-  assert.equal(nextTabFromKey('ArrowUp', 'evidence'), 'activities');
+  assert.equal(nextTabFromKey('ArrowUp', 'evidence'), 'review');
 });
 
 test('nextTabFromKey: ArrowLeft from first tab wraps to last', () => {
-  assert.equal(nextTabFromKey('ArrowLeft', 'activities'), 'timeline');
+  assert.equal(nextTabFromKey('ArrowLeft', 'analysis'), 'final-draft');
 });
 
 test('nextTabFromKey: Home returns the first tab regardless of current', () => {
-  assert.equal(nextTabFromKey('Home', 'expenditure'), 'activities');
-  assert.equal(nextTabFromKey('Home', 'activities'), 'activities');
+  assert.equal(nextTabFromKey('Home', 'expenditure'), 'analysis');
+  assert.equal(nextTabFromKey('Home', 'analysis'), 'analysis');
 });
 
 test('nextTabFromKey: End returns the last tab regardless of current', () => {
-  assert.equal(nextTabFromKey('End', 'expenditure'), 'timeline');
-  assert.equal(nextTabFromKey('End', 'timeline'), 'timeline');
+  assert.equal(nextTabFromKey('End', 'expenditure'), 'final-draft');
+  assert.equal(nextTabFromKey('End', 'final-draft'), 'final-draft');
 });
 
 test('nextTabFromKey: unhandled keys return null (caller preserves native behaviour)', () => {
@@ -110,7 +113,7 @@ test('nextTabFromKey: unhandled keys return null (caller preserves native behavi
 
 test('nextTabFromKey: full ArrowRight cycle visits every tab and wraps', () => {
   // Defends against off-by-one drift in the wrap arithmetic.
-  let current: (typeof CLAIM_TAB_VALUES)[number] = 'activities';
+  let current: (typeof CLAIM_TAB_VALUES)[number] = CLAIM_TAB_VALUES[0];
   const visited: string[] = [current];
   for (let i = 0; i < CLAIM_TAB_VALUES.length; i += 1) {
     const next = nextTabFromKey('ArrowRight', current);
@@ -119,7 +122,7 @@ test('nextTabFromKey: full ArrowRight cycle visits every tab and wraps', () => {
     visited.push(current);
   }
   // Visited each tab in CLAIM_TAB_VALUES order, then wrapped back to the start.
-  assert.deepEqual(visited, [...CLAIM_TAB_VALUES, 'activities']);
+  assert.deepEqual(visited, [...CLAIM_TAB_VALUES, CLAIM_TAB_VALUES[0]]);
 });
 
 // parseExpenditureFilter --------------------------------------------------
