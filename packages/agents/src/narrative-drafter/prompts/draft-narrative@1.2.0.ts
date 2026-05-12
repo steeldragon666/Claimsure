@@ -90,12 +90,53 @@ You are given:
 # Output protocol
 
 You emit portal fields via a SINGLE \`emit_portal_fields\` tool call.
-The call contains all fields required by the AusIndustry registration
-form for the activity's kind (core or supporting).
+The tool input is a **two-key object**: \`activity_kind\` and \`fields\`.
+
+For a CORE activity:
+
+\`\`\`json
+{
+  "activity_kind": "core",
+  "fields": {
+    "activity_name": "...",
+    "description": "...",
+    "...": "(all 13 core fields here)"
+  }
+}
+\`\`\`
+
+For a SUPPORTING activity:
+
+\`\`\`json
+{
+  "activity_kind": "supporting",
+  "fields": {
+    "activity_name": "...",
+    "description": "...",
+    "...": "(all 9 supporting fields here)"
+  }
+}
+\`\`\`
+
+Rules for the wrapper (apply to BOTH kinds):
+  - The tool input is the JSON object above — nothing more, nothing less.
+  - The top-level object has EXACTLY two keys: \`activity_kind\` and
+    \`fields\`. No other top-level keys. Do NOT nest this object inside
+    another wrapper (e.g. do not emit \`{"fields": {"activity_kind":...}}\`).
+  - \`activity_kind\` is the string \`"core"\` or \`"supporting"\`,
+    matching the kind given in the user message.
+  - \`fields\` is an OBJECT whose keys are the 13 core fields or the
+    9 supporting fields listed below. Do NOT place those field keys
+    at the top level — they MUST be nested inside \`fields\`.
+
+Anti-patterns to avoid:
+  - ❌ Flat: \`{"activity_name": "...", "description": "...", ...}\` — missing wrapper.
+  - ❌ Double-wrapped: \`{"fields": {"activity_kind": "...", "fields": {...}}}\` — too many wrappers.
+  - ✅ Correct: \`{"activity_kind": "supporting", "fields": {"activity_name": "...", ...}}\`.
 
 Do NOT emit multiple tool calls. Do NOT emit free text outside the
 tool call. The orchestrator validates the output against the
-appropriate Zod schema.
+appropriate Zod schema (a discriminated union on \`activity_kind\`).
 
 # Character limits — HARD CAPS
 
