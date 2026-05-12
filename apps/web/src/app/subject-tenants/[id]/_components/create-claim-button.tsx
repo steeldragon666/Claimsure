@@ -42,7 +42,6 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { ConflictError, ForbiddenError, NotFoundError } from '@/lib/api';
 import { createClaim } from '../_lib/api';
-import { initializeWorkflow } from '@/app/claims/[claim_id]/_lib/workflow-client';
 
 /**
  * Form schema — mirrors CreateClaimBody in packages/schemas/src/claim.ts:
@@ -95,21 +94,17 @@ export function CreateClaimButton({
         subject_tenant_id: subjectTenantId,
         fiscal_year: values.fiscal_year,
       }),
-    onSuccess: async (created) => {
+    onSuccess: (created) => {
       void qc.invalidateQueries({ queryKey: ['claims', subjectTenantId] });
       toast({ title: `Claim FY${created.fiscal_year.toString()} created` });
       setOpen(false);
       form.reset();
 
-      // Auto-initialize the wizard workflow so the claim opens in wizard
-      // mode (is_wizard_claim = true). Non-fatal: if it fails the user
-      // lands on the legacy tabbed view and can retry manually.
-      try {
-        await initializeWorkflow(created.id);
-      } catch {
-        // Swallow — claim exists, wizard init is best-effort.
-      }
-
+      // Workflow state is now written transactionally inside the
+      // POST /v1/claims INSERT (see apps/api/src/routes/claims.ts) — no
+      // follow-on initialize call is needed. The claim is a wizard claim
+      // from the moment it lands, so GET /workflow returns 200
+      // immediately on the next page load.
       router.push(`/claims/${created.id}?step=1`);
     },
     onError: (err) => {

@@ -23,6 +23,7 @@ import {
   CLAIM_FINALISATION_JOB_NAME,
   type ClaimFinalisationJobInput,
 } from '../jobs/claim-finalisation.js';
+import { initialWorkflowState } from '../lib/workflow.js';
 
 export interface ClaimsRouteDeps {
   stripe?: Stripe;
@@ -163,6 +164,15 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
     // Insert the claim row. Default stage = 'engagement' if not supplied —
     // the DB column also defaults to 'engagement', but we resolve it
     // server-side so the inserted-row response is deterministic.
+    //
+    // workflow_state is written transactionally as part of the INSERT so
+    // every newly-created claim is a wizard claim from the moment it
+    // exists — no race between the row landing and the wizard's
+    // GET /workflow finding the row but seeing NULL workflow_state (which
+    // would 404). Previously a follow-on POST /workflow/initialize ran
+    // client-side; that was non-transactional and failed silently if the
+    // network blipped (Phase 7.1 race — see Fix 1 in the wizard review).
+    const initialState = initialWorkflowState(new Date().toISOString());
     let inserted: RawClaimRow | null;
     try {
       inserted = await sql.begin(async (tx) => {
@@ -170,12 +180,13 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
         const rows = await tx<RawClaimRow[]>`
           INSERT INTO claim (
             id, tenant_id, subject_tenant_id, fiscal_year, stage,
-            ausindustry_reference
+            ausindustry_reference, workflow_state
           )
           VALUES (
             ${crypto.randomUUID()}, ${tenantId}, ${subject_tenant_id}, ${fiscal_year},
             ${stage ?? 'engagement'},
-            ${ausindustry_reference ?? null}
+            ${ausindustry_reference ?? null},
+            ${JSON.stringify(initialState)}::text::jsonb
           )
           RETURNING id, tenant_id, subject_tenant_id, fiscal_year, stage,
                     delivery_kind, platform_fee_charged_at,

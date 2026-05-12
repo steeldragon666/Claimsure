@@ -197,6 +197,42 @@ test('POST /v1/claims: 201 + DB row, default stage = engagement, no event writte
   await app.close();
 });
 
+test('POST /v1/claims: writes workflow_state transactionally — is_wizard_claim=true and GET /workflow is 200 immediately', async () => {
+  // Fix 1 (Phase 7.1 race): workflow_state is set inside the same INSERT
+  // as the claim row, so GET /v1/claims/:id/workflow returns 200 (not 404)
+  // on the very next request. Previously a follow-on initializeWorkflow
+  // call ran client-side; if it failed silently the wizard 404'd.
+  const app = buildApp();
+  const session = await consultantJwt();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/claims',
+    cookies: { cpa_session: session },
+    payload: { subject_tenant_id: SUBJECT_A2, fiscal_year: 2029 },
+  });
+  assert.equal(res.statusCode, 201);
+  const body = res.json<{ claim: { id: string; is_wizard_claim: boolean } }>();
+  // Every newly-created claim is a wizard claim from the moment it lands.
+  assert.equal(body.claim.is_wizard_claim, true);
+
+  // GET /workflow must succeed immediately — no race window.
+  const wfRes = await app.inject({
+    method: 'GET',
+    url: `/v1/claims/${body.claim.id}/workflow`,
+    cookies: { cpa_session: session },
+  });
+  assert.equal(wfRes.statusCode, 200);
+  const wfBody = wfRes.json<{
+    workflow_state: { initialized_at: string; steps: Record<string, unknown> };
+  }>();
+  assert.equal(typeof wfBody.workflow_state.initialized_at, 'string');
+  assert.equal(wfBody.workflow_state.steps['1'], null);
+  assert.equal(wfBody.workflow_state.steps['5'], null);
+
+  await privilegedSql`DELETE FROM claim WHERE id = ${body.claim.id}`;
+  await app.close();
+});
+
 test('POST /v1/claims: 201 + explicit stage honoured', async () => {
   const app = buildApp();
   const res = await app.inject({
