@@ -22,7 +22,6 @@ import {
   REGISTER_SYNTHESIZE_EVENT_CAP,
   buildIdempotencyKey,
   compressEvent,
-  deriveAuFiscalYear,
 } from './activity-register-synthesize.js';
 
 /**
@@ -182,7 +181,7 @@ export async function runClaimActivityProposalJob(
         name: claim.project_name,
         industry_sector: null,
         started_at: claim.project_started_at.toISOString(),
-        fiscal_year: fiscal_year ?? deriveAuFiscalYear(claim.project_started_at),
+        fiscal_year,
       },
       events: compressed,
       existing_activities: activityRows.map((a) => ({
@@ -301,8 +300,7 @@ export async function registerClaimActivityProposalJob(boss: PgBoss): Promise<vo
   await boss.createQueue(CLAIM_ACTIVITY_PROPOSAL_QUEUE);
   await boss.work<ClaimActivityProposalJobInput>(CLAIM_ACTIVITY_PROPOSAL_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      const result = await runClaimActivityProposalJob(job.data);
-      console.log(`[claim-activity-proposal] claim=${job.data.claim_id} status=${result.status}`);
+      await runClaimActivityProposalJob(job.data);
     }
   });
 }
