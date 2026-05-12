@@ -570,3 +570,144 @@ test('GET /workflow: admin role also works (not just consultant)', async () => {
   assert.equal(res.statusCode, 200);
   await app.close();
 });
+
+// =============================================================================
+// Cross-tenant isolation for agree / reopen / GET (F1)
+//
+// The initialize route has its own cross-firm test above (line ~237). These
+// three additions cover the remaining workflow routes: a tenant-B admin
+// holding a session for firm B must NOT be able to mutate or read a claim
+// owned by firm A. The `tenant_id = ${tenantId}` predicate plus RLS hide the
+// row entirely — these routes report `claim_not_found` (404), never 403.
+// =============================================================================
+
+test('POST /workflow/step/:n/agree: 404 cross-firm (Firm B admin cannot agree on Firm A claim)', async () => {
+  // Initialize CLAIM_A in tenant A and seed a classified event so step-1
+  // canAdvance would otherwise be ok — proving the 404 is from tenant
+  // isolation, not from the gate.
+  const initState = {
+    initialized_at: '2025-01-01T00:00:00.000Z',
+    steps: { '1': null, '2': null, '3': null, '4': null, '5': null },
+  };
+  await setWorkflowState(CLAIM_A, initState);
+  await seedClassifiedEvent({
+    tenantId: TENANT_A,
+    subjectTenantId: SUBJECT_A,
+    projectId: PROJECT_A,
+  });
+
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: `/v1/claims/${CLAIM_A}/workflow/step/1/agree`,
+    cookies: { cpa_session: await tenantBAdminJwt() },
+  });
+  assert.equal(res.statusCode, 404);
+  const body = res.json<{ error: string }>();
+  assert.equal(body.error, 'claim_not_found');
+
+  // Belt-and-braces: confirm Firm A's claim was untouched — agreed_at must
+  // still be null. (Verified via privileged read so RLS doesn't blind us.)
+  const rows = await privilegedSql<{ workflow_state: { steps: Record<string, unknown> } }[]>`
+    SELECT workflow_state FROM claim WHERE id = ${CLAIM_A}
+  `;
+  assert.equal(rows[0]!.workflow_state.steps['1'], null);
+  await app.close();
+});
+
+test('POST /workflow/step/:n/reopen: 404 cross-firm', async () => {
+  // Set CLAIM_A to a state where step 2 is already agreed (in tenant A).
+  const agreedState = {
+    initialized_at: '2025-01-01T00:00:00.000Z',
+    steps: {
+      '1': { agreed_at: '2025-01-02T00:00:00.000Z', agreed_by: CONSULTANT_USER },
+      '2': { agreed_at: '2025-01-03T00:00:00.000Z', agreed_by: CONSULTANT_USER },
+      '3': null,
+      '4': null,
+      '5': null,
+    },
+  };
+  await setWorkflowState(CLAIM_A, agreedState);
+
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: `/v1/claims/${CLAIM_A}/workflow/step/2/reopen`,
+    cookies: { cpa_session: await tenantBAdminJwt() },
+  });
+  assert.equal(res.statusCode, 404);
+  const body = res.json<{ error: string }>();
+  assert.equal(body.error, 'claim_not_found');
+
+  // Confirm step 2 was NOT reopened — agreed_at is still set on Firm A's row.
+  const rows = await privilegedSql<
+    {
+      workflow_state: {
+        steps: { '2': { agreed_at: string; agreed_by: string } | null };
+      };
+    }[]
+  >`
+    SELECT workflow_state FROM claim WHERE id = ${CLAIM_A}
+  `;
+  const step2 = rows[0]!.workflow_state.steps['2'];
+  assert.ok(step2);
+  assert.equal(step2.agreed_at, '2025-01-03T00:00:00.000Z');
+  await app.close();
+});
+
+test('GET /workflow: 404 cross-firm', async () => {
+  await setWorkflowState(CLAIM_A, {
+    initialized_at: '2025-01-01T00:00:00.000Z',
+    steps: { '1': null, '2': null, '3': null, '4': null, '5': null },
+  });
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/claims/${CLAIM_A}/workflow`,
+    cookies: { cpa_session: await tenantBAdminJwt() },
+  });
+  // Must be 404 (claim not found in firm B) — NOT 200 with leaked workflow data.
+  assert.equal(res.statusCode, 404);
+  const body = res.json<{ error: string }>();
+  assert.equal(body.error, 'claim_not_found');
+  await app.close();
+});
+
+// =============================================================================
+// Step-5 agree behavior pin (F2)
+//
+// Pins current behavior: canAdvance(5, snap) returns ok=false with reason
+// "Step 5 is terminal — no further advance." (see workflow.ts:101-102), so
+// POST /workflow/step/5/agree always 409s. The route comment (claim-workflow.ts
+// ~120-125) flags this as an open semantic question: a future change may decide
+// step-5 agree means "documents generated" and should succeed. If/when that
+// happens, this test will fail and force a deliberate decision — do not blindly
+// update the expected status without consulting the spec.
+// =============================================================================
+
+test("POST /workflow/step/5/agree: 409 cannot_advance with reason 'Step 5 is terminal' (pinning current behavior — see workflow.ts:101-102)", async () => {
+  // Set up a fully-agreed claim through step 4 — proving that the 409 comes
+  // from canAdvance(5)'s terminal verdict, not from an upstream-gate failure.
+  await setWorkflowState(CLAIM_A, {
+    initialized_at: '2025-01-01T00:00:00.000Z',
+    steps: {
+      '1': { agreed_at: '2025-01-02T00:00:00.000Z', agreed_by: CONSULTANT_USER },
+      '2': { agreed_at: '2025-01-03T00:00:00.000Z', agreed_by: CONSULTANT_USER },
+      '3': { agreed_at: '2025-01-04T00:00:00.000Z', agreed_by: CONSULTANT_USER },
+      '4': { agreed_at: '2025-01-05T00:00:00.000Z', agreed_by: CONSULTANT_USER },
+      '5': null,
+    },
+  });
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: `/v1/claims/${CLAIM_A}/workflow/step/5/agree`,
+    cookies: { cpa_session: await consultantJwt() },
+  });
+  assert.equal(res.statusCode, 409);
+  const body = res.json<{ error: string; message: string }>();
+  assert.equal(body.error, 'cannot_advance');
+  // Match the canAdvance reason verbatim from workflow.ts:101-102.
+  assert.equal(body.message, 'Step 5 is terminal — no further advance.');
+  await app.close();
+});
