@@ -52,6 +52,7 @@ export const Claim = z.object({
   submitted_by_user_id: Uuid.nullable(),
   created_at: Iso8601,
   updated_at: Iso8601,
+  is_wizard_claim: z.boolean(),
 });
 export type Claim = z.infer<typeof Claim>;
 

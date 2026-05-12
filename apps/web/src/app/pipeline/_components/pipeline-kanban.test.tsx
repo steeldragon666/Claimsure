@@ -63,6 +63,7 @@ function makeClaim(args: { id: string; stage: ClaimStage; fy?: number; subject?:
     submitted_by_user_id: null,
     created_at: '2026-04-01T00:00:00.000Z',
     updated_at: '2026-04-01T00:00:00.000Z',
+    is_wizard_claim: false,
   };
 }
 

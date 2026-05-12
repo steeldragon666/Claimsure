@@ -73,6 +73,7 @@ interface RawClaimRow {
   submitted_by_user_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  is_wizard_claim: boolean;
 }
 
 const isoOf = (v: Date | string): string => (typeof v === 'string' ? v : v.toISOString());
@@ -90,6 +91,7 @@ const toApi = (r: RawClaimRow): Claim => ({
   submitted_by_user_id: r.submitted_by_user_id,
   created_at: isoOf(r.created_at),
   updated_at: isoOf(r.updated_at),
+  is_wizard_claim: r.is_wizard_claim,
 });
 
 /**
@@ -178,7 +180,8 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
           RETURNING id, tenant_id, subject_tenant_id, fiscal_year, stage,
                     delivery_kind, platform_fee_charged_at,
                     ausindustry_reference, submitted_at, submitted_by_user_id,
-                    created_at, updated_at
+                    created_at, updated_at,
+                    (workflow_state IS NOT NULL) AS is_wizard_claim
         `;
         return rows[0] ?? null;
       });
@@ -243,7 +246,8 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
         SELECT id, tenant_id, subject_tenant_id, fiscal_year, stage,
                delivery_kind, platform_fee_charged_at,
                ausindustry_reference, submitted_at, submitted_by_user_id,
-               created_at, updated_at
+               created_at, updated_at,
+               (workflow_state IS NOT NULL) AS is_wizard_claim
           FROM claim
          WHERE 1 = 1
                ${whereSubject}
@@ -271,7 +275,8 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
           SELECT id, tenant_id, subject_tenant_id, fiscal_year, stage,
                  delivery_kind, platform_fee_charged_at,
                  ausindustry_reference, submitted_at, submitted_by_user_id,
-                 created_at, updated_at
+                 created_at, updated_at,
+                 (workflow_state IS NOT NULL) AS is_wizard_claim
             FROM claim
            WHERE id = ${id}
         `;
@@ -356,7 +361,8 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
           SELECT id, tenant_id, subject_tenant_id, fiscal_year, stage,
                  delivery_kind, platform_fee_charged_at,
                  ausindustry_reference, submitted_at, submitted_by_user_id,
-                 created_at, updated_at
+                 created_at, updated_at,
+                 (workflow_state IS NOT NULL) AS is_wizard_claim
             FROM claim
            WHERE id = ${id}
              AND tenant_id = ${tenantId}
@@ -392,7 +398,8 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
            RETURNING id, tenant_id, subject_tenant_id, fiscal_year, stage,
                      delivery_kind, platform_fee_charged_at,
                      ausindustry_reference, submitted_at, submitted_by_user_id,
-                     created_at, updated_at
+                     created_at, updated_at,
+                     (workflow_state IS NOT NULL) AS is_wizard_claim
         `;
         const row = updated[0];
         if (!row) {
@@ -508,7 +515,8 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
           SELECT id, tenant_id, subject_tenant_id, fiscal_year, stage,
                  delivery_kind, platform_fee_charged_at,
                  ausindustry_reference, submitted_at, submitted_by_user_id,
-                 created_at, updated_at
+                 created_at, updated_at,
+                 (workflow_state IS NOT NULL) AS is_wizard_claim
             FROM claim
            WHERE id = ${id}
              AND tenant_id = ${tenantId}
@@ -547,7 +555,8 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
            RETURNING id, tenant_id, subject_tenant_id, fiscal_year, stage,
                      delivery_kind, platform_fee_charged_at,
                      ausindustry_reference, submitted_at, submitted_by_user_id,
-                     created_at, updated_at
+                     created_at, updated_at,
+                     (workflow_state IS NOT NULL) AS is_wizard_claim
         `;
         const row = updated[0];
         if (!row) {
@@ -664,7 +673,8 @@ export function registerClaims(app: FastifyInstance, deps?: ClaimsRouteDeps): vo
            RETURNING id, tenant_id, subject_tenant_id, fiscal_year, stage,
                      delivery_kind, platform_fee_charged_at,
                      ausindustry_reference, submitted_at, submitted_by_user_id,
-                     created_at, updated_at
+                     created_at, updated_at,
+                     (workflow_state IS NOT NULL) AS is_wizard_claim
         `;
         const row = updated[0];
         return row ?? null;

@@ -47,6 +47,7 @@ function makeClaim(args: {
     submitted_by_user_id: null,
     created_at: '2026-04-01T00:00:00.000Z',
     updated_at: args.updatedAt ?? '2026-04-01T00:00:00.000Z',
+    is_wizard_claim: false,
   };
 }
 
