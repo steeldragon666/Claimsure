@@ -9,6 +9,7 @@ import { STAGE_LABELS } from '@/lib/claim-stage';
 import { ClaimTabs } from './_components/claim-tabs';
 import { EditClaimButton } from './_components/edit-claim-button';
 import { SubmitClaimButton } from './_components/submit-claim-button';
+import { ClaimWizardPage } from './_components/claim-wizard-page';
 import { getClaim } from './_lib/api';
 import { parseTab } from './_lib/url-params';
 import type { ClaimStage } from '@cpa/schemas';
@@ -101,6 +102,22 @@ function Inner({ claimId }: { claimId: string }) {
   }
 
   const c = claim.data;
+
+  // --- Wizard branch: new 5-step guided flow for wizard-mode claims ---
+  if (c.is_wizard_claim) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <Link href="/pipeline" className="text-sm text-muted-foreground hover:underline">
+            &larr; Pipeline
+          </Link>
+        </div>
+        <ClaimWizardPage claimId={claimId} subjectTenantId={c.subject_tenant_id} />
+      </div>
+    );
+  }
+
+  // --- Legacy tabbed view for pre-wizard claims ---
   // TODO(A2): swap subject_tenant_id slice for real claimant name once
   // GET /v1/claims/:id returns the joined subject_tenant payload (or
   // we add a dedicated lookup). The 8-char slice keeps the header
