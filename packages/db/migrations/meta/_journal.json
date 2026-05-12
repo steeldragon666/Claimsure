@@ -379,6 +379,13 @@
       "when": 1778569200000,
       "tag": "0080_portal_fields_history",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1778569260000,
+      "tag": "0081_claim_workflow_state",
+      "breakpoints": true
     }
   ]
 }

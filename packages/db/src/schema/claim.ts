@@ -1,4 +1,13 @@
-import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { project } from './project.js';
 import { subjectTenant } from './subject_tenant.js';
 import { tenant } from './tenant.js';
@@ -89,6 +98,13 @@ export const claim = pgTable(
     ausindustryReference: text('ausindustry_reference'),
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     submittedByUserId: uuid('submitted_by_user_id').references(() => user.id),
+    // Wizard state (migration 0081). NULL = legacy claim (renders the
+    // existing tabbed UI); non-null = new wizard claim. Shape validated
+    // at application layer by Zod — no jsonb_check constraint. Entry
+    // shape: { initialized_at: ISO, steps: { '1'..'5': null |
+    // { agreed_at: ISO, agreed_by: <user_uuid> } } }. NO DEFAULT — the
+    // null sentinel distinguishes legacy from wizard claims.
+    workflowState: jsonb('workflow_state'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
