@@ -316,6 +316,58 @@ test('below-confidence-threshold: no link created when stub returns 0.60', async
 // Tests: already-linked events are excluded.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Tests: cross-tenant isolation (F3).
+//
+// The job uses `privilegedSql` (bypassing RLS) and relies entirely on the
+// `c.tenant_id = ${input.tenant_id}` predicate in the claim-lookup SQL to
+// scope rows to the calling tenant. This test pins that guard: if a claim
+// exists in tenant A but the job is invoked with a different tenant_id,
+// the job must short-circuit as `failed` (claim not found) and emit
+// NO ARTEFACT_LINKED events. Mirrors `claim-activity-proposal.test.ts`:184.
+// ---------------------------------------------------------------------------
+
+test('claim belongs to different tenant: returns failed without emitting ARTEFACT_LINKED', async () => {
+  // Set up a claim in TENANT with an activity and an unbound evidence event
+  // that WOULD match the activity if the job ran in tenant A.
+  await seedActivity({
+    id: ACTIVITY_1,
+    code: 'CA-01',
+    kind: 'core',
+    title: 'Machine Learning Pipeline Optimization',
+    hypothesis: 'ML will improve throughput',
+  });
+  await seedEvidenceEvent({
+    payloadText: 'Worked on the pipeline refactoring today',
+    kind: 'EXPERIMENT',
+    classification: {
+      kind: 'EXPERIMENT',
+      confidence: 0.9,
+      rationale: 'Describes experimentation',
+      statutory_anchor: 's.355-25',
+    },
+  });
+
+  // Call the job with a foreign tenant_id — the claim row exists, but the
+  // SQL `c.tenant_id = ${input.tenant_id}` predicate must hide it.
+  const FOREIGN_TENANT = '00000000-0000-4000-8000-00000000dead';
+  const result = await runClaimEvidenceBindingJob({
+    claim_id: CLAIM,
+    tenant_id: FOREIGN_TENANT,
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason ?? '', /claim not found/i);
+
+  // No ARTEFACT_LINKED events should have been written for the activity —
+  // the wrong-tenant call must NOT touch the real tenant's event log.
+  const linkEvents = await privilegedSql<{ id: string }[]>`
+    SELECT id FROM event
+     WHERE tenant_id = ${TENANT} AND kind = 'ARTEFACT_LINKED'
+  `;
+  assert.equal(linkEvents.length, 0);
+});
+
 test('already-linked events are excluded from processing', async () => {
   // Seed an activity.
   await seedActivity({
