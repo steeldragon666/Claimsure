@@ -35,6 +35,7 @@ import { registerClaimantMagicLinkRedeem } from './routes/claimant-magic-link.js
 import { registerClaimantStatus } from './routes/claimant-status.js';
 import { registerClaimants } from './routes/claimants.js';
 import { registerClaimPdf } from './routes/claim-pdf.js';
+import { registerClaimWorkflow } from './routes/claim-workflow.js';
 import { registerClaims } from './routes/claims.js';
 import { registerEmployees } from './routes/employees.js';
 import { registerMagicLinkRedeem } from './routes/magic-link.js';
@@ -301,6 +302,10 @@ export function buildApp(options: BuildAppOptions = {}): App {
   });
   app.register((instance, _opts, done) => {
     registerClaims(instance, options.billing ? { stripe: options.billing.stripe } : undefined);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerClaimWorkflow(instance);
     done();
   });
   app.register((instance, _opts, done) => {

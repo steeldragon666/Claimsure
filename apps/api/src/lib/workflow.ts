@@ -20,10 +20,19 @@ import type { WorkflowState } from '@cpa/schemas';
  * binding, not the type.
  *
  * The shape covers exactly what `loadWorkflowSnapshot` needs: tagged-
- * template invocation returning a `Promise` of a typed row array. If
- * postgres-js's surface ever drifts, we widen here.
+ * template invocation returning a `Promise` of a typed row array.
+ *
+ * Note: postgres-js's real `Sql` / `TransactionSql` interface carries a
+ * second overload (the "helper" form `sql(value, ...)` for IN-lists and
+ * row builders) that returns a non-thenable `Helper<any, any>`. TS picks
+ * that overload when checking assignability against this narrow structural
+ * type and fails on the `then` member being private on `Helper`. Callers
+ * that pass a real `TransactionSql` must therefore use a cast at the call
+ * site (`loadWorkflowSnapshot(tx as unknown as SqlClient, ...)`); the
+ * runtime contract — tagged-template tx returns a thenable row array — is
+ * exactly what this helper relies on.
  */
-type SqlClient = <T>(
+export type SqlClient = <T>(
   strings: TemplateStringsArray,
   ...args: unknown[]
 ) => Promise<T> & PromiseLike<T>;
