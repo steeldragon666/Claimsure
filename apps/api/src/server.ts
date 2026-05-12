@@ -27,6 +27,7 @@ import { registerRifDailyScrapeJob } from './jobs/rif-daily-scrape.js';
 import { registerGoogleDrivePollJob } from './jobs/google-drive-poll.js';
 import { registerClaimFinalisationJob } from './jobs/claim-finalisation.js';
 import { registerClaimActivityProposalJob } from './jobs/claim-activity-proposal.js';
+import { registerClaimEvidenceBindingJob } from './jobs/claim-evidence-binding.js';
 import { registerDocumentExtractJob } from './jobs/document-extract.js';
 
 const repoRoot = process.env['REPO_ROOT'] ?? process.cwd();
@@ -60,6 +61,8 @@ if (process.env['NODE_ENV'] !== 'test') {
     app.log.info('claim-finalisation job registered');
     await registerClaimActivityProposalJob(boss);
     app.log.info('claim-activity-proposal job registered');
+    await registerClaimEvidenceBindingJob(boss);
+    app.log.info('claim-evidence-binding job registered');
     await registerDocumentExtractJob(boss);
     app.log.info('document-extract job registered');
   } catch (err) {

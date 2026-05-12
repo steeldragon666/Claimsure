@@ -37,6 +37,7 @@ import {
 } from '../lib/workflow.js';
 import { getBoss } from '../lib/pg-boss-client.js';
 import { CLAIM_ACTIVITY_PROPOSAL_QUEUE } from '../jobs/claim-activity-proposal.js';
+import { CLAIM_EVIDENCE_BINDING_QUEUE } from '../jobs/claim-evidence-binding.js';
 
 const Uuid = z.string().uuid();
 // `:n` arrives as a string from the URL; coerce → number → 1..5 union.
@@ -233,7 +234,24 @@ export function registerClaimWorkflow(app: FastifyInstance): void {
           req.log.error(err, 'claim-activity-proposal enqueue failed');
         }
       }
-      // TODO Task 3.2 — enqueue claim-evidence-binding on step-2 agree.
+      // Enqueue the claim-evidence-binding job on step-2 agree (Task 3.2).
+      // Same pattern as step-1 above: runs OUTSIDE the sql.begin transaction,
+      // singletonKey prevents duplicate jobs on double-click.
+      if (step === 2) {
+        try {
+          const boss = await getBoss();
+          await boss.send(
+            CLAIM_EVIDENCE_BINDING_QUEUE,
+            { claim_id: claimId, tenant_id: tenantId },
+            { singletonKey: claimId },
+          );
+        } catch (err) {
+          // Non-fatal: log and continue. The route must return 200 so the
+          // consultant sees the agree succeed; the job will be retried or
+          // re-triggered on the next agree.
+          req.log.error(err, 'claim-evidence-binding enqueue failed');
+        }
+      }
       return reply.status(200).send({ workflow_state: result.state });
     },
   );
