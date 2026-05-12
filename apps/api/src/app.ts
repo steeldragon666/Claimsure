@@ -19,6 +19,7 @@ import { registerActivities } from './routes/activities.js';
 import { registerActivityPdf } from './routes/activity-pdf.js';
 import { registerActivityRegister } from './routes/activity-register.js';
 import { registerNarrative } from './routes/narrative.js';
+import { registerNarrativeAccept } from './routes/narrative-accept.js';
 import { registerPendingNarrative } from './routes/pending-narrative.js';
 import { registerPortalFields } from './routes/portal-fields.js';
 import { registerApplyRules } from './routes/apply-rules.js';
@@ -322,6 +323,10 @@ export function buildApp(options: BuildAppOptions = {}): App {
   });
   app.register((instance, _opts, done) => {
     registerNarrative(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerNarrativeAccept(instance);
     done();
   });
   app.register((instance, _opts, done) => {
