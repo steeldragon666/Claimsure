@@ -112,7 +112,7 @@ function Inner({ claimId }: { claimId: string }) {
             &larr; Pipeline
           </Link>
         </div>
-        <ClaimWizardPage claimId={claimId} subjectTenantId={c.subject_tenant_id} />
+        <ClaimWizardPage claimId={claimId} subjectTenantId={c.subject_tenant_id} claim={c} />
       </div>
     );
   }

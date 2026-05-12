@@ -2,10 +2,15 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import type { Claim } from '@cpa/schemas';
 import { getWorkflow } from '../_lib/workflow-client';
 import type { WorkflowResponse } from '../_lib/workflow-client';
 import { WizardStepper } from './wizard-stepper';
 import { WizardStep1UploadEvidence } from './wizard-step-1-upload';
+import { WizardStep2ReviewActivities } from './wizard-step-2-review';
+import { WizardStep3AttributeEvidence } from './wizard-step-3-attribute';
+import { WizardStep4ReviewNarrative } from './wizard-step-4-narrative';
+import { WizardStep5GenerateDocuments } from './wizard-step-5-generate';
 
 type StepNum = 1 | 2 | 3 | 4 | 5;
 
@@ -43,15 +48,17 @@ function parseStepParam(raw: string | null): StepNum | null {
  * workflow state). Renders the WizardStepper progress strip and
  * delegates to the active step component.
  *
- * Only Step 1 (Upload Evidence) is implemented; Steps 2-5 render
- * placeholder shells until their respective tasks ship.
+ * Steps 1-5 are all implemented: Upload Evidence, Review Activities,
+ * Attribute Evidence, Narrative & Timeline, and Generate Documents.
  */
 export function ClaimWizardPage({
   claimId,
   subjectTenantId,
+  claim,
 }: {
   claimId: string;
   subjectTenantId: string;
+  claim: Claim;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -102,6 +109,7 @@ export function ClaimWizardPage({
       {currentStep === 1 && (
         <WizardStep1UploadEvidence
           subjectTenantId={subjectTenantId}
+          stepEntry={data.workflow_state.steps['1']}
           canAdvance={
             data.derived.canAdvance['1'] ?? { ok: false, reason: 'Workflow data unavailable' }
           }
@@ -110,27 +118,51 @@ export function ClaimWizardPage({
       )}
 
       {currentStep === 2 && (
-        <div className="rounded border border-[hsl(var(--brand-line))] p-8 text-center text-sm text-muted-foreground">
-          Step 2 — Review Activities — coming soon
-        </div>
+        <WizardStep2ReviewActivities
+          claimId={claimId}
+          subjectTenantId={subjectTenantId}
+          stepEntry={data.workflow_state.steps['2']}
+          canAdvance={
+            data.derived.canAdvance['2'] ?? { ok: false, reason: 'Workflow data unavailable' }
+          }
+          onNext={handleNext}
+        />
       )}
 
       {currentStep === 3 && (
-        <div className="rounded border border-[hsl(var(--brand-line))] p-8 text-center text-sm text-muted-foreground">
-          Step 3 — Attribute Evidence — coming soon
-        </div>
+        <WizardStep3AttributeEvidence
+          claimId={claimId}
+          subjectTenantId={subjectTenantId}
+          stepEntry={data.workflow_state.steps['3']}
+          canAdvance={
+            data.derived.canAdvance['3'] ?? { ok: false, reason: 'Workflow data unavailable' }
+          }
+          onNext={handleNext}
+        />
       )}
 
       {currentStep === 4 && (
-        <div className="rounded border border-[hsl(var(--brand-line))] p-8 text-center text-sm text-muted-foreground">
-          Step 4 — Narrative &amp; Timeline — coming soon
-        </div>
+        <WizardStep4ReviewNarrative
+          claimId={claimId}
+          subjectTenantId={subjectTenantId}
+          claim={claim}
+          stepEntry={data.workflow_state.steps['4']}
+          canAdvance={
+            data.derived.canAdvance['4'] ?? { ok: false, reason: 'Workflow data unavailable' }
+          }
+          onNext={handleNext}
+        />
       )}
 
       {currentStep === 5 && (
-        <div className="rounded border border-[hsl(var(--brand-line))] p-8 text-center text-sm text-muted-foreground">
-          Step 5 — Generate Documents — coming soon
-        </div>
+        <WizardStep5GenerateDocuments
+          claimId={claimId}
+          subjectTenantId={subjectTenantId}
+          stepEntry={data.workflow_state.steps['5']}
+          canAdvance={
+            data.derived.canAdvance['5'] ?? { ok: false, reason: 'Workflow data unavailable' }
+          }
+        />
       )}
     </div>
   );
