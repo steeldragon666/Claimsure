@@ -429,3 +429,83 @@ test('already-linked events are excluded from processing', async () => {
   `;
   assert.equal(linkEvents.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// Tests: partial-failure isolation (F4).
+//
+// The job iterates unbound evidence events and calls the allocator inside a
+// per-event try/catch. If the allocator throws for one event, the job MUST
+// continue processing the remaining events. The stub allocator exposes an
+// ALLOCATOR_STUB_THROW_ON_EVENT_ID env-var hook so tests can target one
+// specific event_id for synthetic failure without affecting others.
+// ---------------------------------------------------------------------------
+
+test('Haiku throws on one event of N: surviving events still get ARTEFACT_LINKED', async () => {
+  // Seed an activity whose title shares >4-char vocabulary with both events
+  // ("pipeline") so the stub returns confidence 0.72 (above threshold 0.65).
+  await seedActivity({
+    id: ACTIVITY_1,
+    code: 'CA-01',
+    kind: 'core',
+    title: 'Machine Learning Pipeline Optimization',
+    hypothesis: 'ML will improve throughput',
+  });
+
+  // Seed two unbound evidence events. eventX will be the one the stub throws
+  // on; eventY must still produce an ARTEFACT_LINKED event.
+  const eventX_id = await seedEvidenceEvent({
+    payloadText: 'Worked on the pipeline refactoring today',
+    kind: 'EXPERIMENT',
+    classification: {
+      kind: 'EXPERIMENT',
+      confidence: 0.9,
+      rationale: 'Describes experimentation',
+      statutory_anchor: 's.355-25',
+    },
+  });
+  const eventY_id = await seedEvidenceEvent({
+    payloadText: 'More pipeline experimentation results',
+    kind: 'EXPERIMENT',
+    classification: {
+      kind: 'EXPERIMENT',
+      confidence: 0.9,
+      rationale: 'Describes experimentation',
+      statutory_anchor: 's.355-25',
+    },
+  });
+
+  process.env.ALLOCATOR_STUB_THROW_ON_EVENT_ID = eventX_id;
+
+  try {
+    const result = await runClaimEvidenceBindingJob({
+      claim_id: CLAIM,
+      tenant_id: TENANT,
+    });
+
+    // Job-level contract: 'allocated' even when a per-event allocator call
+    // throws — partial failures are absorbed inside the per-event try/catch.
+    assert.equal(result.status, 'allocated');
+    // Both events were attempted; only one produced a link.
+    assert.equal(result.events_processed, 2);
+    assert.equal(result.links_created, 1);
+
+    // Confirm exactly one ARTEFACT_LINKED row exists, and it points at eventY.
+    const linkEvents = await privilegedSql<
+      {
+        payload: { artefact_id: string; activity_id: string };
+      }[]
+    >`
+      SELECT payload FROM event
+       WHERE tenant_id = ${TENANT} AND kind = 'ARTEFACT_LINKED'
+    `;
+    assert.equal(linkEvents.length, 1);
+    assert.equal(linkEvents[0]!.payload.artefact_id, eventY_id);
+    assert.equal(linkEvents[0]!.payload.activity_id, ACTIVITY_1);
+
+    // Defensive: explicitly assert NO ARTEFACT_LINKED was emitted for eventX.
+    const linkedForX = linkEvents.filter((e) => e.payload.artefact_id === eventX_id);
+    assert.equal(linkedForX.length, 0);
+  } finally {
+    delete process.env.ALLOCATOR_STUB_THROW_ON_EVENT_ID;
+  }
+});

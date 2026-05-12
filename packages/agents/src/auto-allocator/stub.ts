@@ -16,6 +16,14 @@ import type { AutoAllocator, AutoAllocatorInput, AutoAllocatorOutput } from './t
 export class StubAutoAllocator implements AutoAllocator {
   // eslint-disable-next-line @typescript-eslint/require-await
   async allocate(input: AutoAllocatorInput): Promise<AutoAllocatorOutput> {
+    // Test-only hook: when ALLOCATOR_STUB_THROW_ON_EVENT_ID matches the
+    // incoming event_id, throw synchronously to exercise the
+    // partial-failure isolation path in claim-evidence-binding (F4).
+    // Production never sets this env var.
+    if (process.env.ALLOCATOR_STUB_THROW_ON_EVENT_ID === input.event_id) {
+      throw new Error(`Synthetic stub failure for event ${input.event_id}`);
+    }
+
     const base = {
       model: 'stub-allocator-v1.0.0',
       prompt_version: 'allocate@1.0.0',
