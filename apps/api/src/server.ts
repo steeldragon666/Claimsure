@@ -41,7 +41,10 @@ const app = buildApp({
   },
 });
 
-const port = Number(process.env.API_PORT ?? 3000);
+// Port resolution: prefer PORT (Railway/Fly/Render/Heroku inject this) →
+// API_PORT (local convention, lets you run web on 5173 + api on 3000 without
+// collision) → 3000 (Dockerfile EXPOSE matches).
+const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3000);
 
 // pg-boss bootstrap (Task D.0). Lives here in the listening bootstrap
 // rather than inside buildApp() because buildApp() is a synchronous
