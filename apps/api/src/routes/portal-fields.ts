@@ -22,7 +22,15 @@
  * the same prompt registry + model spend.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+// @anthropic-ai/sdk v0.32.x exposes the client class as the module's default
+// export. NodeNext + esModuleInterop (apps/api's tsconfig) unwraps that
+// correctly, but some bundler-style resolvers (e.g. Next.js's tsc under
+// `moduleResolution: bundler`) leave the import as a namespace and trip
+// TS2351 ("no construct signatures") at `new Anthropic(...)`. Importing the
+// namespace explicitly and pulling `.default` off it resolves uniformly under
+// every module resolution mode we encounter (NodeNext, bundler, node16).
+import * as AnthropicSDK from '@anthropic-ai/sdk';
+const Anthropic = AnthropicSDK.default;
 import type { FastifyInstance } from 'fastify';
 import { sql } from '@cpa/db/client';
 import { requireSession } from '@cpa/auth';
