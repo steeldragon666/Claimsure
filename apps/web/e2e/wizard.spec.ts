@@ -743,6 +743,423 @@ test.describe('Claim wizard', () => {
     await expect(page.getByTestId('wizard-stepper-4')).toHaveText('✓');
     await expect(page.getByTestId('wizard-stepper-5')).toHaveText('5');
   });
+
+  // -----------------------------------------------------------------
+  // TODO #1 — Full chain-event happy path through every canAdvance gate.
+  //
+  // The 11 isolation tests above each pin one step's DOM contract. This
+  // test pins their *composition*: seed real chain events one step at a
+  // time and verify each `canAdvance(N)` aggregation (workflow.ts:
+  // loadWorkflowSnapshot) flips in the expected order as upstream rows
+  // arrive. A future refactor that changes one of the CTE pipelines
+  // could pass every isolation test and still break this one.
+  //
+  // Step-by-step the test:
+  //   1. Fresh wizard, zero events  -> step 1 Agree disabled
+  //   2. Seed 2 classified events   -> step 1 Agree enabled, click, ?step=2
+  //   3. Seed ACTIVITY_REGISTER_DRAFTED with one proposed_activity +
+  //      a matching ACTIVITY_CREATED (so proposedActivitiesPending == 0)
+  //      AND seed a real `activity` row so step 3's CTE has something
+  //      to attribute -> step 2 Agree enables, click, ?step=3
+  //   4. Seed ARTEFACT_LINKED for both evidence events binding to the
+  //      activity (live link count > 0 per activity -> 0 activities
+  //      without binding) -> step 3 Agree enables, click, ?step=4
+  //   5. Seed 4 narrative_draft rows in 'complete' status (one per
+  //      section_kind), click each per-section Agree button (flips the
+  //      draft to 'accepted' via narrative-accept route) -> step 4
+  //      Agree enables, click, ?step=5
+  //   6. Step 5 mounts with honest "Coming soon" stub; all 4 prior
+  //      pills checkmarked; no wizard-step-5-agree exists.
+  // -----------------------------------------------------------------
+  test('full happy-path through all 4 canAdvance gates with real chain events', async ({
+    page,
+    context,
+  }) => {
+    const suffix = 'fullpath';
+    const fx = await seedFixture(suffix);
+    await setWorkflowState(fx.claimId, freshState());
+
+    // Step 3's CTE for proposed-activities reads project_id either from
+    // claim.project_id directly OR via any activity row's project_id.
+    // We seed a project + wire the activity to it (step 5 below) — but
+    // we also need claim.project_id set so the ACTIVITY_REGISTER_DRAFTED
+    // event (which we seed BEFORE any activity row exists in step 2's
+    // gate evaluation) is visible to the latest_draft CTE.
+    const projectId = await seedProject({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      name: 'Full-path project',
+    });
+    await privilegedSql`UPDATE claim SET project_id = ${projectId} WHERE id = ${fx.claimId}`;
+
+    await signInConsultant(context, fx, suffix);
+
+    // -- (1) Fresh wizard --------------------------------------------------
+    await gotoClaim(page, fx.claimId);
+    await expect(page.getByTestId('wizard-stepper')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('wizard-step-1')).toBeVisible();
+    await expect(page.getByTestId('wizard-step-1-agree')).toBeDisabled();
+
+    // -- (2) Seed 2 classified evidence events -> step 1 gate opens --------
+    const ev1 = await seedEvent({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      capturedByUserId: fx.userId,
+      kind: 'HYPOTHESIS',
+      payload: { _v: 1, source: 'paste', raw_text: 'full-path event 1' },
+      classification: {
+        kind: 'HYPOTHESIS',
+        confidence: 0.85,
+        rationale: 'seed',
+        statutory_anchor: '§355-25(1)(a)',
+        model: 'stub-v1.0.0',
+        prompt_version: 'classify@1.0.0',
+        tokens_in: 0,
+        tokens_out: 0,
+      },
+    });
+    const ev2 = await seedEvent({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      capturedByUserId: fx.userId,
+      kind: 'EXPERIMENT',
+      payload: { _v: 1, source: 'paste', raw_text: 'full-path event 2' },
+      classification: {
+        kind: 'EXPERIMENT',
+        confidence: 0.9,
+        rationale: 'seed',
+        statutory_anchor: '§355-25(1)(a)',
+        model: 'stub-v1.0.0',
+        prompt_version: 'classify@1.0.0',
+        tokens_in: 0,
+        tokens_out: 0,
+      },
+    });
+
+    await page.reload();
+    await expect(page.getByTestId('wizard-step-1')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('wizard-step-1-agree')).toBeEnabled({ timeout: 10_000 });
+
+    await page.getByTestId('wizard-step-1-agree').click();
+    await expect(page).toHaveURL(/[?&]step=2(?:&|$)/, { timeout: 10_000 });
+    await expect(page.getByTestId('wizard-stepper-1')).toHaveText('✓');
+
+    // -- (3) Seed ACTIVITY_REGISTER_DRAFTED + ACTIVITY_CREATED + activity --
+    // canAdvance(2) wants proposedActivitiesPending === 0. The CTE finds
+    // the LATEST ACTIVITY_REGISTER_DRAFTED per project, unnests
+    // proposed_activities[], and LEFT JOINs against ACTIVITY_CREATED
+    // events whose payload.proposed_id matches. We seed one proposed
+    // activity and one matching ACTIVITY_CREATED so pending = 0.
+    //
+    // The seedEvent helper doesn't set the (nullable) event.project_id
+    // column — but the CTE joins on it. project_id is NOT part of the
+    // chain hash (see canonicaliseEvent), so we can update post-insert.
+    const proposedId = crypto.randomUUID();
+    const activityId = await seedActivity({
+      tenantId: fx.tenantId,
+      projectId,
+      claimId: fx.claimId,
+      code: 'CA-001',
+      kind: 'core',
+      title: 'Full-path activity',
+    });
+
+    const draftEvent = await seedEvent({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      capturedByUserId: fx.userId,
+      kind: 'ACTIVITY_REGISTER_DRAFTED',
+      payload: {
+        _v: 1,
+        project_id: projectId,
+        proposed_activities: [
+          {
+            proposed_id: proposedId,
+            name: 'Full-path proposed activity',
+            kind: 'core',
+            statutory_anchor: 's.355-25',
+            rationale: 'seeded for the full-path test',
+            clustered_event_ids: [ev1.id, ev2.id],
+            confidence: 0.9,
+            proposed_hypothesis: null,
+            proposed_uncertainty: null,
+          },
+        ],
+        unclustered_event_ids: [],
+        total_input_events: 2,
+        events_truncated: false,
+        synthesizer_notes: 'seeded',
+        model: 'stub-v1.0.0',
+        prompt_version: 'synthesize-register@1.0.0',
+        idempotency_key: `full-path-${suffix}-draft`,
+      },
+      classification: null,
+    });
+    await privilegedSql`UPDATE event SET project_id = ${projectId} WHERE id = ${draftEvent.id}`;
+
+    const createdEvent = await seedEvent({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      capturedByUserId: fx.userId,
+      kind: 'ACTIVITY_CREATED',
+      payload: {
+        activity_id: activityId,
+        code: 'CA-001',
+        kind: 'core',
+        title: 'Full-path activity',
+        project_id: projectId,
+        claim_id: fx.claimId,
+        proposed_id: proposedId,
+      },
+      classification: null,
+    });
+    await privilegedSql`UPDATE event SET project_id = ${projectId} WHERE id = ${createdEvent.id}`;
+
+    await page.reload();
+    await expect(page.getByTestId('wizard-step-2')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('wizard-step-2-agree')).toBeEnabled({ timeout: 10_000 });
+
+    await page.getByTestId('wizard-step-2-agree').click();
+    await expect(page).toHaveURL(/[?&]step=3(?:&|$)/, { timeout: 10_000 });
+    await expect(page.getByTestId('wizard-stepper-2')).toHaveText('✓');
+
+    // -- (4) Seed ARTEFACT_LINKED events binding the activity ---------------
+    // canAdvance(3) wants agreedActivitiesWithoutBinding === 0. One live
+    // ARTEFACT_LINKED per activity is enough.
+    const link1 = await seedEvent({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      capturedByUserId: fx.userId,
+      kind: 'ARTEFACT_LINKED',
+      payload: {
+        activity_id: activityId,
+        artefact_kind: 'event',
+        artefact_id: ev1.id,
+        link_reason: 'seed for full-path test',
+      },
+      classification: null,
+    });
+    await privilegedSql`UPDATE event SET project_id = ${projectId} WHERE id = ${link1.id}`;
+    const link2 = await seedEvent({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      capturedByUserId: fx.userId,
+      kind: 'ARTEFACT_LINKED',
+      payload: {
+        activity_id: activityId,
+        artefact_kind: 'event',
+        artefact_id: ev2.id,
+        link_reason: 'seed for full-path test',
+      },
+      classification: null,
+    });
+    await privilegedSql`UPDATE event SET project_id = ${projectId} WHERE id = ${link2.id}`;
+
+    await page.reload();
+    await expect(page.getByTestId('wizard-step-3')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('wizard-step-3-agree')).toBeEnabled({ timeout: 10_000 });
+
+    await page.getByTestId('wizard-step-3-agree').click();
+    await expect(page).toHaveURL(/[?&]step=4(?:&|$)/, { timeout: 10_000 });
+    await expect(page.getByTestId('wizard-stepper-3')).toHaveText('✓');
+
+    // -- (5) Seed 4 narrative_draft rows; click each per-section Agree -----
+    const SECTION_KINDS = [
+      'new_knowledge',
+      'hypothesis',
+      'uncertainty',
+      'experiments_and_results',
+    ] as const;
+    for (const kind of SECTION_KINDS) {
+      await seedNarrativeDraft({
+        tenantId: fx.tenantId,
+        activityId,
+        sectionKind: kind,
+        status: 'complete',
+        createdByUserId: fx.userId,
+      });
+    }
+
+    await page.reload();
+    await expect(page.getByTestId('wizard-step-4')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('wizard-step-4-agree')).toBeDisabled();
+
+    for (const kind of SECTION_KINDS) {
+      await page.getByTestId(`narrative-section-${kind}-agree`).click();
+      await expect(page.getByTestId(`narrative-section-${kind}-accepted`)).toBeVisible({
+        timeout: 10_000,
+      });
+    }
+
+    await expect(page.getByTestId('wizard-step-4-agree')).toBeEnabled({ timeout: 10_000 });
+    await page.getByTestId('wizard-step-4-agree').click();
+    await expect(page).toHaveURL(/[?&]step=5(?:&|$)/, { timeout: 10_000 });
+
+    // -- (6) Step 5 mounts; honest stub; all prior pills checkmarked --------
+    await expect(page.getByTestId('wizard-step-5')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Coming soon\./i)).toBeVisible();
+    await expect(page.getByTestId('wizard-stepper-1')).toHaveText('✓');
+    await expect(page.getByTestId('wizard-stepper-2')).toHaveText('✓');
+    await expect(page.getByTestId('wizard-stepper-3')).toHaveText('✓');
+    await expect(page.getByTestId('wizard-stepper-4')).toHaveText('✓');
+    // Step 5 is terminal — no Agree button mounts.
+    await expect(page.getByTestId('wizard-step-5-agree')).toHaveCount(0);
+  });
+
+  // -----------------------------------------------------------------
+  // TODO #2 — EventPickerDialog click-flow.
+  //
+  // Step 3's activity-first picker (wizard-step-3-attribute.tsx) renders
+  // one ActivityAttributionPanel per agreed activity. Each panel has an
+  // "Add evidence" trigger that opens EventPickerDialog — a modal listing
+  // unbound classifiable events. Selecting one + submitting fans out
+  // POST /v1/activities/:id/artefact-links and invalidates the workflow
+  // query so canAdvance(3) re-derives. This test pins the open → select →
+  // submit → close → bound-row visible chain.
+  // -----------------------------------------------------------------
+  test('EventPickerDialog: open → select unbound event → submit → activity card shows binding', async ({
+    page,
+    context,
+  }) => {
+    const suffix = 'picker';
+    const fx = await seedFixture(suffix);
+    const now = new Date().toISOString();
+    // Pre-agree steps 1 + 2 so the orchestrator lands us on step 3.
+    await setWorkflowState(fx.claimId, {
+      initialized_at: now,
+      steps: {
+        '1': { agreed_at: now, agreed_by: fx.userId },
+        '2': { agreed_at: now, agreed_by: fx.userId },
+        '3': null,
+        '4': null,
+        '5': null,
+      },
+    });
+
+    // Step 3 needs a real activity row (the panel renders one card per
+    // activity under the claim). The activity-first picker is on the card.
+    const projectId = await seedProject({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      name: 'Picker project',
+    });
+    await privilegedSql`UPDATE claim SET project_id = ${projectId} WHERE id = ${fx.claimId}`;
+    const activityId = await seedActivity({
+      tenantId: fx.tenantId,
+      projectId,
+      claimId: fx.claimId,
+      code: 'CA-001',
+      kind: 'core',
+      title: 'Picker activity',
+    });
+
+    // Two unbound classified evidence events (no ARTEFACT_LINKED yet,
+    // BINDABLE_KINDS — HYPOTHESIS/EXPERIMENT both qualify).
+    const ev1 = await seedEvent({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      capturedByUserId: fx.userId,
+      kind: 'HYPOTHESIS',
+      payload: { _v: 1, source: 'paste', raw_text: 'picker-spec event one' },
+      classification: {
+        kind: 'HYPOTHESIS',
+        confidence: 0.85,
+        rationale: 'seed',
+        statutory_anchor: '§355-25(1)(a)',
+        model: 'stub-v1.0.0',
+        prompt_version: 'classify@1.0.0',
+        tokens_in: 0,
+        tokens_out: 0,
+      },
+    });
+    const ev2 = await seedEvent({
+      tenantId: fx.tenantId,
+      subjectTenantId: fx.subjectId,
+      capturedByUserId: fx.userId,
+      kind: 'EXPERIMENT',
+      payload: { _v: 1, source: 'paste', raw_text: 'picker-spec event two' },
+      classification: {
+        kind: 'EXPERIMENT',
+        confidence: 0.9,
+        rationale: 'seed',
+        statutory_anchor: '§355-25(1)(a)',
+        model: 'stub-v1.0.0',
+        prompt_version: 'classify@1.0.0',
+        tokens_in: 0,
+        tokens_out: 0,
+      },
+    });
+
+    await signInConsultant(context, fx, suffix);
+    await gotoClaim(page, fx.claimId, 'step=3');
+
+    await expect(page.getByTestId('wizard-step-3')).toBeVisible({ timeout: 15_000 });
+
+    // Activity card renders with the "Add evidence" trigger.
+    const triggerTestId = `event-picker-trigger-${activityId}`;
+    await expect(page.getByTestId(triggerTestId)).toBeVisible({ timeout: 10_000 });
+
+    // No bound events yet → step 3 Agree disabled (1 agreed activity, 0
+    // bindings → agreedActivitiesWithoutBinding === 1).
+    await expect(page.getByTestId('wizard-step-3-agree')).toBeDisabled();
+
+    // Click the trigger; dialog opens. Radix Dialog renders role="dialog".
+    await page.getByTestId(triggerTestId).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+
+    // Both unbound events appear as checkbox rows inside the dialog.
+    // Use the dialog as the search scope so we don't accidentally match
+    // anything on the underlying step-3 panel.
+    const checkboxes = dialog.locator('input[type="checkbox"]');
+    await expect(checkboxes).toHaveCount(2, { timeout: 10_000 });
+
+    const submitBtn = page.getByTestId(`event-picker-submit-${activityId}`);
+    // Submit is disabled until at least one event is checked.
+    await expect(submitBtn).toBeDisabled();
+
+    // Check the first checkbox. We don't depend on the displayed label
+    // text — the dialog renders effective_kind + an eventLabel snippet,
+    // but the snippet contents shift based on payload shape; checking by
+    // position keeps the assertion stable.
+    await checkboxes.first().check();
+    await expect(submitBtn).toBeEnabled({ timeout: 5_000 });
+
+    await submitBtn.click();
+
+    // Dialog closes on success.
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    // Activity card now shows a bound-event row inside the activity's
+    // `bound-events-${activityId}` list. We don't know which of (ev1, ev2)
+    // was at position 0 in the picker (the API orders by captured_at
+    // DESC, received_at DESC), so assert via the parent list testid +
+    // count instead.
+    const boundList = page.getByTestId(`bound-events-${activityId}`);
+    await expect(boundList).toBeVisible({ timeout: 10_000 });
+    await expect(boundList.locator('[data-testid^="bound-event-"]')).toHaveCount(1, {
+      timeout: 10_000,
+    });
+
+    // canAdvance(3) reads from agreedActivitiesWithoutBinding — the
+    // single activity has at least one live link now, so the gate flips
+    // and the bottom Agree enables.
+    await expect(page.getByTestId('wizard-step-3-agree')).toBeEnabled({ timeout: 10_000 });
+
+    // Re-open the dialog: the bound event is now filtered out, so only
+    // one candidate (the other event) remains. Pins the "already bound"
+    // filter contract.
+    await page.getByTestId(triggerTestId).click();
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const remainingCheckboxes = dialog.locator('input[type="checkbox"]');
+    await expect(remainingCheckboxes).toHaveCount(1, { timeout: 10_000 });
+
+    // Suppress unused-binding lint — ev1/ev2 are seeded for the dialog
+    // contents; we don't assert on their specific ids because the order
+    // depends on captured_at + received_at ordering server-side.
+    void ev1;
+    void ev2;
+  });
 });
 
 // Suppress an unused-import warning if `crypto` is removed in a future
