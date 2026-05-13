@@ -46,6 +46,25 @@ const PROMPT_VERSION = 'allocate@1.0.0';
 const AGENT_NAME = 'evidence-auto-allocator';
 
 /**
+ * Outcome `reason` substrings that represent PERMANENT failures — the
+ * pg-boss worker treats anything else as TRANSIENT (e.g. Anthropic 429,
+ * DB blip) and re-throws so pg-boss engages its retry policy. See
+ * `claim-activity-proposal.ts` for the same pattern.
+ */
+const PERMANENT_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  'invalid job input',
+  'claim not found',
+]);
+
+function isPermanentFailureReason(reason: string | undefined): boolean {
+  if (!reason) return false;
+  for (const marker of PERMANENT_FAILURE_REASONS) {
+    if (reason.includes(marker)) return true;
+  }
+  return false;
+}
+
+/**
  * Minimum confidence score from the auto-allocator for a binding to be
  * emitted as an `ARTEFACT_LINKED` event. Below this threshold, the
  * allocation is silently dropped. With the stub allocator: vocabulary
@@ -177,6 +196,16 @@ export async function runClaimEvidenceBindingJob(
   }
 
   try {
+    // Test-only hook: when CLAIM_EVIDENCE_BINDING_THROW_TRANSIENT=1, throw
+    // synchronously inside the outer try block to exercise the
+    // transient-failure throw path in handleClaimEvidenceBindingJob
+    // (Fix 2). Production never sets this env var. Mirrors the
+    // ALLOCATOR_STUB_THROW_ON_EVENT_ID pattern (F4) and the
+    // SYNTHESIZER_STUB_THROW pattern.
+    if (process.env.CLAIM_EVIDENCE_BINDING_THROW_TRANSIENT === '1') {
+      throw new Error('Synthetic transient binding-job failure');
+    }
+
     // Step c: load the claim row (privileged — no request-scoped GUC).
     const claimRows = await privilegedSql<ClaimRow[]>`
       SELECT c.project_id,
@@ -363,6 +392,28 @@ export async function runClaimEvidenceBindingJob(
 }
 
 /**
+ * pg-boss worker entry point — runs the job and re-throws on TRANSIENT
+ * failures so pg-boss engages its retry policy. Permanent failures
+ * (invalid input, claim not found) are absorbed via
+ * {@link PERMANENT_FAILURE_REASONS} and returned as-is.
+ *
+ * Exposed for unit testing without booting pg-boss.
+ */
+export async function handleClaimEvidenceBindingJob(
+  data: ClaimEvidenceBindingJobInput,
+): Promise<ClaimEvidenceBindingJobResult> {
+  const result = await runClaimEvidenceBindingJob(data);
+  console.log(
+    `[claim-evidence-binding] claim=${data.claim_id} status=${result.status}` +
+      (result.reason ? ` reason=${result.reason}` : ''),
+  );
+  if (result.status === 'failed' && !isPermanentFailureReason(result.reason)) {
+    throw new Error(`Transient failure, will retry: ${result.reason ?? 'unknown'}`);
+  }
+  return result;
+}
+
+/**
  * Register the claim-evidence-binding job with pg-boss.
  * Called from server.ts after getBoss() succeeds.
  */
@@ -370,7 +421,7 @@ export async function registerClaimEvidenceBindingJob(boss: PgBoss): Promise<voi
   await boss.createQueue(CLAIM_EVIDENCE_BINDING_QUEUE);
   await boss.work<ClaimEvidenceBindingJobInput>(CLAIM_EVIDENCE_BINDING_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      await runClaimEvidenceBindingJob(job.data);
+      await handleClaimEvidenceBindingJob(job.data);
     }
   });
 }

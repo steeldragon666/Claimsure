@@ -140,6 +140,15 @@ export class StubRegisterSynthesizer implements RegisterSynthesizer {
   // with SonnetRegisterSynthesizer.
   // eslint-disable-next-line @typescript-eslint/require-await
   async synthesize(input: SynthesizerInput): Promise<SynthesizerOutput> {
+    // Test-only hook: when SYNTHESIZER_STUB_THROW=1, throw synchronously to
+    // exercise the transient-failure throw path in
+    // runClaimActivityProposalJob (Fix 2). Production never sets this env
+    // var. Mirrors the ALLOCATOR_STUB_THROW_ON_EVENT_ID hook in
+    // packages/agents/src/auto-allocator/stub.ts.
+    if (process.env.SYNTHESIZER_STUB_THROW === '1') {
+      throw new Error('Synthetic stub synthesizer failure');
+    }
+
     const buckets = new Map<string, Bucket>();
 
     for (const ev of input.events) {

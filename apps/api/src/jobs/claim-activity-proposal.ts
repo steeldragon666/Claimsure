@@ -51,6 +51,38 @@ export const CLAIM_ACTIVITY_PROPOSAL_QUEUE = 'claim-activity-proposal';
 const PROMPT_VERSION = 'synthesize-register@1.0.0';
 const AGENT_NAME = 'activity-register-synthesizer';
 
+/**
+ * Outcome `reason` substrings that represent PERMANENT failures — retrying
+ * won't help, so the pg-boss worker returns the result as-is (no throw)
+ * and pg-boss treats the job as succeeded. Anything outside this set is
+ * treated as TRANSIENT (e.g. Anthropic 429, DB blip, transient network
+ * error) and the worker re-throws so pg-boss engages its retry policy.
+ *
+ * Matching is substring-based on `result.reason` because the per-job
+ * reason text already includes both a stable prefix (e.g.
+ * "invalid job input") and a downstream parser/library message; we only
+ * need to detect the stable prefix.
+ */
+const PERMANENT_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  // Zod parse failure on job input — claim_id missing / not UUID / etc.
+  'invalid job input',
+  // SQL guard miss — claim row doesn't exist or has no workflow_state, or
+  // belongs to a different tenant. None of these are recovered by retry.
+  'claim not found',
+]);
+
+/**
+ * Returns true if `reason` indicates a permanent failure that should NOT
+ * be retried. Substring match against {@link PERMANENT_FAILURE_REASONS}.
+ */
+function isPermanentFailureReason(reason: string | undefined): boolean {
+  if (!reason) return false;
+  for (const marker of PERMANENT_FAILURE_REASONS) {
+    if (reason.includes(marker)) return true;
+  }
+  return false;
+}
+
 const ClaimActivityProposalJobInputSchema = z.object({
   claim_id: z.string().uuid(),
   tenant_id: z.string().uuid(),
@@ -300,6 +332,34 @@ export async function runClaimActivityProposalJob(
 }
 
 /**
+ * pg-boss worker entry point — runs the job and re-throws on TRANSIENT
+ * failures so pg-boss engages its retry policy. Permanent failures
+ * (invalid input, claim not found, wrong tenant) are absorbed via
+ * {@link PERMANENT_FAILURE_REASONS} and returned as-is — retrying won't
+ * help and would just churn the queue.
+ *
+ * Exposed (not just inlined into `boss.work`) so unit tests can exercise
+ * the throw/return decision without booting pg-boss.
+ */
+export async function handleClaimActivityProposalJob(
+  data: ClaimActivityProposalJobInput,
+): Promise<ClaimActivityProposalJobResult> {
+  const result = await runClaimActivityProposalJob(data);
+  console.log(
+    `[claim-activity-proposal] claim=${data.claim_id} status=${result.status}` +
+      (result.reason ? ` reason=${result.reason}` : ''),
+  );
+  if (result.status === 'failed' && !isPermanentFailureReason(result.reason)) {
+    // Transient failure: throw so pg-boss records the attempt as failed
+    // and re-queues per the queue's retry policy. Returning a value
+    // (even one with status:'failed') is interpreted as success by
+    // pg-boss and silently drops the job.
+    throw new Error(`Transient failure, will retry: ${result.reason ?? 'unknown'}`);
+  }
+  return result;
+}
+
+/**
  * Register the claim-activity-proposal job with pg-boss.
  * Called from server.ts after getBoss() succeeds.
  */
@@ -307,7 +367,7 @@ export async function registerClaimActivityProposalJob(boss: PgBoss): Promise<vo
   await boss.createQueue(CLAIM_ACTIVITY_PROPOSAL_QUEUE);
   await boss.work<ClaimActivityProposalJobInput>(CLAIM_ACTIVITY_PROPOSAL_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      await runClaimActivityProposalJob(job.data);
+      await handleClaimActivityProposalJob(job.data);
     }
   });
 }

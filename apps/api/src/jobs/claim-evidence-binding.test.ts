@@ -15,7 +15,8 @@ _reloadEnvForTests();
 
 // Import AFTER env is configured.
 const { AGENT_B_SYSTEM_USER_ID } = await import('./activity-register-synthesize.js');
-const { runClaimEvidenceBindingJob } = await import('./claim-evidence-binding.js');
+const { runClaimEvidenceBindingJob, handleClaimEvidenceBindingJob } =
+  await import('./claim-evidence-binding.js');
 
 // ---------------------------------------------------------------------------
 // Pinned UUIDs — `0c32` segment groups all Task 3.2 fixtures.
@@ -508,4 +509,56 @@ test('Haiku throws on one event of N: surviving events still get ARTEFACT_LINKED
   } finally {
     delete process.env.ALLOCATOR_STUB_THROW_ON_EVENT_ID;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Tests: pg-boss worker retry semantics (Fix 2).
+//
+// The job's pg-boss wrapper (handleClaimEvidenceBindingJob) must THROW on
+// transient failures so pg-boss engages its retry policy. Permanent
+// failures (invalid input, claim not found) must return as-is — retrying
+// won't help and would just churn the queue.
+// ---------------------------------------------------------------------------
+
+test('handleClaimEvidenceBindingJob: transient outer failure throws so pg-boss can retry', async () => {
+  // CLAIM_EVIDENCE_BINDING_THROW_TRANSIENT=1 makes the job throw inside
+  // its outer try block — the catch returns { status:'failed', reason:
+  // 'Synthetic transient binding-job failure' }. That reason is NOT in
+  // PERMANENT_FAILURE_REASONS, so the worker wrapper must rethrow.
+  process.env.CLAIM_EVIDENCE_BINDING_THROW_TRANSIENT = '1';
+  try {
+    await assert.rejects(
+      () =>
+        handleClaimEvidenceBindingJob({
+          claim_id: CLAIM,
+          tenant_id: TENANT,
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /Transient failure, will retry/);
+        return true;
+      },
+    );
+  } finally {
+    delete process.env.CLAIM_EVIDENCE_BINDING_THROW_TRANSIENT;
+  }
+});
+
+test('handleClaimEvidenceBindingJob: permanent failure (invalid input) does NOT throw', async () => {
+  const result = await handleClaimEvidenceBindingJob({
+    // @ts-expect-error -- intentionally invalid for the test
+    claim_id: 'not-a-uuid',
+    tenant_id: TENANT,
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason ?? '', /invalid job input/);
+});
+
+test('handleClaimEvidenceBindingJob: permanent failure (claim not found) does NOT throw', async () => {
+  const result = await handleClaimEvidenceBindingJob({
+    claim_id: '00000000-0000-4000-8000-00000000dead',
+    tenant_id: TENANT,
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason ?? '', /claim not found/);
 });

@@ -15,7 +15,8 @@ _reloadEnvForTests();
 
 // Import AFTER env is configured.
 const { AGENT_B_SYSTEM_USER_ID } = await import('./activity-register-synthesize.js');
-const { runClaimActivityProposalJob } = await import('./claim-activity-proposal.js');
+const { runClaimActivityProposalJob, handleClaimActivityProposalJob } =
+  await import('./claim-activity-proposal.js');
 
 // ---------------------------------------------------------------------------
 // Pinned UUIDs — `0c31` segment groups all Task 3.1 fixtures.
@@ -341,4 +342,64 @@ test('payload carries correct metadata: project_id, model, prompt_version', asyn
   assert.equal(rows[0]?.payload.prompt_version, 'synthesize-register@1.0.0');
   // Stub always reports model 'stub-v1.0.0'.
   assert.equal(rows[0]?.payload.model, 'stub-v1.0.0');
+});
+
+// ---------------------------------------------------------------------------
+// Tests: pg-boss worker retry semantics (Fix 2).
+//
+// The job's pg-boss wrapper (handleClaimActivityProposalJob) must THROW on
+// transient failures so pg-boss engages its retry policy. Permanent
+// failures (invalid input, claim not found) must return as-is — retrying
+// won't help and would just churn the queue.
+// ---------------------------------------------------------------------------
+
+test('handleClaimActivityProposalJob: transient synthesizer failure throws so pg-boss can retry', async () => {
+  await seedEvent({ payloadText: 'a synth-driving event' });
+
+  // SYNTHESIZER_STUB_THROW=1 makes the stub synthesizer throw synchronously
+  // inside withAgentSpan — the job's outer try/catch absorbs it and
+  // returns { status:'failed', reason:'Synthetic stub synthesizer failure' }.
+  // That reason is NOT in PERMANENT_FAILURE_REASONS, so the worker
+  // wrapper must rethrow.
+  process.env.SYNTHESIZER_STUB_THROW = '1';
+  try {
+    await assert.rejects(
+      () =>
+        handleClaimActivityProposalJob({
+          claim_id: CLAIM,
+          tenant_id: TENANT,
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /Transient failure, will retry/);
+        return true;
+      },
+    );
+  } finally {
+    delete process.env.SYNTHESIZER_STUB_THROW;
+  }
+});
+
+test('handleClaimActivityProposalJob: permanent failure (invalid input) does NOT throw', async () => {
+  // Zod-rejected input → reason starts with 'invalid job input' which IS
+  // in PERMANENT_FAILURE_REASONS. The wrapper must return the failed
+  // result as-is so pg-boss treats the job as succeeded (no retry).
+  const result = await handleClaimActivityProposalJob({
+    // @ts-expect-error -- intentionally invalid for the test
+    claim_id: 'not-a-uuid',
+    tenant_id: TENANT,
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason ?? '', /invalid job input/);
+});
+
+test('handleClaimActivityProposalJob: permanent failure (claim not found) does NOT throw', async () => {
+  // 'claim not found' is permanent — the row doesn't exist; retrying is
+  // pointless. The wrapper must return as-is.
+  const result = await handleClaimActivityProposalJob({
+    claim_id: '00000000-0000-4000-8000-00000000dead',
+    tenant_id: TENANT,
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason ?? '', /claim not found/);
 });
