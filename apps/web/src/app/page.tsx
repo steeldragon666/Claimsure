@@ -21,6 +21,7 @@ import {
 import { AppShell } from '@/components/app-shell';
 import { ForensicChip } from '@/components/forensic-chip';
 import { EmptyState } from '@/components/empty-state';
+import { StartClaimButton } from '@/components/start-claim-button';
 import { useWhoami } from '@/hooks/use-whoami';
 
 export default function DashboardPage() {
@@ -180,9 +181,14 @@ function DashboardContent() {
               </span>
             </h1>
             <p className="text-base text-muted-foreground max-w-lg leading-relaxed">
-              Every artefact you produce here is hash-chained and audit-traceable. Your workspace is
-              ready.
+              Start a new claim or pick up where you left off. Every artefact you produce here is
+              hash-chained and audit-traceable.
             </p>
+
+            {/* Primary CTA — drops the user straight into the wizard */}
+            <div className="pt-1">
+              <StartClaimButton size="lg" />
+            </div>
 
             {/* Tenant stat bar */}
             <div className="flex flex-wrap gap-x-8 gap-y-3 pt-2 border-t border-[hsl(var(--brand-hairline))]">

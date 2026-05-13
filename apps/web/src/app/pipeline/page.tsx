@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Claim } from '@cpa/schemas';
 import { AppShell } from '@/components/app-shell';
+import { StartClaimButton } from '@/components/start-claim-button';
 import { PipelineBulkToolbar } from './_components/pipeline-bulk-toolbar';
 import { PipelineFilters, type ConsultantOption } from './_components/pipeline-filters';
 import { PipelineKanban } from './_components/pipeline-kanban';
@@ -111,9 +112,12 @@ function Inner() {
             Claims in flight across every stage from intake through lodgement.
           </p>
         </div>
-        <span className="font-mono text-xs text-muted-foreground">
-          {claimCount} claim{claimCount === 1 ? '' : 's'}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-xs text-muted-foreground">
+            {claimCount} claim{claimCount === 1 ? '' : 's'}
+          </span>
+          <StartClaimButton />
+        </div>
       </header>
 
       <PipelineFilters
