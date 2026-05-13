@@ -149,11 +149,21 @@ export interface SeedEventInput {
   payload: unknown;
   classification?: unknown;
   capturedAt?: Date;
+  /**
+   * Optional `event.project_id` — populated directly in the INSERT.
+   * Used by `loadWorkflowSnapshot`'s proposed-activities CTE which
+   * joins on `event.project_id`. `project_id` is NOT part of the
+   * canonicalised hash (see canonicaliseEvent), so setting it here
+   * doesn't change the chain hash compared to leaving it NULL and
+   * back-filling with UPDATE afterwards.
+   */
+  projectId?: string;
 }
 
 export async function seedEvent(input: SeedEventInput): Promise<{ id: string; hash: string }> {
   const capturedAt = input.capturedAt ?? new Date();
   const classification = input.classification ?? null;
+  const projectId = input.projectId ?? null;
 
   // Read the current head hash (highest captured_at on this chain).
   const prevRows = await privilegedSql<{ hash: string }[]>`
@@ -184,13 +194,13 @@ export async function seedEvent(input: SeedEventInput): Promise<{ id: string; ha
   const capturedAtIso = capturedAt.toISOString();
   await privilegedSql`
     INSERT INTO event (
-      id, tenant_id, subject_tenant_id, kind,
+      id, tenant_id, subject_tenant_id, project_id, kind,
       payload, classification,
       override_of_event_id, override_new_kind, override_reason,
       prev_hash, hash,
       captured_at, captured_by_user_id
     ) VALUES (
-      ${id}, ${input.tenantId}, ${input.subjectTenantId}, ${input.kind},
+      ${id}, ${input.tenantId}, ${input.subjectTenantId}, ${projectId}, ${input.kind},
       ${JSON.stringify(input.payload)}::jsonb, ${classification === null ? null : JSON.stringify(classification)}::jsonb,
       ${null}, ${null}, ${null},
       ${prevHash}, ${hash},

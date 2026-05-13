@@ -851,9 +851,10 @@ test.describe('Claim wizard', () => {
     // events whose payload.proposed_id matches. We seed one proposed
     // activity and one matching ACTIVITY_CREATED so pending = 0.
     //
-    // The seedEvent helper doesn't set the (nullable) event.project_id
-    // column — but the CTE joins on it. project_id is NOT part of the
-    // chain hash (see canonicaliseEvent), so we can update post-insert.
+    // The CTE joins on `event.project_id`, so we pass `projectId` through
+    // seedEvent's optional param. project_id is NOT part of the
+    // canonicalised chain hash (see canonicaliseEvent), so populating it
+    // directly in the INSERT produces the same hash as leaving it NULL.
     const proposedId = crypto.randomUUID();
     const activityId = await seedActivity({
       tenantId: fx.tenantId,
@@ -864,10 +865,11 @@ test.describe('Claim wizard', () => {
       title: 'Full-path activity',
     });
 
-    const draftEvent = await seedEvent({
+    await seedEvent({
       tenantId: fx.tenantId,
       subjectTenantId: fx.subjectId,
       capturedByUserId: fx.userId,
+      projectId,
       kind: 'ACTIVITY_REGISTER_DRAFTED',
       payload: {
         _v: 1,
@@ -895,12 +897,12 @@ test.describe('Claim wizard', () => {
       },
       classification: null,
     });
-    await privilegedSql`UPDATE event SET project_id = ${projectId} WHERE id = ${draftEvent.id}`;
 
-    const createdEvent = await seedEvent({
+    await seedEvent({
       tenantId: fx.tenantId,
       subjectTenantId: fx.subjectId,
       capturedByUserId: fx.userId,
+      projectId,
       kind: 'ACTIVITY_CREATED',
       payload: {
         activity_id: activityId,
@@ -913,7 +915,6 @@ test.describe('Claim wizard', () => {
       },
       classification: null,
     });
-    await privilegedSql`UPDATE event SET project_id = ${projectId} WHERE id = ${createdEvent.id}`;
 
     await page.reload();
     await expect(page.getByTestId('wizard-step-2')).toBeVisible({ timeout: 15_000 });
@@ -926,10 +927,11 @@ test.describe('Claim wizard', () => {
     // -- (4) Seed ARTEFACT_LINKED events binding the activity ---------------
     // canAdvance(3) wants agreedActivitiesWithoutBinding === 0. One live
     // ARTEFACT_LINKED per activity is enough.
-    const link1 = await seedEvent({
+    await seedEvent({
       tenantId: fx.tenantId,
       subjectTenantId: fx.subjectId,
       capturedByUserId: fx.userId,
+      projectId,
       kind: 'ARTEFACT_LINKED',
       payload: {
         activity_id: activityId,
@@ -939,11 +941,11 @@ test.describe('Claim wizard', () => {
       },
       classification: null,
     });
-    await privilegedSql`UPDATE event SET project_id = ${projectId} WHERE id = ${link1.id}`;
-    const link2 = await seedEvent({
+    await seedEvent({
       tenantId: fx.tenantId,
       subjectTenantId: fx.subjectId,
       capturedByUserId: fx.userId,
+      projectId,
       kind: 'ARTEFACT_LINKED',
       payload: {
         activity_id: activityId,
@@ -953,7 +955,6 @@ test.describe('Claim wizard', () => {
       },
       classification: null,
     });
-    await privilegedSql`UPDATE event SET project_id = ${projectId} WHERE id = ${link2.id}`;
 
     await page.reload();
     await expect(page.getByTestId('wizard-step-3')).toBeVisible({ timeout: 15_000 });
