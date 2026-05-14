@@ -65,7 +65,13 @@ CREATE INDEX IF NOT EXISTS llm_token_usage_agent_idx
   ON llm_token_usage (agent_name, created_at DESC);
 
 -- RLS — tenant-scoped reads.
+--
+-- FORCE is required: PostgreSQL bypasses RLS for the table OWNER unless
+-- FORCE ROW LEVEL SECURITY is set. Without FORCE, the application's
+-- postgres role (which owns the table in dev) would see all rows
+-- regardless of the policy. Mirrors event-table behaviour in migration 0006.
 ALTER TABLE llm_token_usage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE llm_token_usage FORCE  ROW LEVEL SECURITY;
 
 CREATE POLICY llm_token_usage_tenant_isolation
   ON llm_token_usage
