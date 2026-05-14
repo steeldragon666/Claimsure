@@ -25,6 +25,7 @@ import { registerPipelineStatus } from './routes/pipeline-status.js';
 import { registerProposedActivities } from './routes/proposed-activities.js';
 import { registerGenerateApplication } from './routes/generate-application.js';
 import { registerInsights } from './routes/insights.js';
+import { registerClaimBudget } from './routes/claim-budget.js';
 import { registerPortalFields } from './routes/portal-fields.js';
 import { registerApplyRules } from './routes/apply-rules.js';
 import { registerArtefactLinks } from './routes/artefact-links.js';
@@ -351,6 +352,10 @@ export function buildApp(options: BuildAppOptions = {}): App {
   });
   app.register((instance, _opts, done) => {
     registerInsights(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerClaimBudget(instance);
     done();
   });
   app.register((instance, _opts, done) => {

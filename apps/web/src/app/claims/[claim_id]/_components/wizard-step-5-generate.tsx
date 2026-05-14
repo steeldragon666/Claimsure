@@ -1,12 +1,21 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, FileText, Loader2, Sparkles } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, Loader2, Sparkles } from 'lucide-react';
 import type { WorkflowStepEntry } from '@cpa/schemas';
 import { Button } from '@/components/ui/button';
 import { apiFetch } from '@/lib/api';
 import type { CanAdvance } from '../_lib/workflow-client';
 import { StaleStepBanner } from './stale-step-banner';
+
+/**
+ * Conservative estimate of a single Sonnet drafter call's AUD-cents cost.
+ * Based on production averages: 30k input tokens + 25k output tokens at
+ * the FY25/26 Sonnet-4-5 rates × 1.55 USD->AUD = ~72c. We round up to
+ * 100c for the pre-flight estimate so the projected spend on the warning
+ * banner is honest-with-headroom rather than rosy.
+ */
+const DRAFTER_ESTIMATED_AUD_CENTS = 100;
 
 /**
  * WizardStep5 — Generate AusIndustry Application.
@@ -25,6 +34,23 @@ interface ApplicationDraftResponse {
   status: 'pending' | 'drafting' | 'complete' | 'failed';
   draft?: ApplicationDraftShape | null;
   message?: string;
+}
+
+interface ClaimBudgetResponse {
+  claim_id: string;
+  used_aud_cents: number;
+  remaining_aud_cents: number;
+  budget_aud_cents: number;
+  status: 'free_tier' | 'over_quota';
+  call_count: number;
+  billable_aud_cents: number;
+  free_tier_aud_cents: number;
+  agents: Array<{
+    agent_name: string;
+    call_count: number;
+    total_aud_cents: number;
+    last_called_at: string | null;
+  }>;
 }
 
 interface ApplicationDraftShape {
@@ -74,6 +100,14 @@ export function WizardStep5GenerateDocuments({
     },
   });
 
+  // Pull the live budget so we can surface a pre-flight warning. Refetch
+  // on success of the generate mutation so the projected -> actual swap
+  // is immediate.
+  const budgetQuery = useQuery({
+    queryKey: ['claim-budget', claimId] as const,
+    queryFn: () => apiFetch<ClaimBudgetResponse>(`/v1/claims/${claimId}/budget`),
+  });
+
   const generate = useMutation({
     mutationFn: () =>
       apiFetch<{ status: string; job_id: string; message: string }>(
@@ -82,6 +116,9 @@ export function WizardStep5GenerateDocuments({
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['application-draft', claimId] });
+      // Budget will change once the drafter ledgers its row — refetch
+      // immediately so the consultant sees the spend land.
+      void qc.invalidateQueries({ queryKey: ['claim-budget', claimId] });
     },
   });
 
@@ -117,6 +154,7 @@ export function WizardStep5GenerateDocuments({
               </p>
             </div>
           </div>
+          {budgetQuery.data && <BudgetPanel budget={budgetQuery.data} />}
           <Button
             type="button"
             onClick={() => generate.mutate()}
@@ -273,6 +311,102 @@ function Field({ label, value }: { label: string; value: string }) {
         {label}
       </p>
       <p className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap">{value}</p>
+    </div>
+  );
+}
+
+/**
+ * Pre-flight budget panel — shows the consultant where this claim sits
+ * against the A$50 free-tier envelope BEFORE they trigger the ~A$0.78
+ * drafter call. Three states:
+ *
+ *   - free-tier with headroom: neutral, just informational
+ *   - free-tier near threshold (>=80% used or call would cross it):
+ *     amber warning, copy explains the post-call projection
+ *   - already over_quota: rose warning, copy explains cost+50% markup
+ *
+ * We do NOT disable the button per user direction ("don't refuse, just
+ * bill"). The consultant always has agency; we just make sure they see
+ * the cost.
+ */
+function BudgetPanel({ budget }: { budget: ClaimBudgetResponse }) {
+  const usedAud = (budget.used_aud_cents / 100).toFixed(2);
+  const budgetAud = (budget.budget_aud_cents / 100).toFixed(2);
+  const projectedAfter = budget.used_aud_cents + DRAFTER_ESTIMATED_AUD_CENTS;
+  const projectedAfterAud = (projectedAfter / 100).toFixed(2);
+  const wouldGoOver = projectedAfter > budget.budget_aud_cents;
+  const alreadyOver = budget.status === 'over_quota';
+  const pct =
+    budget.budget_aud_cents > 0
+      ? Math.min(100, Math.round((budget.used_aud_cents / budget.budget_aud_cents) * 100))
+      : 0;
+
+  // Decide the tone
+  const tone: 'neutral' | 'amber' | 'rose' = alreadyOver
+    ? 'rose'
+    : wouldGoOver || pct >= 80
+      ? 'amber'
+      : 'neutral';
+
+  const toneClasses: Record<typeof tone, string> = {
+    neutral: 'border-border bg-background/60 text-muted-foreground',
+    amber: 'border-amber-300 bg-amber-50 text-amber-900',
+    rose: 'border-rose-300 bg-rose-50 text-rose-900',
+  };
+  const barColor: Record<typeof tone, string> = {
+    neutral: 'bg-primary/70',
+    amber: 'bg-amber-500',
+    rose: 'bg-rose-500',
+  };
+
+  return (
+    <div
+      className={`rounded-md border p-3 space-y-2 ${toneClasses[tone]}`}
+      data-testid="wizard-step-5-budget-panel"
+      data-tone={tone}
+    >
+      <div className="flex items-center gap-2">
+        {tone !== 'neutral' && <AlertTriangle className="h-4 w-4 shrink-0" />}
+        <span className="font-mono text-[10px] uppercase tracking-widest shrink-0">
+          {alreadyOver ? 'over quota' : 'free tier'}
+        </span>
+        <div className="flex-1 h-1.5 rounded-full bg-border/60 overflow-hidden">
+          <div className={`h-full transition-all ${barColor[tone]}`} style={{ width: `${pct}%` }} />
+        </div>
+        <span className="font-mono tabular-nums text-[11px] shrink-0">
+          A${usedAud} / A${budgetAud}
+        </span>
+      </div>
+      {tone === 'amber' && (
+        <p className="text-[11px] leading-relaxed">
+          Heads-up: this draft is estimated at ~A${(DRAFTER_ESTIMATED_AUD_CENTS / 100).toFixed(2)}.
+          It would land you at A${projectedAfterAud} — {wouldGoOver ? 'over the' : 'close to the'}{' '}
+          A$
+          {budgetAud} free-tier envelope. Above the envelope, calls are billed to your account at
+          cost + 50%.
+        </p>
+      )}
+      {tone === 'rose' && (
+        <p className="text-[11px] leading-relaxed">
+          This claim is already over the A${budgetAud} free-tier envelope. This draft (~A$
+          {(DRAFTER_ESTIMATED_AUD_CENTS / 100).toFixed(2)} base) will be billed to your account at
+          cost + 50% — approximately A${((DRAFTER_ESTIMATED_AUD_CENTS * 1.5) / 100).toFixed(2)}.
+        </p>
+      )}
+      {budget.call_count > 0 && (
+        <p className="text-[10px] font-mono opacity-70">
+          {budget.call_count} call{budget.call_count === 1 ? '' : 's'} ledgered so far
+          {budget.agents.length > 0 && (
+            <>
+              {' · '}
+              {budget.agents
+                .slice(0, 3)
+                .map((a) => `${a.agent_name}: A$${(a.total_aud_cents / 100).toFixed(2)}`)
+                .join(' · ')}
+            </>
+          )}
+        </p>
+      )}
     </div>
   );
 }
