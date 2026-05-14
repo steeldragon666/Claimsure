@@ -21,6 +21,7 @@ import { registerActivityRegister } from './routes/activity-register.js';
 import { registerNarrative } from './routes/narrative.js';
 import { registerNarrativeAccept } from './routes/narrative-accept.js';
 import { registerPendingNarrative } from './routes/pending-narrative.js';
+import { registerPipelineStatus } from './routes/pipeline-status.js';
 import { registerPortalFields } from './routes/portal-fields.js';
 import { registerApplyRules } from './routes/apply-rules.js';
 import { registerArtefactLinks } from './routes/artefact-links.js';
@@ -331,6 +332,10 @@ export function buildApp(options: BuildAppOptions = {}): App {
   });
   app.register((instance, _opts, done) => {
     registerPendingNarrative(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerPipelineStatus(instance);
     done();
   });
   app.register((instance, _opts, done) => {
