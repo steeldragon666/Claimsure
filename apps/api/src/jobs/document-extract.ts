@@ -42,7 +42,28 @@ export async function registerDocumentExtractJob(boss: PgBoss): Promise<void> {
  */
 let analyzerInstance: ReturnType<typeof makeDocumentAnalyzer> | null = null;
 const getAnalyzer = () => {
-  if (!analyzerInstance) analyzerInstance = makeDocumentAnalyzer();
+  if (!analyzerInstance) {
+    // DIAGNOSTIC: surface what env the worker actually sees at runtime.
+    // Observed bug: stub analyzer running on production despite
+    // DOCUMENT_ANALYZER_IMPL=haiku set on the Railway service. Either the
+    // env var isn't propagating to the container, or some other code path
+    // is instantiating the stub. This log proves which.
+    console.log(
+      '[document-extract][DIAG] instantiating analyzer:',
+      JSON.stringify({
+        DOCUMENT_ANALYZER_IMPL: process.env.DOCUMENT_ANALYZER_IMPL ?? '<unset>',
+        CLASSIFIER_IMPL: process.env.CLASSIFIER_IMPL ?? '<unset>',
+        CI: process.env.CI ?? '<unset>',
+        NODE_ENV: process.env.NODE_ENV ?? '<unset>',
+        ANTHROPIC_KEY_PRESENT: !!process.env.ANTHROPIC_API_KEY,
+      }),
+    );
+    analyzerInstance = makeDocumentAnalyzer();
+    console.log(
+      '[document-extract][DIAG] analyzer constructor:',
+      analyzerInstance.constructor.name,
+    );
+  }
   return analyzerInstance;
 };
 
