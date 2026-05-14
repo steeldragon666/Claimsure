@@ -76,3 +76,8 @@ ALTER TABLE llm_token_usage FORCE  ROW LEVEL SECURITY;
 CREATE POLICY llm_token_usage_tenant_isolation
   ON llm_token_usage
   USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+-- NOTE: GRANT for cpa_app lives in migration 0084 (backfill), not here.
+-- We can't edit this file retroactively (append-only contract — already
+-- applied to live Supabase). 0084 handles llm_token_usage along with 8
+-- other tables that hit the same missing-default-privileges bug.
