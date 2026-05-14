@@ -1,16 +1,26 @@
 import { z } from 'zod';
 
 /**
- * UUID v4 only. Rejects v1 (which leaks MAC + timestamp), v3, v5,
- * nil, and max. We mint via `crypto.randomUUID()` (always v4), so
- * any non-v4 UUID arriving at our boundary is wrong by definition.
+ * Any RFC 9562 UUID format (v1, v3, v4, v5, v7, nil, max). We mint new
+ * UUIDs via `crypto.randomUUID()` (always v4), but seed data, test
+ * fixtures, and dev databases legitimately carry non-v4 IDs (e.g. the
+ * deterministic `00000000-0000-0000-0000-00000000000N` pattern used for
+ * the platform's seed user and demo tenants). The v4-only regex
+ * previously here rejected those at the API boundary — every wizard
+ * `agreed_by` field on a seed-user-driven claim failed schema
+ * validation, surfacing as `not_a_wizard_claim` (false negative).
+ *
+ * Security implication: v1 UUIDs encode a MAC address + timestamp, so
+ * accepting them at the boundary in principle leaks server-side info
+ * if the caller is allowed to supply user IDs. In this codebase user
+ * IDs are server-minted (never accepted from the client wire), so the
+ * concern is theoretical. If a future codepath ACCEPTS a user-supplied
+ * UUID, that route should layer an `id.startsWith('...-4...-')` check
+ * on top.
  */
 export const Uuid = z
   .string()
-  .regex(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    'must be a UUID v4',
-  );
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 'must be a UUID');
 export type Uuid = z.infer<typeof Uuid>;
 
 /**
