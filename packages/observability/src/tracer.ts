@@ -14,19 +14,41 @@ export interface TracerInit {
  * Initialise the OpenTelemetry tracer + auto-instrumentations.
  *
  * Reads GRAFANA_OTLP_ENDPOINT (e.g. https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp),
- * GRAFANA_OTLP_USERNAME, GRAFANA_OTLP_PASSWORD from env. If endpoint is unset, falls
- * back to the OTLPTraceExporter's own default (localhost:4318) — useful for unit
- * tests where a real collector isn't running.
+ * GRAFANA_OTLP_USERNAME, GRAFANA_OTLP_PASSWORD from env.
+ *
+ * NO-OP MODE: if GRAFANA_OTLP_ENDPOINT is unset, returns an inert NodeSDK
+ * without starting any exporter. The previous behaviour — falling back to
+ * the OTLPTraceExporter's localhost:4318 default — crashed any deployment
+ * without a sidecar collector (Railway, Fly, Cloud Run, etc.) because the
+ * auto-instrumentation patched pg-boss → pg-boss's instrumented pg client
+ * propagated the exporter's ECONNREFUSED on first DB call.
+ *
+ * Also respects `OTEL_SDK_DISABLED=true` as an override for environments
+ * that want to force-disable OTel even when an endpoint is configured.
  *
  * Returns the NodeSDK so callers can `await sdk.shutdown()` on graceful exit.
  */
 export function startTracing(init: TracerInit): NodeSDK {
+  const endpoint = process.env.GRAFANA_OTLP_ENDPOINT;
+  const disabled = process.env.OTEL_SDK_DISABLED === 'true';
+
+  // No collector → no exporter → no SDK start. Returning an unstarted NodeSDK
+  // keeps the return-type contract (callers can still `await sdk.shutdown()`,
+  // which is a no-op on an unstarted SDK).
+  if (!endpoint || disabled) {
+    return new NodeSDK({
+      resource: new Resource({
+        [ATTR_SERVICE_NAME]: init.serviceName,
+        [ATTR_SERVICE_VERSION]: init.serviceVersion,
+      }),
+    });
+  }
+
   // Surface internal OTel warnings + errors to stderr. Without this, exporter
   // failures (network, auth) retry silently. WARN level avoids spam from
-  // routine debug-level diagnostics.
+  // routine debug-level diagnostics. Only meaningful when SDK actually runs.
   diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.WARN);
 
-  const endpoint = process.env.GRAFANA_OTLP_ENDPOINT;
   const username = process.env.GRAFANA_OTLP_USERNAME;
   const password = process.env.GRAFANA_OTLP_PASSWORD;
 
@@ -36,9 +58,7 @@ export function startTracing(init: TracerInit): NodeSDK {
     headers.Authorization = `Basic ${credentials}`;
   }
 
-  const exporter = endpoint
-    ? new OTLPTraceExporter({ url: `${endpoint}/v1/traces`, headers })
-    : new OTLPTraceExporter();
+  const exporter = new OTLPTraceExporter({ url: `${endpoint}/v1/traces`, headers });
 
   const sdk = new NodeSDK({
     resource: new Resource({
