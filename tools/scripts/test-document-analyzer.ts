@@ -65,7 +65,7 @@ async function main(): Promise<void> {
 
   console.log('  → calling analyze()…');
   const t0 = Date.now();
-  const output = await analyzer.analyze({
+  const result = await analyzer.analyze({
     filename: 'research-log-sprint-11.md',
     mime_type: 'text/markdown',
     raw_text: FIXTURE_RAW_TEXT,
@@ -79,6 +79,7 @@ async function main(): Promise<void> {
     ],
   });
   const elapsedMs = Date.now() - t0;
+  const output = result.output;
 
   console.log(`  ← analyze() returned in ${elapsedMs}ms`);
   console.log('');
@@ -86,6 +87,11 @@ async function main(): Promise<void> {
   console.log(`  activities       : ${output.activities.length}`);
   console.log(`  invoices         : ${output.invoices.length}`);
   console.log(`  document_summary : ${output.document_summary.length} chars`);
+  if (result.usage) {
+    console.log(
+      `  usage            : ${result.usage.tokens_in} in / ${result.usage.tokens_out} out (${result.usage.model})`,
+    );
+  }
   console.log('');
   console.log('=== validated output ===');
   console.log(JSON.stringify(output, null, 2));

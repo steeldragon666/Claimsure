@@ -7,16 +7,20 @@
  * obviously not produced — every field is short, descriptive of the
  * stub nature.
  */
-import type { ApplicationDraft, ApplicationDrafter, ApplicationDrafterInput } from './types.js';
+import type {
+  ApplicationDrafter,
+  ApplicationDrafterInput,
+  ApplicationDrafterResult,
+} from './types.js';
 
 export class StubApplicationDrafter implements ApplicationDrafter {
   // eslint-disable-next-line @typescript-eslint/require-await
-  async draft(input: ApplicationDrafterInput): Promise<ApplicationDraft> {
+  async draft(input: ApplicationDrafterInput): Promise<ApplicationDrafterResult> {
     const proposalsCount = input.events.reduce(
       (n, e) => n + (e.extracted_content?.activities.length ?? 0),
       0,
     );
-    return {
+    const output: ApplicationDrafterResult['output'] = {
       applicant: {
         name: input.applicant.name,
         abn: input.applicant.abn,
@@ -80,5 +84,6 @@ export class StubApplicationDrafter implements ApplicationDrafter {
       compliance_notes:
         'Stub drafter — not for submission. Set APPLICATION_DRAFTER_IMPL=sonnet in production.',
     };
+    return { output, usage: null };
   }
 }

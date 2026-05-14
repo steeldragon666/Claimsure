@@ -2,7 +2,7 @@ import { getAnthropicClient } from '../runtime/anthropic-client.js';
 import { getPrompt } from '../runtime/prompt-registry.js';
 import { callWithToolUse } from '../runtime/tool-use.js';
 import './prompts/analyze-document@1.0.0.js'; // side-effect: registers the prompt
-import type { DocumentAnalyzer, DocumentAnalyzerInput, DocumentAnalyzerOutput } from './types.js';
+import type { DocumentAnalyzer, DocumentAnalyzerInput, DocumentAnalyzerResult } from './types.js';
 import type { AnalyzeDocumentToolOutput } from './prompts/analyze-document@1.0.0.js';
 
 const MODEL = process.env.DOCUMENT_ANALYZER_MODEL ?? 'claude-haiku-4-5';
@@ -26,7 +26,7 @@ const MAX_TEXT_CHARS = 60_000;
  * analyze() call; without it `getPrompt(PROMPT_KEY)` throws.
  */
 export class HaikuDocumentAnalyzer implements DocumentAnalyzer {
-  async analyze(input: DocumentAnalyzerInput): Promise<DocumentAnalyzerOutput> {
+  async analyze(input: DocumentAnalyzerInput): Promise<DocumentAnalyzerResult> {
     // DIAG: prove this class is actually running for each call.
     const callId = Math.random().toString(36).slice(2, 8);
     console.log(
@@ -68,7 +68,7 @@ export class HaikuDocumentAnalyzer implements DocumentAnalyzer {
       truncatedText,
     ].join('\n');
 
-    const { output } = await callWithToolUse(getAnthropicClient(), {
+    const { output, tokens_in, tokens_out } = await callWithToolUse(getAnthropicClient(), {
       model: MODEL,
       system: prompt.system,
       user: userMessage,
@@ -77,9 +77,12 @@ export class HaikuDocumentAnalyzer implements DocumentAnalyzer {
     });
 
     return {
-      activities: output.activities,
-      invoices: output.invoices,
-      document_summary: output.document_summary,
+      output: {
+        activities: output.activities,
+        invoices: output.invoices,
+        document_summary: output.document_summary,
+      },
+      usage: { model: MODEL, tokens_in, tokens_out },
     };
   }
 }

@@ -189,7 +189,15 @@ export async function getClaimBudgetStatus(
   };
 }
 
-/** Tagged-template SQL fn (postgres-js shape) without a hard dep on @cpa/db. */
+/**
+ * Tagged-template SQL fn (postgres-js shape) without a hard dep on @cpa/db.
+ *
+ * The real postgres-js `Sql` type returns a `PendingQuery` (Promise +
+ * helpers like `.values()`); this narrower shape captures only what the
+ * ledger needs. Callers passing `privilegedSql` directly should cast via
+ * `privilegedSql as unknown as TaggedSql` — the cast is the documented
+ * escape hatch for postgres-js's complex generic helpers.
+ */
 export type TaggedSql = <T = unknown>(
   strings: TemplateStringsArray,
   ...values: unknown[]

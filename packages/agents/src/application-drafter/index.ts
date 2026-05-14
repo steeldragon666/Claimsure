@@ -14,6 +14,8 @@ export type {
   ApplicationDraft,
   ApplicationDrafter,
   ApplicationDrafterInput,
+  ApplicationDrafterResult,
+  ApplicationDrafterUsage,
   CoreActivityRecord,
   SupportingActivityRecord,
   HypothesisRegisterEntry as HypothesisRegisterEntryType,

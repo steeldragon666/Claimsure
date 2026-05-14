@@ -8,9 +8,11 @@
 
 export { makeDocumentAnalyzer } from './factory.js';
 export type {
+  AgentUsage,
   DocumentAnalyzer,
   DocumentAnalyzerInput,
   DocumentAnalyzerOutput,
+  DocumentAnalyzerResult,
   ProposedActivityExtract,
   ProposedInvoiceExtract,
 } from './types.js';

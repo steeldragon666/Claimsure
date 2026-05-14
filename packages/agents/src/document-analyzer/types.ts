@@ -98,6 +98,28 @@ export type DocumentAnalyzerInput = {
   }>;
 };
 
+/**
+ * Token usage report attached to every real (non-stub) agent call.
+ *
+ * Stub implementations return `null` here — they don't consume tokens
+ * so there's nothing to ledger.
+ *
+ * The model id is captured at call time (NOT a constant) because env
+ * overrides like DOCUMENT_ANALYZER_MODEL can swap the model per-deploy;
+ * the ledger row must record what was ACTUALLY billed, not what the
+ * code defaults to.
+ */
+export type AgentUsage = {
+  model: string;
+  tokens_in: number;
+  tokens_out: number;
+};
+
+export interface DocumentAnalyzerResult {
+  output: DocumentAnalyzerOutput;
+  usage: AgentUsage | null;
+}
+
 export interface DocumentAnalyzer {
-  analyze(input: DocumentAnalyzerInput): Promise<DocumentAnalyzerOutput>;
+  analyze(input: DocumentAnalyzerInput): Promise<DocumentAnalyzerResult>;
 }

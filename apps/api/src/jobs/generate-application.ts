@@ -22,7 +22,12 @@
  *   poll:    GET /v1/claims/:id/application-draft returns status + data
  */
 import type { PgBoss } from 'pg-boss';
-import { makeApplicationDrafter, type ApplicationDrafterInput } from '@cpa/agents';
+import {
+  makeApplicationDrafter,
+  recordUsage,
+  type ApplicationDrafterInput,
+  type TaggedSql,
+} from '@cpa/agents';
 import { privilegedSql } from '@cpa/db/client';
 
 export const GENERATE_APPLICATION_QUEUE = 'generate-application';
@@ -175,9 +180,9 @@ export async function runGenerateApplicationJob(input: GenerateApplicationJobInp
     }),
   };
 
-  let draft;
+  let drafterResult;
   try {
-    draft = await getDrafter().draft(input2);
+    drafterResult = await getDrafter().draft(input2);
   } catch (err) {
     console.error(
       '[generate-application] drafter threw:',
@@ -190,6 +195,37 @@ export async function runGenerateApplicationJob(input: GenerateApplicationJobInp
       err instanceof Error ? err.message : 'unknown',
     ).catch(() => {});
     return;
+  }
+
+  const draft = drafterResult.output;
+
+  // Ledger the token usage. This is the call that CAN push a claim over
+  // the A$50 envelope — a typical draft is ~$0.50 USD (≈A$0.78), worst
+  // case ~$1.50 (≈A$2.33). recordUsage decides free_tier vs billable by
+  // comparing the claim's running total against the budget.
+  //
+  // We ledger AFTER the successful draft is in hand (not before) so a
+  // failed/aborted draft doesn't burn budget. The Anthropic call already
+  // succeeded by this point so the tokens were definitely consumed.
+  if (drafterResult.usage) {
+    const recorded = await recordUsage(privilegedSql as unknown as TaggedSql, {
+      tenant_id,
+      claim_id,
+      subject_tenant_id,
+      agent_name: 'application-drafter',
+      model: drafterResult.usage.model,
+      tokens_in: drafterResult.usage.tokens_in,
+      tokens_out: drafterResult.usage.tokens_out,
+    });
+    console.log(
+      '[generate-application] ledgered usage:',
+      JSON.stringify({
+        status: recorded.status,
+        cost_aud_cents: recorded.cost_aud_cents,
+        claim_total_after_cents: recorded.claim_total_after_cents,
+        remaining_aud_cents: recorded.remaining_aud_cents,
+      }),
+    );
   }
 
   // Persist the result. Try column-write first; if it errors, fall back

@@ -27,15 +27,19 @@ import { getAnthropicClient } from '../runtime/anthropic-client.js';
 import { getPrompt } from '../runtime/prompt-registry.js';
 import { callWithToolUse } from '../runtime/tool-use.js';
 import './prompts/draft-application@1.0.0.js'; // side-effect: registers
-import type { ApplicationDraft, ApplicationDrafter, ApplicationDrafterInput } from './types.js';
+import type {
+  ApplicationDrafter,
+  ApplicationDrafterInput,
+  ApplicationDrafterResult,
+} from './types.js';
 
 const MODEL = process.env.APPLICATION_DRAFTER_MODEL ?? 'claude-sonnet-4-5';
 const PROMPT_KEY = 'draft-application@1.0.0';
 const MAX_TOKENS = 32_000;
 
 export class SonnetApplicationDrafter implements ApplicationDrafter {
-  async draft(input: ApplicationDrafterInput): Promise<ApplicationDraft> {
-    const prompt = getPrompt<ApplicationDraft>(PROMPT_KEY);
+  async draft(input: ApplicationDrafterInput): Promise<ApplicationDrafterResult> {
+    const prompt = getPrompt<ApplicationDrafterResult['output']>(PROMPT_KEY);
 
     // DIAG: surface model + input volume for production runs. These are
     // expensive calls (~60s, ~$0.50 per draft) — observability matters.
@@ -77,7 +81,10 @@ export class SonnetApplicationDrafter implements ApplicationDrafter {
       }),
     );
 
-    return output;
+    return {
+      output,
+      usage: { model: MODEL, tokens_in, tokens_out },
+    };
   }
 }
 

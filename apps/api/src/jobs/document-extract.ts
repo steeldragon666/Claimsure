@@ -1,6 +1,6 @@
 import type { PgBoss } from 'pg-boss';
 import { privilegedSql } from '@cpa/db/client';
-import { makeDocumentAnalyzer } from '@cpa/agents';
+import { makeDocumentAnalyzer, recordUsage, type TaggedSql } from '@cpa/agents';
 
 /**
  * Queue name used by both the sender (route) and the subscriber (this worker).
@@ -154,9 +154,9 @@ export async function runDocumentExtractJob(input: DocumentExtractJobInput): Pro
   `;
 
   // Step 5: run analyzer.
-  let result;
+  let analyzerResult;
   try {
-    result = await getAnalyzer().analyze({
+    analyzerResult = await getAnalyzer().analyze({
       filename: filename || 'document',
       mime_type: mimeType || 'application/octet-stream',
       raw_text: extractedText,
@@ -179,6 +179,26 @@ export async function runDocumentExtractJob(input: DocumentExtractJobInput): Pro
        WHERE id = ${event_id}
     `;
     return;
+  }
+
+  const result = analyzerResult.output;
+
+  // Step 5b: ledger the token usage. Extraction runs BEFORE evidence is
+  // bound to a specific claim (claim_id is not in the job payload), so
+  // we record with claim_id=null — these calls bill against the tenant's
+  // global pool, not any one claim's A$50 envelope. The ledger row is
+  // forensic-grade regardless; if we later decide to associate extraction
+  // costs to a specific claim, we can do so by joining via subject_tenant_id.
+  if (analyzerResult.usage) {
+    await recordUsage(privilegedSql as unknown as TaggedSql, {
+      tenant_id,
+      claim_id: null,
+      subject_tenant_id,
+      agent_name: 'document-analyzer',
+      model: analyzerResult.usage.model,
+      tokens_in: analyzerResult.usage.tokens_in,
+      tokens_out: analyzerResult.usage.tokens_out,
+    });
   }
 
   // Step 6: persist result.

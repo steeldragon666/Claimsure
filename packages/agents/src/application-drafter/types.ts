@@ -216,6 +216,25 @@ export type ApplicationDrafterInput = {
   }>;
 };
 
+/**
+ * Token usage from the drafter call. The drafter is the single most
+ * expensive agent in the system (~$0.50/call typical, ~$1.50 worst case)
+ * so the usage record drives both the per-claim budget gate and the
+ * "you're approaching the A$50 envelope" UX banner.
+ *
+ * `null` from stub implementations only.
+ */
+export type ApplicationDrafterUsage = {
+  model: string;
+  tokens_in: number;
+  tokens_out: number;
+};
+
+export interface ApplicationDrafterResult {
+  output: ApplicationDraft;
+  usage: ApplicationDrafterUsage | null;
+}
+
 export interface ApplicationDrafter {
-  draft(input: ApplicationDrafterInput): Promise<ApplicationDraft>;
+  draft(input: ApplicationDrafterInput): Promise<ApplicationDrafterResult>;
 }
