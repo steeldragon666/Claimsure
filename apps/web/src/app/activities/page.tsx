@@ -17,6 +17,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Beaker, FileText, TrendingUp, AlertCircle, Loader2 } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
+import { InsightsStrip } from '@/components/insights-strip';
 import { apiFetch } from '@/lib/api';
 
 interface ProposedActivity {
@@ -101,6 +102,8 @@ function ActivitiesContent() {
           a registered activity register.
         </p>
       </header>
+
+      <InsightsStrip scope="activities" />
 
       {summary.total > 0 && (
         <section

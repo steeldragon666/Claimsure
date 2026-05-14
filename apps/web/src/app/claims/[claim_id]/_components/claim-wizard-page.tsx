@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { Claim } from '@cpa/schemas';
 import { PipelineStatusBanner } from '@/components/pipeline-status-banner';
+import { InsightsStrip } from '@/components/insights-strip';
 import { getWorkflow } from '../_lib/workflow-client';
 import type { WorkflowResponse } from '../_lib/workflow-client';
 import { WizardStepper } from './wizard-stepper';
@@ -108,6 +109,8 @@ export function ClaimWizardPage({
       />
 
       <PipelineStatusBanner subjectTenantId={subjectTenantId} />
+
+      <InsightsStrip scope="wizard" subjectTenantId={subjectTenantId} />
 
       {currentStep === 1 && (
         <WizardStep1UploadEvidence
