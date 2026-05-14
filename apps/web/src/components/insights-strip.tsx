@@ -44,6 +44,26 @@ interface InsightsResponse {
   generated_at: string;
   scope: string;
   subject_tenant_id: string | null;
+  /**
+   * Budget snapshot for the active claim (null when no claim attached or
+   * insights weren't generative). Drives the "$X.XX of $50 used" footer
+   * and the over-quota banner.
+   */
+  budget: {
+    claim_id: string | null;
+    used_aud_cents: number;
+    remaining_aud_cents: number;
+    budget_aud_cents: number;
+    status: 'free_tier' | 'over_quota';
+  } | null;
+  generative_status:
+    | 'fresh'
+    | 'cached'
+    | 'no_claim'
+    | 'over_quota'
+    | 'budget_billable'
+    | 'no_evidence'
+    | 'disabled';
 }
 
 export function InsightsStrip({
@@ -67,6 +87,8 @@ export function InsightsStrip({
   });
 
   const insights = query.data?.insights ?? [];
+  const budget = query.data?.budget ?? null;
+  const generativeStatus = query.data?.generative_status ?? 'disabled';
 
   // Auto-rotate the featured card every 12 sec unless the user has pinned one.
   useEffect(() => {
@@ -122,6 +144,19 @@ export function InsightsStrip({
         </div>
       </div>
 
+      {/* Budget banner — only when generative is active. Two states:
+          billable (over A$50) and free-tier-progress. Cached + disabled +
+          no_claim states emit no banner so the strip stays quiet for
+          tenant-wide / first-run views. */}
+      {budget && (generativeStatus === 'fresh' || generativeStatus === 'budget_billable') && (
+        <BudgetFooter
+          usedCents={budget.used_aud_cents}
+          remainingCents={budget.remaining_aud_cents}
+          budgetCents={budget.budget_aud_cents}
+          overQuota={budget.status === 'over_quota'}
+        />
+      )}
+
       {/* Strip of all insights — click to pin */}
       <ul className="flex items-stretch gap-0 divide-x divide-border">
         {insights.map((insight, i) => {
@@ -162,5 +197,77 @@ export function InsightsStrip({
         })}
       </ul>
     </section>
+  );
+}
+
+/**
+ * Footer strip that surfaces the per-claim A$50 LLM budget.
+ *
+ * Two visual states:
+ *   - Under quota: progress bar tinted neutral, "$X.YY of $50 budget used"
+ *     copy. Bar goes amber at 70%, rose at 90%.
+ *   - Over quota: rose banner — "Generative insights are now billable
+ *     (cost + 50% markup against your account)". The bar stays at 100%.
+ *
+ * Conscious choice: we don't show a "stop insights" button here. The
+ * user explicitly chose generative + cost+50% over hard-refusal, so the
+ * banner is purely informational. If they want to stop, the env var
+ * INSIGHTS_GEN_ENABLED=0 disables across the deploy.
+ */
+function BudgetFooter({
+  usedCents,
+  remainingCents,
+  budgetCents,
+  overQuota,
+}: {
+  usedCents: number;
+  remainingCents: number;
+  budgetCents: number;
+  overQuota: boolean;
+}) {
+  const usedAud = (usedCents / 100).toFixed(2);
+  const budgetAud = (budgetCents / 100).toFixed(2);
+  const overCents = Math.max(0, -remainingCents);
+  const overAud = (overCents / 100).toFixed(2);
+  const pct = budgetCents > 0 ? Math.min(100, Math.round((usedCents / budgetCents) * 100)) : 0;
+
+  const barColor = overQuota
+    ? 'bg-rose-500'
+    : pct >= 90
+      ? 'bg-rose-500'
+      : pct >= 70
+        ? 'bg-amber-500'
+        : 'bg-primary/70';
+
+  return (
+    <div
+      className={[
+        'border-t border-border px-4 py-2 text-[11px]',
+        overQuota ? 'bg-rose-50 text-rose-900' : 'bg-muted/30 text-muted-foreground',
+      ].join(' ')}
+      data-testid="insights-budget-footer"
+    >
+      <div className="flex items-center gap-3">
+        <span className="font-mono uppercase tracking-widest shrink-0">
+          {overQuota ? 'over quota' : 'free tier'}
+        </span>
+        <div className="flex-1 h-1.5 rounded-full bg-border/70 overflow-hidden">
+          <div
+            className={['h-full transition-all', barColor].join(' ')}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="font-mono tabular-nums shrink-0">
+          A${usedAud} / A${budgetAud}
+        </span>
+      </div>
+      {overQuota && (
+        <p className="mt-1 leading-relaxed">
+          Generative insights are now billable to your consultant account at cost + 50% markup (A$
+          {overAud} over the per-claim envelope so far). Continuous insight polling implies the
+          system is being tested — disable in deploy env to halt.
+        </p>
+      )}
+    </div>
   );
 }

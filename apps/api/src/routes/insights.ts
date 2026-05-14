@@ -24,6 +24,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from '@cpa/auth';
 import { sql } from '@cpa/db/client';
+import { maybeGenerateInsights } from '../lib/generative-insights.js';
 
 type InsightCategory =
   | 'throughput'
@@ -50,6 +51,31 @@ interface InsightsResponse {
   generated_at: string;
   scope: string;
   subject_tenant_id: string | null;
+  /**
+   * Budget snapshot for the active claim (null when no claim attached or
+   * insights weren't generative this call). Used by the InsightsStrip to
+   * surface "A$X.YY of A$50 used" and a banner when over-quota.
+   */
+  budget: {
+    claim_id: string | null;
+    used_aud_cents: number;
+    remaining_aud_cents: number;
+    budget_aud_cents: number;
+    status: 'free_tier' | 'over_quota';
+  } | null;
+  /**
+   * Tells the UI whether the generative slice ran fresh, was cached, was
+   * skipped (no_claim / no_evidence), or was billable. Drives the banner
+   * copy in InsightsStrip.
+   */
+  generative_status:
+    | 'fresh'
+    | 'cached'
+    | 'no_claim'
+    | 'over_quota'
+    | 'budget_billable'
+    | 'no_evidence'
+    | 'disabled';
 }
 
 export function registerInsights(app: FastifyInstance): void {
@@ -161,7 +187,7 @@ export function registerInsights(app: FastifyInstance): void {
     const highConfidence = parseInt(stats.high_confidence, 10);
     const distinctKinds = parseInt(stats.distinct_event_kinds, 10);
 
-    const insights = buildInsights({
+    const deterministic = buildInsights({
       totalEvents,
       completeEvents,
       activityProposals,
@@ -174,14 +200,94 @@ export function registerInsights(app: FastifyInstance): void {
       scope,
     });
 
+    // Generative pass — gated by INSIGHTS_GEN_ENABLED env (default on)
+    // and the per-claim A$50 budget. The route file is the boundary
+    // because the budget decision is route-scoped, not agent-scoped.
+    const generativeEnabled = (process.env.INSIGHTS_GEN_ENABLED ?? '1') !== '0';
+    let generativeStatus: InsightsResponse['generative_status'] = 'disabled';
+    let budgetSnapshot: InsightsResponse['budget'] = null;
+    let generativeInsights: Insight[] = [];
+
+    if (generativeEnabled) {
+      const evidenceSummary = buildEvidenceSummary({
+        totalEvents,
+        completeEvents,
+        activityProposals,
+        invoiceProposals,
+        coreCount,
+        supportingCount,
+        avgConfidence,
+        highConfidence,
+        distinctKinds,
+        scope,
+      });
+      const genResult = await maybeGenerateInsights(
+        tenantId,
+        subjectTenantId,
+        scope,
+        evidenceSummary,
+      );
+      generativeStatus = genResult.status;
+      if (genResult.budget) {
+        budgetSnapshot = {
+          ...genResult.budget,
+          status: genResult.budget.remaining_aud_cents <= 0 ? 'over_quota' : 'free_tier',
+        };
+      }
+      // Promote generative insights to the FRONT of the list with rank 0
+      // (highest priority) — they're the freshest signal. Map the
+      // GenerativeInsight shape to the wire Insight shape, adding a
+      // source tag the UI uses to badge them as AI-generated.
+      generativeInsights = genResult.insights.map((g, i) => ({
+        id: `gen-${g.id}`,
+        rank: i,
+        category: g.category,
+        icon: g.icon,
+        headline: g.headline,
+        detail: g.detail,
+        source:
+          genResult.status === 'cached'
+            ? 'generative: claude-sonnet-4-5 (cached)'
+            : 'generative: claude-sonnet-4-5',
+      }));
+    }
+
+    // Final ranking: generative first (most prominent in the rotation),
+    // then the deterministic stack. Cap at 5 — the strip is a short feed,
+    // not a wall of text.
+    const insights = [...generativeInsights, ...deterministic]
+      .map((ins, i) => ({ ...ins, rank: i + 1 }))
+      .slice(0, 5);
+
     const response: InsightsResponse = {
       insights,
       generated_at: new Date().toISOString(),
       scope,
       subject_tenant_id: subjectTenantId,
+      budget: budgetSnapshot,
+      generative_status: generativeStatus,
     };
     return reply.status(200).send(response);
   });
+}
+
+/**
+ * Compact text summary of the evidence state fed into the Sonnet
+ * prompt. ~600 chars max — small enough that prompt tokens stay tiny,
+ * specific enough that the model can produce findings anchored in
+ * actual numbers rather than generic platitudes.
+ */
+function buildEvidenceSummary(s: StatBundle): string {
+  if (s.totalEvents === 0) {
+    return `Empty claim — no evidence uploaded yet. Scope: ${s.scope}.`;
+  }
+  return [
+    `Evidence: ${s.completeEvents}/${s.totalEvents} documents classified by Claude Haiku across ${s.distinctKinds} distinct R&D event kinds.`,
+    `Activities: ${s.activityProposals} proposed (${s.coreCount} core, ${s.supportingCount} supporting).`,
+    `Confidence: avg ${s.avgConfidence.toFixed(2)}, ${s.highConfidence} proposals ≥0.85.`,
+    `Invoices: ${s.invoiceProposals} extracted.`,
+    `User is currently viewing the "${s.scope}" page.`,
+  ].join(' ');
 }
 
 interface StatBundle {
