@@ -111,6 +111,11 @@ export async function runDocumentExtractJob(input: DocumentExtractJobInput): Pro
   // The CHECK constraint for 'processing' was added in migration
   // 0083_event_extraction_processing_state.sql.
   const lockResult = await sql.begin(async (tx) => {
+    // Set the tenant GUC so RLS lets us see the row. The @cpa/db
+    // sql.begin wrapper auto-runs SET LOCAL ROLE cpa_app first, so
+    // we now need the tenant context too — otherwise RLS filters
+    // the event row to zero and the worker bails as 'not_found'.
+    await tx`SELECT set_config('app.current_tenant_id', ${tenant_id}, true)`;
     await tx`SELECT pg_advisory_xact_lock(hashtext(${event_id})::bigint)`;
     const rows = await tx<{ id: string; payload: unknown; extraction_status: string | null }[]>`
       SELECT id, payload, extraction_status
