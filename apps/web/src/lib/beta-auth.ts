@@ -69,3 +69,20 @@ export async function verifyToken(
   }
   return { email };
 }
+
+const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+
+/**
+ * Mint a 30-day session JWT (the cookie value).
+ */
+export async function mintSessionToken(email: string, secret: string): Promise<string> {
+  return await new SignJWT({})
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuer(ISS)
+    .setSubject(email)
+    .setIssuedAt()
+    .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
+    .setNotBefore('0s')
+    .setAudience('beta-session')
+    .sign(secretToKey(secret));
+}

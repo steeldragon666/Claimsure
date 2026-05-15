@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAllowlist, mintMagicLinkToken, verifyToken } from './beta-auth.js';
+import { parseAllowlist, mintMagicLinkToken, mintSessionToken, verifyToken } from './beta-auth.js';
 
 test('parseAllowlist: empty string returns empty set', () => {
   assert.deepEqual([...parseAllowlist('')], []);
@@ -40,4 +40,20 @@ test('verifyToken: tampered token rejected', async () => {
 test('verifyToken: wrong secret rejected', async () => {
   const token = await mintMagicLinkToken('alice@firm.com', TEST_SECRET);
   await assert.rejects(verifyToken(token, 'beta-link', 'b'.repeat(64)));
+});
+
+test('mintSessionToken + verifyToken(beta-session) round-trip succeeds', async () => {
+  const token = await mintSessionToken('alice@firm.com', TEST_SECRET);
+  const result = await verifyToken(token, 'beta-session', TEST_SECRET);
+  assert.equal(result.email, 'alice@firm.com');
+});
+
+test('verifyToken rejects a magic-link token presented as a session', async () => {
+  const linkToken = await mintMagicLinkToken('alice@firm.com', TEST_SECRET);
+  await assert.rejects(verifyToken(linkToken, 'beta-session', TEST_SECRET));
+});
+
+test('verifyToken rejects a session token presented as a magic link', async () => {
+  const sessionToken = await mintSessionToken('alice@firm.com', TEST_SECRET);
+  await assert.rejects(verifyToken(sessionToken, 'beta-link', TEST_SECRET));
 });
