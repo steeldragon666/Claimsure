@@ -311,7 +311,7 @@ export function registerCompliance(app: FastifyInstance): void {
         VALUES (
           ${id}, ${tenantId}, ${body.subject_tenant_id}, ${body.fy_label},
           ${body.facility_name}, ${body.address}, ${body.is_owned},
-          ${JSON.stringify(body.used_for_activity_ids)}::text::jsonb
+          ${body.used_for_activity_ids}::uuid[]
         )
         RETURNING *
       `;
@@ -683,20 +683,24 @@ export function registerCompliance(app: FastifyInstance): void {
 
         // Activity scopes to its subject via `claim.subject_tenant_id` —
         // there's no `activity.subject_tenant_id` column.
+        //
+        // TODO(p4-b-counts): claimed_amount is hardcoded to '0' until the
+        // expenditure→activity mapping schema lands. The original query
+        // joined `expenditure e ON e.activity_id = a.id` but `expenditure`
+        // has no `activity_id` column (and the SUM referenced
+        // `e.amount_aud` which is actually `total_amount`). Same gap as
+        // claims.ts:319 — both surfaces will be wired up together once
+        // expenditure_line.activity_id mapping lands.
         const activityRows = await tx<ActivityExpRow[]>`
           SELECT
             a.id AS activity_id,
             a.title,
-            COALESCE(SUM(e.amount_aud), 0)::text AS claimed_amount
+            '0'::text AS claimed_amount
           FROM activity a
           JOIN claim c ON c.id = a.claim_id AND c.tenant_id = a.tenant_id
-          LEFT JOIN expenditure e
-            ON e.activity_id = a.id
-            AND e.tenant_id = ${tenantId}
           WHERE c.subject_tenant_id = ${subject_tenant_id}
             AND a.fy_label = ${fy}
             AND a.tenant_id = ${tenantId}
-          GROUP BY a.id, a.title
           ORDER BY a.title ASC
         `;
 

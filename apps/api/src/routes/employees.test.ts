@@ -16,8 +16,14 @@ const SUBJECT_B1 = '00000000-0000-4000-8000-0000000f6023';
 const EMPLOYEE_PRESEED = '00000000-0000-4000-8000-0000000f6030';
 
 const cleanup = async (): Promise<void> => {
-  // FK-safe cleanup: magic_link_token → subject_tenant_employee → subject_tenant
-  // → tenant_user → user → tenant.
+  // FK-safe cleanup: events first (event.subject_tenant_id FKs to
+  // subject_tenant), then magic_link_token → subject_tenant_employee →
+  // subject_tenant → tenant_user → user → tenant.
+  //
+  // The event delete handles stale events from prior failed runs that
+  // would otherwise block the subject_tenant delete on FK constraint
+  // event_subject_tenant_id_subject_tenant_id_fk.
+  await privilegedSql`DELETE FROM event WHERE tenant_id IN (${TENANT_A}, ${TENANT_B})`;
   await privilegedSql`
     DELETE FROM magic_link_token WHERE employee_id IN (
       SELECT id FROM subject_tenant_employee WHERE tenant_id IN (${TENANT_A}, ${TENANT_B})
