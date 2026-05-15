@@ -24,6 +24,13 @@ test('GET /v1/whoami: 401 when no session cookie', async () => {
 });
 
 test('GET /v1/whoami: 200 with user + tenant info when authenticated', async () => {
+  // Pre-clean any stale rows from a previous failed run, then seed
+  // fresh. Without this, the seed INSERTs trip tenant_pkey when a
+  // prior run died mid-test and never reached the finally-clause.
+  await privilegedSql`DELETE FROM tenant_user WHERE user_id = ${USER_ID}`;
+  await sql`DELETE FROM "user" WHERE id = ${USER_ID}`;
+  await sql`DELETE FROM tenant WHERE id = ${TENANT_ID}`;
+
   // Seed: a tenant + user + tenant_user membership (privileged path)
   await sql`INSERT INTO tenant (id, name, slug, primary_idp)
             VALUES (${TENANT_ID}, 'Whoami Firm', 'whoami-firm', 'mixed')`;
