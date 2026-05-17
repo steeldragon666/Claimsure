@@ -31,6 +31,7 @@ import { registerApplyRules } from './routes/apply-rules.js';
 import { registerArtefactLinks } from './routes/artefact-links.js';
 import { registerGoogleAuth } from './routes/auth/google.js';
 import { registerMicrosoftAuth } from './routes/auth/microsoft.js';
+import { registerDevLogin } from './routes/auth/dev-login.js';
 import { registerSignout } from './routes/auth/signout.js';
 import { healthRoutes } from './routes/health.js';
 import { registerAuditScore } from './routes/audit-score.js';
@@ -495,6 +496,26 @@ export function buildApp(options: BuildAppOptions = {}): App {
         ttlSeconds,
         postLoginRedirect: DEFAULT_POST_LOGIN_REDIRECT,
       });
+    });
+  }
+
+  // GET /v1/dev/login — escape-hatch route that mints a real cpa_session
+  // for an existing user. ONLY registers when DEV_LOGIN_TOKEN is set
+  // in the env — production deployments without that env var see a
+  // 404 on this path. Designed for founder/operator emergency access
+  // when OIDC isn't configured or the IdP is down.
+  // See: apps/api/src/routes/auth/dev-login.ts for the full contract.
+  const devLoginToken = process.env['DEV_LOGIN_TOKEN'];
+  if (devLoginToken) {
+    app.register((instance, _opts, done) => {
+      registerDevLogin(instance, {
+        bypassToken: devLoginToken,
+        sessionSecret,
+        cookieName,
+        cookieSecure,
+        ttlSeconds,
+      });
+      done();
     });
   }
 
