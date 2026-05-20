@@ -166,7 +166,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
     const app = await asAppTenant(TARGET_TENANT);
     try {
       const rows = await app.query<{ id: string }[]>`
-        SELECT id FROM claim WHERE id = '${CLAIM_SHARED}'
+        SELECT id FROM claim WHERE id = ${CLAIM_SHARED}
       `;
       assert.ok(
         (rows as unknown as { id: string }[]).length > 0,
@@ -183,7 +183,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
     const app = await asAppTenant(TARGET_TENANT);
     try {
       const rows = await app.query<{ id: string }[]>`
-        SELECT id FROM claim WHERE id = '${CLAIM_UNSHARED}'
+        SELECT id FROM claim WHERE id = ${CLAIM_UNSHARED}
       `;
       assert.equal(
         (rows as unknown as { id: string }[]).length,
@@ -203,7 +203,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
       await assert.rejects(
         app.query`
           INSERT INTO claim (tenant_id, subject_tenant_id, project_id, fiscal_year, stage)
-          VALUES ('${SOURCE_TENANT}', '${SUBJECT_TENANT_SHARED}', '${PROJECT_ID}', 2026, 'engagement')
+          VALUES (${SOURCE_TENANT}, ${SUBJECT_TENANT_SHARED}, ${PROJECT_ID}, 2026, 'engagement')
         `,
         'Target tenant should not be able to INSERT claims',
       );
@@ -223,7 +223,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
     const app = await asAppTenant(TARGET_TENANT);
     try {
       const rows = await app.query<{ id: string }[]>`
-        SELECT id FROM claim WHERE id = '${CLAIM_UNSHARED}'
+        SELECT id FROM claim WHERE id = ${CLAIM_UNSHARED}
       `;
       assert.equal(
         (rows as unknown as { id: string }[]).length,
@@ -241,7 +241,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
     const app = await asAppTenant(SOURCE_TENANT);
     try {
       const rows = await app.query<{ id: string }[]>`
-        SELECT id FROM claim WHERE id IN ('${CLAIM_SHARED}', '${CLAIM_UNSHARED}')
+        SELECT id FROM claim WHERE id IN (${CLAIM_SHARED}, ${CLAIM_UNSHARED})
       `;
       assert.equal(
         (rows as unknown as { id: string }[]).length,
