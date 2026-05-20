@@ -162,6 +162,20 @@ export const EVIDENCE_KINDS = [
   'TIME_ENTRY_CREATED',
   'TIME_ENTRY_UPDATED',
   'TIME_ENTRY_DELETED',
+  // Cloud sync connector — admitted by 0075_cloud_sync_connection.sql.
+  // CLOUD_SYNC_CONNECTED / CLOUD_SYNC_DISCONNECTED are state-transition
+  // events. EVIDENCE_UPLOADED is the file-ingestion event (classifiable
+  // evidence kind added to the claimant's chain per file).
+  'CLOUD_SYNC_CONNECTED',
+  'CLOUD_SYNC_DISCONNECTED',
+  'EVIDENCE_UPLOADED',
+  // B+C narrative-approval flow — admitted by 0079_narrative_approval_columns.sql.
+  // NARRATIVE_APPROVED is emitted once per bulk-approval action.
+  // ACTIVITY_REVIEWED / EXPENDITURE_REVIEWED are emitted when a consultant
+  // clears the needs_review flag on an auto-created record.
+  'NARRATIVE_APPROVED',
+  'ACTIVITY_REVIEWED',
+  'EXPENDITURE_REVIEWED',
 ] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 

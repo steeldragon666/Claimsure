@@ -91,9 +91,9 @@ before(async () => {
            (${TARGET_USER}, 'rls-tgt@example.com', 'microsoft', 'microsoft:rls-tgt', 'RLS Target')
   `;
   await privilegedSql`
-    INSERT INTO tenant_user (tenant_id, user_id, role)
-    VALUES (${SOURCE_TENANT}, ${SOURCE_USER}, 'admin'),
-           (${TARGET_TENANT}, ${TARGET_USER}, 'admin')
+    INSERT INTO tenant_user (id, tenant_id, user_id, role)
+    VALUES (gen_random_uuid(), ${SOURCE_TENANT}, ${SOURCE_USER}, 'admin'),
+           (gen_random_uuid(), ${TARGET_TENANT}, ${TARGET_USER}, 'admin')
   `;
   await privilegedSql`
     INSERT INTO subject_tenant (id, tenant_id, name, abn)
