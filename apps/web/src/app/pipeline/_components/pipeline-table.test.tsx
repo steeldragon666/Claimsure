@@ -41,6 +41,7 @@ function makeClaim(args: {
     subject_tenant_id: args.subject ?? '00000000-0000-0000-0000-0000000000aa',
     fiscal_year: args.fy ?? 2026,
     stage: args.stage,
+    delivery_kind: null,
     ausindustry_reference: null,
     submitted_at: null,
     submitted_by_user_id: null,

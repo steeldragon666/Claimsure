@@ -38,6 +38,7 @@ export async function getClaim(id: string): Promise<Claim> {
     subject_tenant_id: '00000000-0000-0000-0000-0000000000aa',
     fiscal_year: 2026,
     stage: 'engagement',
+    delivery_kind: null,
     ausindustry_reference: null,
     submitted_at: null,
     submitted_by_user_id: null,
