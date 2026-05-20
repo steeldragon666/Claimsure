@@ -88,8 +88,8 @@ before(async () => {
            (gen_random_uuid(), ${TARGET_TENANT}, ${TARGET_USER}, 'admin')
   `;
   await privilegedSql`
-    INSERT INTO subject_tenant (id, tenant_id, name, abn)
-    VALUES (${SUBJECT_TENANT}, ${SOURCE_TENANT}, 'Test Entity Pty Ltd', '12345678901')
+    INSERT INTO subject_tenant (id, tenant_id, name)
+    VALUES (${SUBJECT_TENANT}, ${SOURCE_TENANT}, 'Test Entity Pty Ltd')
   `;
 });
 

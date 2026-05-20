@@ -87,8 +87,8 @@ before(async () => {
            (gen_random_uuid(), ${TARGET_TENANT}, ${TARGET_USER}, 'admin')
   `;
   await privilegedSql`
-    INSERT INTO subject_tenant (id, tenant_id, name, abn)
-    VALUES (${SUBJECT_TENANT}, ${SOURCE_TENANT}, 'Revoke Entity', '44444444444')
+    INSERT INTO subject_tenant (id, tenant_id, name)
+    VALUES (${SUBJECT_TENANT}, ${SOURCE_TENANT}, 'Revoke Entity')
   `;
   await privilegedSql`
     INSERT INTO federation_share (id, subject_tenant_id, source_tenant_id, target_tenant_id, granted_by_user_id)

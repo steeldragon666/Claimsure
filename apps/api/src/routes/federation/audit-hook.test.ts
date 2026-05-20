@@ -76,12 +76,12 @@ before(async () => {
            (gen_random_uuid(), ${TARGET_TENANT}, ${TARGET_USER}, 'admin')
   `;
   await privilegedSql`
-    INSERT INTO subject_tenant (id, tenant_id, name, abn)
-    VALUES (${SUBJECT_TENANT}, ${SOURCE_TENANT}, 'Audit Entity', '33333333333')
+    INSERT INTO subject_tenant (id, tenant_id, name)
+    VALUES (${SUBJECT_TENANT}, ${SOURCE_TENANT}, 'Audit Entity')
   `;
   await privilegedSql`
-    INSERT INTO project (id, tenant_id, name)
-    VALUES (${PROJECT_ID}, ${SOURCE_TENANT}, 'Audit Project')
+    INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+    VALUES (${PROJECT_ID}, ${SOURCE_TENANT}, ${SUBJECT_TENANT}, 'Audit Project', now())
   `;
   await privilegedSql`
     INSERT INTO claim (id, tenant_id, subject_tenant_id, project_id, fiscal_year, stage)
