@@ -96,9 +96,9 @@ before(async () => {
            (gen_random_uuid(), ${TARGET_TENANT}, ${TARGET_USER}, 'admin')
   `;
   await privilegedSql`
-    INSERT INTO subject_tenant (id, tenant_id, name, abn)
-    VALUES (${SUBJECT_TENANT_SHARED}, ${SOURCE_TENANT}, 'Shared Entity', '11111111111'),
-           (${SUBJECT_TENANT_UNSHARED}, ${SOURCE_TENANT}, 'Unshared Entity', '22222222222')
+    INSERT INTO subject_tenant (id, tenant_id, name)
+    VALUES (${SUBJECT_TENANT_SHARED}, ${SOURCE_TENANT}, 'Shared Entity'),
+           (${SUBJECT_TENANT_UNSHARED}, ${SOURCE_TENANT}, 'Unshared Entity')
   `;
   await privilegedSql`
     INSERT INTO project (id, tenant_id, name)

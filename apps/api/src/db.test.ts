@@ -23,7 +23,13 @@ test('checkDb: ok=false when runQuery rejects synchronously', async () => {
 test('checkDb: ok=false when runQuery hangs past timeout', async () => {
   const result = await checkDb(() => new Promise(() => {})); // never resolves
   assert.equal(result.ok, false);
-  assert.ok(result.latencyMs >= 1500, 'timeout fired');
+  // Lower bound is CHECK_TIMEOUT_MS (1500) minus a small CI-clock-jitter
+  // tolerance. On virtualized CI runners Node's setTimeout can fire a few
+  // ms earlier than the wall-clock delay would suggest (libuv timer-wheel
+  // resolution + Date.now() granularity); the intent of this assertion is
+  // "we waited for the timeout, not some other early reject path", which
+  // 1480ms still demonstrates clearly.
+  assert.ok(result.latencyMs >= 1480, `timeout fired (got ${result.latencyMs}ms)`);
   assert.ok(result.latencyMs < 1700, 'did not wait far past timeout');
 });
 
