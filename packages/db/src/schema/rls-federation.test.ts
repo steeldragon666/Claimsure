@@ -101,8 +101,8 @@ before(async () => {
            (${SUBJECT_TENANT_UNSHARED}, ${SOURCE_TENANT}, 'Unshared Entity')
   `;
   await privilegedSql`
-    INSERT INTO project (id, tenant_id, name)
-    VALUES (${PROJECT_ID}, ${SOURCE_TENANT}, 'RLS Test Project')
+    INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+    VALUES (${PROJECT_ID}, ${SOURCE_TENANT}, ${SUBJECT_TENANT_SHARED}, 'RLS Test Project', now())
   `;
   await privilegedSql`
     INSERT INTO claim (id, tenant_id, subject_tenant_id, project_id, fiscal_year, stage)
