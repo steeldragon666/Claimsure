@@ -7,13 +7,23 @@ test('Uuid accepts a valid UUID v4', () => {
   assert.equal(Uuid.parse(v), v);
 });
 
-test('Uuid rejects a v1 UUID (MAC + timestamp)', () => {
-  // a8098c1a-f86e-11da-bd1a-00112444be1e is a real v1 UUID
-  assert.throws(() => Uuid.parse('a8098c1a-f86e-11da-bd1a-00112444be1e'));
+test('Uuid accepts a v1 UUID (RFC 9562 — validator is shape-only)', () => {
+  // Commit 5051605 relaxed Uuid from v4-only to any RFC 9562 UUID after
+  // a UUID v8 in workflow_state.agreed_by was wrongly rejected. v1 must
+  // also pass for the same reason — the validator's job is shape, not
+  // version. Routes that need v4 specifically should layer their own
+  // check (see primitives.ts:14-19).
+  const v = 'a8098c1a-f86e-11da-bd1a-00112444be1e';
+  assert.equal(Uuid.parse(v), v);
 });
 
-test('Uuid rejects the nil UUID', () => {
-  assert.throws(() => Uuid.parse('00000000-0000-0000-0000-000000000000'));
+test('Uuid accepts the nil UUID (RFC 9562 §5.9)', () => {
+  // The nil UUID is a valid RFC 9562 sentinel and several call sites in
+  // this codebase use it as the all-zeros tenant placeholder (see
+  // pipeline test fixtures + dev-login fallback). Rejecting it here
+  // would force those call sites to special-case the sentinel.
+  const v = '00000000-0000-0000-0000-000000000000';
+  assert.equal(Uuid.parse(v), v);
 });
 
 test('Uuid rejects a non-UUID string', () => {
