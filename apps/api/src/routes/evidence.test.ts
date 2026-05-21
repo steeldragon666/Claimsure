@@ -150,3 +150,50 @@ test('GET /v1/evidence: filters by kinds', async () => {
   assert.equal(body.items.length, 1);
   assert.equal(body.items[0]?.kind, 'HYPOTHESIS');
 });
+
+test('GET /v1/evidence: cursor pagination yields disjoint, ordered pages', async () => {
+  const app = buildApp();
+  // Page 1: limit=2 → newest two
+  const page1Res = await app.inject({
+    method: 'GET',
+    url: '/v1/evidence?limit=2',
+    cookies: { cpa_session: await userJwt() },
+  });
+  assert.equal(page1Res.statusCode, 200);
+  const page1 = page1Res.json<{ items: Array<{ id: string }>; next_cursor: string | null }>();
+  assert.equal(page1.items.length, 2);
+  assert.deepEqual(
+    page1.items.map((i) => i.id),
+    [EV_NEWEST, EV_MID],
+  );
+  assert.ok(page1.next_cursor, 'cursor returned when more pages exist');
+
+  // Page 2: continue from cursor
+  const page2Res = await app.inject({
+    method: 'GET',
+    url: `/v1/evidence?limit=2&cursor=${encodeURIComponent(page1.next_cursor)}`,
+    cookies: { cpa_session: await userJwt() },
+  });
+  assert.equal(page2Res.statusCode, 200);
+  const page2 = page2Res.json<{ items: Array<{ id: string }>; next_cursor: string | null }>();
+  assert.equal(page2.items.length, 1);
+  assert.deepEqual(
+    page2.items.map((i) => i.id),
+    [EV_OLDEST],
+  );
+  assert.equal(page2.next_cursor, null, 'no more pages');
+  await app.close();
+});
+
+test('GET /v1/evidence: 400 on invalid kind', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/evidence?kinds=NOT_A_REAL_KIND',
+    cookies: { cpa_session: await userJwt() },
+  });
+  assert.equal(res.statusCode, 400);
+  const body = res.json<{ error: string }>();
+  assert.equal(body.error, 'invalid_query');
+  await app.close();
+});
