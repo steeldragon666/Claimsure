@@ -1,38 +1,47 @@
 'use client';
-/**
- * /evidence — Evidence tab (top-tab nav).
- *
- * PR #1 stub. Spec from docs/product/client-side-app-spec.md §3:
- *   - AI-classified from raw docs / pics / videos / voice notes
- *   - Aligned to activities (via chain ARTEFACT_LINKED events)
- *   - Plotted on a visual narrative timeline to verify cohesion
- */
+import { useSearchParams } from 'next/navigation';
 import { AppShell } from '@/components/app-shell';
-import { FileText } from 'lucide-react';
+import { EvidenceFeed } from './_components/evidence-feed';
+import { EvidenceFilterBar } from './_components/evidence-filter-bar';
+import { parseClaimantIds, parseEvidenceKinds } from './_lib/url-params';
 
+/**
+ * /evidence — Cross-claimant evidence feed.
+ *
+ * URL is the source of truth for filter state (?kinds=..., ?claimant_ids=...).
+ * The page parses URL params, passes them to the filter bar (for display)
+ * and the feed (for data fetching via React Query).
+ *
+ * Replaces the P1 "coming next" stub.
+ */
 export default function EvidencePage() {
   return (
     <AppShell>
-      <div className="max-w-3xl mx-auto py-12">
-        <div className="flex items-center gap-3 mb-4">
-          <FileText className="h-6 w-6 text-primary" />
-          <h1 className="font-display text-3xl font-semibold tracking-tight">Evidence</h1>
-        </div>
-        <p className="text-muted-foreground mb-8">
-          AI-classified evidence from raw streamed documents, pictures, videos, and voice notes —
-          aligned to activities and plotted on a visual timeline to verify the cohesive, succinct
-          narrative your claim depends on.
-        </p>
-        <div className="rounded-md border border-dashed border-border p-6 bg-muted/20">
-          <p className="text-sm font-medium mb-2">Coming next</p>
-          <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-            <li>Per-claimant evidence stream (uploads + email + cloud sync)</li>
-            <li>Haiku-classified into activities automatically</li>
-            <li>Visual timeline view — drag/drop to re-attribute</li>
-            <li>Narrative cohesion score per activity</li>
-          </ul>
-        </div>
-      </div>
+      <Inner />
     </AppShell>
+  );
+}
+
+function Inner() {
+  const searchParams = useSearchParams();
+  const kinds = parseEvidenceKinds(searchParams.get('kinds'));
+  const claimantIds = parseClaimantIds(searchParams.get('claimant_ids'));
+
+  return (
+    <div className="space-y-8">
+      <header className="space-y-2">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          Workspace
+        </p>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">Evidence</h1>
+        <p className="text-muted-foreground max-w-2xl">
+          AI-classified evidence from raw documents, pictures, videos, and voice notes — across all
+          claimants.
+        </p>
+      </header>
+
+      <EvidenceFilterBar activeKinds={kinds} />
+      <EvidenceFeed kinds={kinds} claimantIds={claimantIds} />
+    </div>
   );
 }

@@ -85,6 +85,7 @@ import { registerUpdateUser } from './routes/users/update.js';
 import { registerWhoami } from './routes/whoami.js';
 import { registerFederation } from './routes/federation/index.js';
 import { registerCloudSync } from './routes/cloud-sync.js';
+import { registerEvidenceRoutes } from './routes/evidence.js';
 
 const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
 const DEFAULT_SESSION_COOKIE_NAME = 'cpa_session';
@@ -403,6 +404,11 @@ export function buildApp(options: BuildAppOptions = {}): App {
   // Cloud sync connector routes (Google Drive OAuth + connection CRUD).
   app.register((instance, _opts, done) => {
     registerCloudSync(instance);
+    done();
+  });
+  // Cross-claimant evidence feed (GET /v1/evidence).
+  app.register((instance, _opts, done) => {
+    registerEvidenceRoutes(instance);
     done();
   });
   // Prompt-suggestions routes require explicit deps (esp. `runContractTest`,
