@@ -69,7 +69,6 @@ after(async () => {
   await privilegedSql.end();
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used by tests added in later commits
 const userJwt = (): Promise<string> =>
   signSession(
     {
@@ -91,4 +90,63 @@ test('GET /v1/evidence: 401 without session', async () => {
   const res = await app.inject({ method: 'GET', url: '/v1/evidence' });
   assert.equal(res.statusCode, 401);
   await app.close();
+});
+
+test("GET /v1/evidence: returns events from user's tenant only, sorted DESC by captured_at", async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/evidence',
+    cookies: { cpa_session: await userJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ items: Array<{ id: string }>; next_cursor: string | null }>();
+  assert.equal(body.items.length, 3, 'three events under TENANT_A');
+  assert.deepEqual(
+    body.items.map((i) => i.id),
+    [EV_NEWEST, EV_MID, EV_OLDEST],
+    'sorted DESC by captured_at',
+  );
+  await app.close();
+});
+
+test('GET /v1/evidence: RLS isolation — does NOT return events from another tenant', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/evidence',
+    cookies: { cpa_session: await userJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ items: Array<{ id: string }> }>();
+  const ids = body.items.map((i) => i.id);
+  assert.ok(!ids.includes(EV_OTHER_TENANT), 'event from TENANT_B must NOT appear');
+});
+
+test('GET /v1/evidence: filters by claimant_ids', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/evidence?claimant_ids=${SUBJECT_A1}`,
+    cookies: { cpa_session: await userJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ items: Array<{ id: string; claimant: { id: string } }> }>();
+  assert.equal(body.items.length, 2, 'only events under SUBJECT_A1');
+  for (const item of body.items) {
+    assert.equal(item.claimant.id, SUBJECT_A1);
+  }
+});
+
+test('GET /v1/evidence: filters by kinds', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/evidence?kinds=HYPOTHESIS',
+    cookies: { cpa_session: await userJwt() },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json<{ items: Array<{ id: string; kind: string }> }>();
+  assert.equal(body.items.length, 1);
+  assert.equal(body.items[0]?.kind, 'HYPOTHESIS');
 });

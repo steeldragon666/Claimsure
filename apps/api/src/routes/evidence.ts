@@ -34,7 +34,7 @@ function decodeCursor(cursor: string): { at: string; id: string } | null {
 interface RawRow {
   id: string;
   kind: string;
-  captured_at: Date;
+  captured_at: Date | string;
   payload_excerpt: string;
   claimant_id: string;
   claimant_name: string;
@@ -61,55 +61,65 @@ export function registerEvidenceRoutes(app: FastifyInstance): void {
 
     // Effective kind filter = intersection of caller filter and allowlist.
     const effectiveKinds = (kinds ?? [...EVIDENCE_FEED_KINDS]) as string[];
+    const tenantId = req.user!.tenantId!;
 
-    // RLS scopes by tenant_id automatically (cpa_app role + app.current_tenant_id GUC).
-    const rows = await sql<RawRow[]>`
-      SELECT
-        e.id::text                          AS id,
-        e.kind                              AS kind,
-        e.captured_at                       AS captured_at,
-        COALESCE(NULLIF(e.payload->>'filename', ''),
-                 LEFT(COALESCE(e.payload->>'raw_text', ''), 240)) AS payload_excerpt,
-        st.id::text                         AS claimant_id,
-        st.name                             AS claimant_name,
-        e.classification->>'kind'           AS classification_kind,
-        e.classification->>'confidence'     AS classification_confidence,
-        NULL::text                          AS claim_id
-      FROM event e
-      JOIN subject_tenant st ON st.id = e.subject_tenant_id
-      WHERE e.kind = ANY(${effectiveKinds})
-        AND (${claimant_ids ?? null}::uuid[] IS NULL OR e.subject_tenant_id = ANY(${claimant_ids ?? null}::uuid[]))
-        AND (${since ?? null}::timestamptz IS NULL OR e.captured_at >= ${since ?? null}::timestamptz)
-        AND (${decoded?.at ?? null}::timestamptz IS NULL
-             OR (e.captured_at, e.id::text) < (${decoded?.at ?? null}::timestamptz, ${decoded?.id ?? null}::text))
-      ORDER BY e.captured_at DESC, e.id DESC
-      LIMIT ${limit + 1}
-    `;
+    // Wrap in sql.begin + set_config so RLS scopes by tenant. Connection
+    // pooling means the session middleware's GUC isn't reliable across
+    // pool checkouts (same pattern as subject-tenants.ts).
+    return await sql.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
 
-    const hasMore = rows.length > limit;
-    const page = hasMore ? rows.slice(0, limit) : rows;
-    const lastRow = page[page.length - 1];
+      const rows = await tx<RawRow[]>`
+        SELECT
+          e.id::text                          AS id,
+          e.kind                              AS kind,
+          e.captured_at                       AS captured_at,
+          COALESCE(NULLIF(e.payload->>'filename', ''),
+                   LEFT(COALESCE(e.payload->>'raw_text', ''), 240)) AS payload_excerpt,
+          st.id::text                         AS claimant_id,
+          st.name                             AS claimant_name,
+          e.classification->>'kind'           AS classification_kind,
+          e.classification->>'confidence'     AS classification_confidence,
+          NULL::text                          AS claim_id
+        FROM event e
+        JOIN subject_tenant st ON st.id = e.subject_tenant_id
+        WHERE e.kind = ANY(${effectiveKinds})
+          AND (${claimant_ids ?? null}::uuid[] IS NULL OR e.subject_tenant_id = ANY(${claimant_ids ?? null}::uuid[]))
+          AND (${since ?? null}::timestamptz IS NULL OR e.captured_at >= ${since ?? null}::timestamptz)
+          AND (${decoded?.at ?? null}::timestamptz IS NULL
+               OR (e.captured_at, e.id::text) < (${decoded?.at ?? null}::timestamptz, ${decoded?.id ?? null}::text))
+        ORDER BY e.captured_at DESC, e.id DESC
+        LIMIT ${limit + 1}
+      `;
 
-    const items: EvidenceFeedItem[] = page.map((r) => ({
-      id: r.id,
-      kind: r.kind as EvidenceFeedItem['kind'],
-      captured_at: r.captured_at.toISOString(),
-      payload_excerpt: r.payload_excerpt ?? '',
-      claimant: { id: r.claimant_id, name: r.claimant_name },
-      classification:
-        r.classification_kind !== null && r.classification_confidence !== null
-          ? {
-              kind: r.classification_kind,
-              confidence: Number(r.classification_confidence),
-            }
-          : null,
-      claim_id: r.claim_id,
-    }));
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      const lastRow = page[page.length - 1];
 
-    const next_cursor =
-      hasMore && lastRow ? encodeCursor(lastRow.captured_at.toISOString(), lastRow.id) : null;
+      const toIso = (v: Date | string): string =>
+        v instanceof Date ? v.toISOString() : new Date(v).toISOString();
 
-    const body: EvidenceFeedResponse = { items, next_cursor };
-    return reply.send(body);
+      const items: EvidenceFeedItem[] = page.map((r) => ({
+        id: r.id,
+        kind: r.kind as EvidenceFeedItem['kind'],
+        captured_at: toIso(r.captured_at),
+        payload_excerpt: r.payload_excerpt ?? '',
+        claimant: { id: r.claimant_id, name: r.claimant_name },
+        classification:
+          r.classification_kind !== null && r.classification_confidence !== null
+            ? {
+                kind: r.classification_kind,
+                confidence: Number(r.classification_confidence),
+              }
+            : null,
+        claim_id: r.claim_id,
+      }));
+
+      const next_cursor =
+        hasMore && lastRow ? encodeCursor(toIso(lastRow.captured_at), lastRow.id) : null;
+
+      const body: EvidenceFeedResponse = { items, next_cursor };
+      return reply.send(body);
+    });
   });
 }
