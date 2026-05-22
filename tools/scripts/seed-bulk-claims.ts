@@ -34,7 +34,7 @@
 import { createHash } from 'node:crypto';
 import { insertEventWithChain, verifyChain } from '@cpa/db';
 import { privilegedSql, sql } from '@cpa/db/client';
-import { DOMAINS, type Domain } from './_bulk-claim-domains.js';
+import { CONTAMINATION_THEMES, DOMAINS, type Domain } from './_bulk-claim-domains.js';
 
 // ── Volume per claim ─────────────────────────────────────────────────
 const N_TRANSACTIONS = 500;
@@ -44,6 +44,15 @@ const N_PDFS = 5;
 const N_VOICE = 3;
 const N_SPREADSHEETS = 2;
 const N_NARRATIVE_DRAFTS = 1;
+
+/**
+ * Per-claim contamination ratio: 30% of notes are non-R&D content
+ * (refactoring chores, marketing A/B tests, board prep, insurance
+ * renewals). These carry payload.rd_band_hint = 'non_rd' as the ground
+ * truth the scorer grades Agent A against. The remaining 70% carry
+ * rd_band_hint = 'rd_relevant'.
+ */
+const CONTAMINATION_RATE = 0.3;
 
 // FY26: 1 Jul 2025 — 30 Jun 2026. Times generated within this window.
 const FY_START = new Date('2025-07-01T00:00:00Z');
@@ -221,52 +230,83 @@ function genTransaction(rng: RandFn, d: Domain, i: number, n: number): PendingEx
   };
 }
 
+type Theme =
+  | 'hypothesis'
+  | 'observation'
+  | 'experiment'
+  | 'iteration'
+  | 'uncertainty'
+  | 'newKnowledge'
+  | 'timeLog'
+  | 'associateFlag';
+
+const KIND_BY_THEME: Record<Theme, string> = {
+  hypothesis: 'HYPOTHESIS',
+  observation: 'OBSERVATION',
+  experiment: 'EXPERIMENT',
+  iteration: 'ITERATION',
+  uncertainty: 'UNCERTAINTY',
+  newKnowledge: 'NEW_KNOWLEDGE',
+  timeLog: 'TIME_LOG',
+  associateFlag: 'ASSOCIATE_FLAG',
+};
+
+/** Themes contamination is allowed to wear — the corporate-noise pool only
+ *  fills the kinds that admin / marketing / refactoring activity could
+ *  plausibly impersonate. HYPOTHESIS / UNCERTAINTY / NEW_KNOWLEDGE stay
+ *  R&D-only because their linguistic register is science-specific. */
+const CONTAMINATION_KINDS: Array<keyof typeof CONTAMINATION_THEMES> = [
+  'experiment',
+  'iteration',
+  'observation',
+  'timeLog',
+  'associateFlag',
+];
+
 /**
  * Pick a kind heuristically based on which theme pool the note was
  * sampled from. classification is null so Agent A's re-run produces
  * the real rationale + statutory anchor + confidence.
+ *
+ * 30 % of notes are CONTAMINATION — corporate noise that looks
+ * structurally like one of the lower-register R&D kinds but is
+ * actually non-R&D activity. They carry `payload.rd_band_hint = 'non_rd'`
+ * so the scoring CLI can verify Agent A flagged them INELIGIBLE
+ * rather than rolling them into the claim. The R&D-relevant 70 % carry
+ * `payload.rd_band_hint = 'rd_relevant'`.
  */
 function genNote(rng: RandFn, d: Domain, i: number): PendingEvent {
-  type Theme =
-    | 'hypothesis'
-    | 'observation'
-    | 'experiment'
-    | 'iteration'
-    | 'uncertainty'
-    | 'newKnowledge'
-    | 'timeLog'
-    | 'associateFlag';
-  // Weighted theme pick — observation/experiment dominate a real
-  // claim's evidence stream.
-  const r = rng();
-  const theme: Theme =
-    r < 0.18
-      ? 'hypothesis'
-      : r < 0.4
-        ? 'observation'
-        : r < 0.58
-          ? 'experiment'
-          : r < 0.68
-            ? 'iteration'
-            : r < 0.76
-              ? 'uncertainty'
-              : r < 0.83
-                ? 'newKnowledge'
-                : r < 0.93
-                  ? 'timeLog'
-                  : 'associateFlag';
-  const kindByTheme: Record<Theme, string> = {
-    hypothesis: 'HYPOTHESIS',
-    observation: 'OBSERVATION',
-    experiment: 'EXPERIMENT',
-    iteration: 'ITERATION',
-    uncertainty: 'UNCERTAINTY',
-    newKnowledge: 'NEW_KNOWLEDGE',
-    timeLog: 'TIME_LOG',
-    associateFlag: 'ASSOCIATE_FLAG',
-  };
+  const isContamination = rng() < CONTAMINATION_RATE;
 
-  const template = pick(rng, d.themes[theme]);
+  let theme: Theme;
+  let template: string;
+  if (isContamination) {
+    const ck = pick(rng, CONTAMINATION_KINDS);
+    theme = ck;
+    template = pick(rng, CONTAMINATION_THEMES[ck]);
+  } else {
+    // Weighted theme pick over the R&D-relevant pool — observation /
+    // experiment dominate a real claim's evidence stream.
+    const r = rng();
+    theme =
+      r < 0.18
+        ? 'hypothesis'
+        : r < 0.4
+          ? 'observation'
+          : r < 0.58
+            ? 'experiment'
+            : r < 0.68
+              ? 'iteration'
+              : r < 0.76
+                ? 'uncertainty'
+                : r < 0.83
+                  ? 'newKnowledge'
+                  : r < 0.93
+                    ? 'timeLog'
+                    : 'associateFlag';
+    template = pick(rng, d.themes[theme]);
+  }
+  const kindByTheme = KIND_BY_THEME;
   const params: Record<string, string | number> = {
     n: ri(rng, 1, 30),
     prev: ri(rng, 1, 20),
@@ -373,7 +413,14 @@ function genNote(rng: RandFn, d: Domain, i: number): PendingEvent {
     new1: ri(rng, 1, 20),
     new2: ri(rng, 1, 20),
   };
-  const text = fill(template, params) + '\n\n' + secondaryParagraph(rng, d, theme, params);
+  // R&D notes get a supplementary paragraph sampled from a sibling
+  // theme to make the text feel multi-sentence and organic.
+  // Contamination notes stay single-paragraph — corporate noise reads
+  // tersely, and pulling a second paragraph from the R&D pool would
+  // dilute the ground-truth signal.
+  const text = isContamination
+    ? fill(template, params)
+    : fill(template, params) + '\n\n' + secondaryParagraph(rng, d, theme, params);
 
   // captured_at within FY26 but biased to the back half of the year
   // (when claims actually wind up — Mar / Apr / May / Jun).
@@ -386,6 +433,10 @@ function genNote(rng: RandFn, d: Domain, i: number): PendingEvent {
       raw_text: text,
       source: 'consultant-paste',
       auto_kind_hint: kindByTheme[theme].toLowerCase(),
+      // Ground truth for the scoring CLI. 'non_rd' means the note is
+      // corporate noise that should be flagged INELIGIBLE; 'rd_relevant'
+      // means it should be classified to one of the eligible kinds.
+      rd_band_hint: isContamination ? 'non_rd' : 'rd_relevant',
     },
     classification: null, // Agent A's job
     captured_at: captured,

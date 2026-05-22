@@ -40,6 +40,64 @@ export interface Domain {
   voiceNoteTopics: string[];
 }
 
+/**
+ * Contamination pool — notes that LOOK like R&D evidence but are
+ * actually non-R&D corporate activity. Shared across every domain
+ * because admin / marketing / refactoring noise reads the same across
+ * industries. The generator stamps these with
+ * `payload.rd_band_hint = 'non_rd'` so the scoring CLI can verify the
+ * classifier flagged them INELIGIBLE rather than rolling them into the
+ * claim.
+ *
+ * Grouped by the HEURISTIC kind a naive pattern matcher might assign
+ * (EXPERIMENT-looking, ITERATION-looking, etc.). The point: only
+ * semantic classification catches these — keyword matching would put
+ * them straight into the claim.
+ */
+export const CONTAMINATION_THEMES: {
+  experiment: string[];
+  iteration: string[];
+  observation: string[];
+  timeLog: string[];
+  associateFlag: string[];
+} = {
+  experiment: [
+    'A/B test on the landing page hero — variant B (orange CTA) lifted CTR by 12% vs control. Promoting to default for Q3.',
+    'Email subject-line experiment across the {n}-user newsletter cohort. Open-rate winner clear after {h} h.',
+    'Pricing-page experiment — added the "$30k founder" tile. Conversion lift {pct}% but anchored on $60k tile.',
+    'Onboarding-flow eval — removed the email-verification step for sub-trial accounts. Drop in support tickets {pct}%.',
+    'Internal tool eval — Notion vs Linear vs Coda for the program board. Voted Linear unanimously after a fortnight trial.',
+  ],
+  iteration: [
+    'Refactored the legacy reports module — extracted the date-window helper into shared/date. No behaviour change; tests still green.',
+    'Migrated the team Slack workspace to the new pricing plan. Imported {n} historic channels; archived {old} inactive.',
+    'Switched the CI runner from {old} to {new} after a Q2 pricing review. Build-time delta {pct}%.',
+    'Bumped the staging cluster from t3.large to t3.xlarge after the OOM kills on {temp} k req/min sustained load.',
+    'Cleaned up the marketing-site favicon set after the {b} brand-asset review. No code change beyond /public.',
+  ],
+  observation: [
+    'Q{n} marketing spend review — agency budget tracking 8% under target. Surplus shifting to Q{next} brand work.',
+    'PI premium quote came back from Marsh — {pct}% above last year. Need to raise this with the broker.',
+    'Salesforce seat audit — {n} inactive logins this quarter. Reclaiming for the FY26 budget.',
+    'Office lease renewal landed — same terms, +3% on the annual review. Signed and filed.',
+    'Quarterly team NPS survey result — {n} responses, average score {pct}. Two themes: tooling fragmentation, more 1:1s.',
+  ],
+  timeLog: [
+    '{hours} h on Q{n} board-pack preparation + ELT review meeting',
+    '{hours} h on FY26 budget reforecast + spreadsheet rebuild',
+    '{hours} h on tax-prep handover with EY + supporting documentation',
+    '{hours} h on PI insurance renewal — broker call, schedule review, signing',
+    '{hours} h on payroll system migration (admin assistant project)',
+  ],
+  associateFlag: [
+    'Team offsite at the wineries — Tuesday agenda whiteboarded then dinner at the cellar door. Some great cross-team conversations.',
+    'Onboarded new admin assistant — set up payroll, HR system, Slack, calendar. Took most of Monday.',
+    'Renewed PI insurance with Marsh — moved from tier C2 to B1 after the evidence-chain conversation last quarter.',
+    'Tax prep for FY26 with EY — handover meeting, evidence pack agreed, return drafted by end of next week.',
+    'Q{n} board pack review with the CFO — minor tweaks to the slide deck; nothing structural.',
+  ],
+};
+
 export const DOMAINS: Domain[] = [
   // ── 1. Vantage Industries — Hi-temp alloy phase stability ──────────
   {
