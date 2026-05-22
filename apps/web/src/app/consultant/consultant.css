@@ -1,0 +1,37 @@
+/*
+ * Route-scoped styles for the consultant broadcast workspace.
+ * Mirrors the inline <style> block in ui_kits/consultant-app/index.html.
+ *
+ * The selectors target html / body / scrollbars globally — this stylesheet
+ * is only imported by apps/web/src/app/consultant/layout.tsx, so it only
+ * applies while a /consultant/* route is mounted. The rest of the app
+ * keeps its own background / scrollbar rules.
+ */
+html:has(body[data-consultant-workspace='true']),
+body[data-consultant-workspace='true'] {
+  margin: 0;
+  padding: 0;
+  background: #0b0b0d;
+  overflow: hidden;
+  height: 100%;
+}
+
+body[data-consultant-workspace='true'] ::selection {
+  background: #e1a23a;
+  color: #0b0b0d;
+}
+
+body[data-consultant-workspace='true'] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+body[data-consultant-workspace='true'] ::-webkit-scrollbar-track {
+  background: #0b0b0d;
+}
+body[data-consultant-workspace='true'] ::-webkit-scrollbar-thumb {
+  background: rgba(240, 235, 226, 0.1);
+  border-radius: 4px;
+}
+body[data-consultant-workspace='true'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(240, 235, 226, 0.22);
+}

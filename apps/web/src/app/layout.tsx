@@ -1,6 +1,13 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
-import { Fraunces, Inter_Tight, Inter, Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
+import {
+  Fraunces,
+  Inter_Tight,
+  Inter,
+  Plus_Jakarta_Sans,
+  JetBrains_Mono,
+  Geist,
+} from 'next/font/google';
 import { Providers } from '@/components/providers';
 
 /*
@@ -43,6 +50,15 @@ const jetBrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
+// Geist — used by the broadcast-themed consultant workspace at /consultant.
+// Loaded via next/font/google so SSR and pre-fetch behave like the other faces.
+const geist = Geist({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700'],
+  variable: '--font-geist',
+  display: 'swap',
+});
+
 export const metadata: Metadata = {
   title: {
     default: 'Claimsure',
@@ -57,7 +73,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${fraunces.variable} ${interTight.variable} ${inter.variable} ${plusJakartaSans.variable} ${jetBrainsMono.variable}`}
+      className={`${fraunces.variable} ${interTight.variable} ${inter.variable} ${plusJakartaSans.variable} ${jetBrainsMono.variable} ${geist.variable}`}
     >
       <body>
         <Providers>{children}</Providers>
