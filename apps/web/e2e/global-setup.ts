@@ -59,6 +59,7 @@ export default async function globalSetup(): Promise<void> {
       context.get('/login').catch(() => {}),
       context.get('/pipeline').catch(() => {}),
       context.get('/claims/00000000-0000-0000-0000-000000000000').catch(() => {}),
+      context.get('/consultant').catch(() => {}),
     ]);
     await context.dispose();
   } catch {
