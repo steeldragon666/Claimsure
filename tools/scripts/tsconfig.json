@@ -1,8 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true,
-    "rootDir": "."
+    "noEmit": true
   },
   "include": ["*.ts"],
   "exclude": ["*.test.ts", "node_modules"]

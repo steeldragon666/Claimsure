@@ -87,10 +87,11 @@ async function main(): Promise<void> {
     process.stdout.write(`[${i + 1}/${events.length}] ${ev.id.slice(0, 8)}  was: ${before}  →  `);
 
     try {
-      const result = await classifier.classify({
-        raw_text: rawText,
-        captured_at: new Date().toISOString(),
-      });
+      // ClassifierInput is intentionally minimal — just `raw_text`. The
+      // event's captured_at lives in the chain row, not the classifier
+      // payload; passing it here would be ignored and now fails strict
+      // type-checking (the property was removed from ClassifierInput).
+      const result = await classifier.classify({ raw_text: rawText });
       // result is the canonical Classification shape: { kind, confidence, rationale, ... }
       const after = `${result.kind}/${result.confidence.toFixed(2)}`;
       const changed =

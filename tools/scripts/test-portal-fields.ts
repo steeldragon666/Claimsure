@@ -41,6 +41,7 @@ import '../../apps/api/src/force-env.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { getPrompt } from '../../packages/agents/src/runtime/prompt-registry.js';
 import { callWithToolUse } from '../../packages/agents/src/runtime/tool-use.js';
+import type { ToolDef } from '../../packages/agents/src/runtime/types.js';
 // Side-effect import: registers `draft-narrative@1.2.0` in the prompt registry.
 import type { EmitPortalFieldsToolInput } from '../../packages/agents/src/narrative-drafter/prompts/draft-narrative@1.2.0.js';
 import '../../packages/agents/src/narrative-drafter/prompts/draft-narrative@1.2.0.js';
@@ -244,7 +245,10 @@ async function main(): Promise<void> {
       model,
       system: prompt.system,
       user: userMessage,
-      tool: prompt.tool as typeof prompt.tool & { input_schema: typeof prompt.tool.input_schema },
+      // The prompt registry types `prompt.tool` as ToolDef<unknown> so any
+      // prompt's tool can sit in the same registry slot. Narrow it to the
+      // specific output shape we want callWithToolUse to validate against.
+      tool: prompt.tool as unknown as ToolDef<EmitPortalFieldsToolInput>,
       max_tokens: maxTokens,
     },
   );
