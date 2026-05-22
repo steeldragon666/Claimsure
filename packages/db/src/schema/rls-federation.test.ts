@@ -38,12 +38,18 @@ let dbAvailable = false;
 /**
  * Helper: execute SQL as cpa_app with a specific tenant_id GUC set.
  * This simulates what the API middleware does at request time.
+ *
+ * Reads `DATABASE_URL_APP` (the workspace convention — see
+ * packages/db/src/env.ts) with a localhost-docker default. Pass values via
+ * tagged-template `${X}` *without* surrounding quotes; the helper rewrites
+ * each placeholder to a numbered Postgres parameter ($1, $2, …) and binds
+ * the value through postgres-js. Wrapping the placeholder in single quotes
+ * (`'${X}'`) would emit the literal string `'$1'`, which Postgres parses as
+ * the four-character string `$1` — silently matching zero uuid rows.
  */
 async function asAppTenant(tenantId: string) {
-  // Create a new connection for cpa_app role
   const appUrl =
-    process.env['APP_DATABASE_URL'] ??
-    'postgres://cpa_app:cpa_app_dev_pwd@localhost:5433/cpa_platform';
+    process.env['DATABASE_URL_APP'] ?? 'postgres://cpa_app:cpa_app_dev_pwd@localhost:5433/cpa_dev';
   const { default: postgres } = await import('postgres');
   const appSql = postgres(appUrl, { max: 1 });
   return {
@@ -90,19 +96,22 @@ before(async () => {
     VALUES (${SOURCE_USER}, 'rls-src@example.com', 'microsoft', 'microsoft:rls-src', 'RLS Source'),
            (${TARGET_USER}, 'rls-tgt@example.com', 'microsoft', 'microsoft:rls-tgt', 'RLS Target')
   `;
+  // tenant_user.id is NOT NULL with no DB default — supply uuid explicitly.
   await privilegedSql`
-    INSERT INTO tenant_user (tenant_id, user_id, role)
-    VALUES (${SOURCE_TENANT}, ${SOURCE_USER}, 'admin'),
-           (${TARGET_TENANT}, ${TARGET_USER}, 'admin')
+    INSERT INTO tenant_user (id, tenant_id, user_id, role)
+    VALUES (gen_random_uuid(), ${SOURCE_TENANT}, ${SOURCE_USER}, 'admin'),
+           (gen_random_uuid(), ${TARGET_TENANT}, ${TARGET_USER}, 'admin')
   `;
+  // subject_tenant has no abn column; kind defaults to 'claimant'.
   await privilegedSql`
-    INSERT INTO subject_tenant (id, tenant_id, name, abn)
-    VALUES (${SUBJECT_TENANT_SHARED}, ${SOURCE_TENANT}, 'Shared Entity', '11111111111'),
-           (${SUBJECT_TENANT_UNSHARED}, ${SOURCE_TENANT}, 'Unshared Entity', '22222222222')
+    INSERT INTO subject_tenant (id, tenant_id, name)
+    VALUES (${SUBJECT_TENANT_SHARED}, ${SOURCE_TENANT}, 'Shared Entity'),
+           (${SUBJECT_TENANT_UNSHARED}, ${SOURCE_TENANT}, 'Unshared Entity')
   `;
+  // project.subject_tenant_id and started_at are both NOT NULL.
   await privilegedSql`
-    INSERT INTO project (id, tenant_id, name)
-    VALUES (${PROJECT_ID}, ${SOURCE_TENANT}, 'RLS Test Project')
+    INSERT INTO project (id, tenant_id, subject_tenant_id, name, started_at)
+    VALUES (${PROJECT_ID}, ${SOURCE_TENANT}, ${SUBJECT_TENANT_SHARED}, 'RLS Test Project', now())
   `;
   await privilegedSql`
     INSERT INTO claim (id, tenant_id, subject_tenant_id, project_id, fiscal_year, stage)
@@ -164,7 +173,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
     const app = await asAppTenant(TARGET_TENANT);
     try {
       const rows = await app.query<{ id: string }[]>`
-        SELECT id FROM claim WHERE id = '${CLAIM_SHARED}'
+        SELECT id FROM claim WHERE id = ${CLAIM_SHARED}
       `;
       assert.ok(
         (rows as unknown as { id: string }[]).length > 0,
@@ -181,7 +190,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
     const app = await asAppTenant(TARGET_TENANT);
     try {
       const rows = await app.query<{ id: string }[]>`
-        SELECT id FROM claim WHERE id = '${CLAIM_UNSHARED}'
+        SELECT id FROM claim WHERE id = ${CLAIM_UNSHARED}
       `;
       assert.equal(
         (rows as unknown as { id: string }[]).length,
@@ -201,7 +210,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
       await assert.rejects(
         app.query`
           INSERT INTO claim (tenant_id, subject_tenant_id, project_id, fiscal_year, stage)
-          VALUES ('${SOURCE_TENANT}', '${SUBJECT_TENANT_SHARED}', '${PROJECT_ID}', 2026, 'engagement')
+          VALUES (${SOURCE_TENANT}, ${SUBJECT_TENANT_SHARED}, ${PROJECT_ID}, 2026, 'engagement')
         `,
         'Target tenant should not be able to INSERT claims',
       );
@@ -221,7 +230,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
     const app = await asAppTenant(TARGET_TENANT);
     try {
       const rows = await app.query<{ id: string }[]>`
-        SELECT id FROM claim WHERE id = '${CLAIM_UNSHARED}'
+        SELECT id FROM claim WHERE id = ${CLAIM_UNSHARED}
       `;
       assert.equal(
         (rows as unknown as { id: string }[]).length,
@@ -239,7 +248,7 @@ describe('Federation RLS — cross-tenant read access (P9.3 Task 3.3)', () => {
     const app = await asAppTenant(SOURCE_TENANT);
     try {
       const rows = await app.query<{ id: string }[]>`
-        SELECT id FROM claim WHERE id IN ('${CLAIM_SHARED}', '${CLAIM_UNSHARED}')
+        SELECT id FROM claim WHERE id IN (${CLAIM_SHARED}, ${CLAIM_UNSHARED})
       `;
       assert.equal(
         (rows as unknown as { id: string }[]).length,
