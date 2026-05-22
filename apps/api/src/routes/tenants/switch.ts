@@ -14,7 +14,7 @@ const SwitchBody = z.object({
 
 interface UserCoreRow {
   email: string;
-  primary_idp: 'microsoft' | 'google';
+  primary_idp: 'microsoft' | 'google' | 'email' | 'auth0';
   display_name: string | null;
 }
 

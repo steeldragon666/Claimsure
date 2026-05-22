@@ -22,8 +22,8 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/beta-auth';
 
-const BYPASS_PATHS = ['/', '/signup', '/verify-email'];
-const BYPASS_PREFIXES = ['/beta-access', '/api/beta/', '/marketing/'];
+const BYPASS_PATHS = ['/', '/login', '/signup', '/verify-email'];
+const BYPASS_PREFIXES = ['/beta-access', '/api/beta/', '/marketing/', '/v1/auth/'];
 
 export const config = {
   // Match all paths except _next internals and the favicon. Static assets

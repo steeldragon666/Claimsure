@@ -36,6 +36,14 @@ export interface SignupRouteDeps {
    * captures the token for assertion.
    */
   sendVerificationEmail: (to: string, token: string) => Promise<void>;
+  /**
+   * Non-production/operator fallback for local demos when outbound email is
+   * not configured. Production should leave this false so delivery failures
+   * are visible and signup does not silently bypass email.
+   */
+  allowManualVerification?: boolean;
+  /** Base URL used to expose a manual verification link when allowed. */
+  verificationBaseUrl?: string;
 }
 
 const VERIFICATION_ISSUER = 'cpa-signup-verification';
@@ -108,9 +116,24 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
       .setExpirationTime(now + VERIFICATION_TTL_SECONDS)
       .sign(secretToKey(verificationSecret));
 
-    await deps.sendVerificationEmail(email, token);
+    const verificationUrl = deps.verificationBaseUrl
+      ? `${deps.verificationBaseUrl.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(token)}`
+      : undefined;
 
-    return reply.status(202).send({ ok: true });
+    try {
+      await deps.sendVerificationEmail(email, token);
+    } catch (err) {
+      req.log.error({ err }, 'signup verification email failed');
+      if (!deps.allowManualVerification || !verificationUrl) throw err;
+      return reply.status(202).send({
+        ok: true,
+        delivery: 'manual_verification',
+        verificationUrl,
+        message: 'Email delivery is not configured. Use the verification link below to continue.',
+      });
+    }
+
+    return reply.status(202).send({ ok: true, delivery: 'email_sent' });
   });
 
   // ---------------------------------------------------------------------------

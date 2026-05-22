@@ -137,7 +137,7 @@ export function registerDevLogin(app: FastifyInstance, cfg: DevLoginConfig): voi
       {
         sub: user.id,
         email: user.email,
-        primaryIdp: (user.primary_idp as 'microsoft' | 'google' | 'email') ?? 'google',
+        primaryIdp: (user.primary_idp as 'microsoft' | 'google' | 'email' | 'auth0') ?? 'google',
         activeTenantId: active.tenant_id,
         activeRole: active.role as 'admin' | 'consultant' | 'viewer',
         availableTenants,

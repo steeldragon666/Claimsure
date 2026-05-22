@@ -10,7 +10,7 @@ export interface AvailableTenant {
 export interface SessionClaims {
   sub: string;
   email: string;
-  primaryIdp: 'microsoft' | 'google' | 'email';
+  primaryIdp: 'microsoft' | 'google' | 'email' | 'auth0';
   activeTenantId: string | null;
   activeRole: 'admin' | 'consultant' | 'viewer' | null;
   availableTenants: AvailableTenant[];
@@ -66,7 +66,7 @@ export async function verifySession(jwt: string, secret: string): Promise<Verifi
   return {
     sub: String(payload.sub),
     email: String(payload['email']),
-    primaryIdp: payload['primaryIdp'] as 'microsoft' | 'google' | 'email',
+    primaryIdp: payload['primaryIdp'] as 'microsoft' | 'google' | 'email' | 'auth0',
     activeTenantId: (payload['activeTenantId'] as string | null) ?? null,
     activeRole: (payload['activeRole'] as 'admin' | 'consultant' | 'viewer' | null) ?? null,
     availableTenants: (payload['availableTenants'] as AvailableTenant[]) ?? [],

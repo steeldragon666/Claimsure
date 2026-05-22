@@ -4,7 +4,7 @@ import { signSession } from '@cpa/auth';
 export interface SessionUser {
   id: string;
   email: string;
-  primaryIdp: 'microsoft' | 'google';
+  primaryIdp: 'microsoft' | 'google' | 'email' | 'auth0';
   activeTenantId: string | null;
   activeRole: 'admin' | 'consultant' | 'viewer' | null;
   availableTenants: Array<{

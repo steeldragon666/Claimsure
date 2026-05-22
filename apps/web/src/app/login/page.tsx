@@ -56,8 +56,17 @@ export default function LoginPage() {
             <Button asChild className="w-full" variant="outline">
               <a href="/v1/auth/google/login">Continue with Google</a>
             </Button>
+            <Button asChild className="w-full" variant="outline">
+              <a href="/v1/auth/auth0/login">Continue with Auth0</a>
+            </Button>
             <p className="text-sm text-muted-foreground text-center pt-2">
               Your firm administrator must add you to a firm before you can sign in.
+            </p>
+            <p className="text-sm text-muted-foreground text-center">
+              Starting a new firm?{' '}
+              <a className="text-foreground underline underline-offset-4" href="/signup">
+                Create a trial workspace
+              </a>
             </p>
           </CardContent>
         </Card>

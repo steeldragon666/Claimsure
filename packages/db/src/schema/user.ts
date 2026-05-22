@@ -8,6 +8,7 @@ import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
  * `externalId` carries the IdP-specific subject identifier:
  *   - Microsoft Entra: 'microsoft:<oid>'
  *   - Google Workspace: 'google:<sub>'
+ *   - Auth0: 'auth0:<sub>'
  * Stable per-user across email changes; we use it for the canonical
  * lookup during OIDC callback.
  *
@@ -24,7 +25,7 @@ export const user = pgTable('user', {
     .$defaultFn(() => crypto.randomUUID()),
   email: text('email').notNull().unique(),
   displayName: text('display_name'),
-  primaryIdp: text('primary_idp', { enum: ['microsoft', 'google'] }).notNull(),
+  primaryIdp: text('primary_idp', { enum: ['microsoft', 'google', 'email', 'auth0'] }).notNull(),
   externalId: text('external_id').notNull(),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

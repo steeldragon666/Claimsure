@@ -30,6 +30,7 @@ export default function SignupPage() {
   const [displayName, setDisplayName] = useState('');
   const [state, setState] = useState<SubmitState>('idle');
   const [error, setError] = useState('');
+  const [verificationUrl, setVerificationUrl] = useState('');
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -47,17 +48,18 @@ export default function SignupPage() {
         }),
       });
 
+      const body = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        verificationUrl?: string;
+      };
+
       if (!res.ok) {
         let message = 'Signup could not be started. Please check the details and try again.';
-        try {
-          const body = (await res.json()) as { message?: string };
-          if (body.message) message = body.message;
-        } catch {
-          /* keep default */
-        }
+        if (body.message) message = body.message;
         throw new Error(message);
       }
 
+      setVerificationUrl(body.verificationUrl ?? '');
       setState('sent');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup could not be started.');
@@ -123,6 +125,14 @@ export default function SignupPage() {
                     We sent a verification link to {email.trim().toLowerCase()}. Open it to finish
                     creating your Claimsure trial tenant.
                   </p>
+                  {verificationUrl && (
+                    <p className="mt-4 break-all border border-[#e1a23a]/40 bg-[#e1a23a]/10 p-3 font-body text-sm leading-6 text-[#f0ebe2]">
+                      Email is not configured in this environment. Continue here:{' '}
+                      <Link href={verificationUrl} className="text-[#e1a23a] underline">
+                        verify signup
+                      </Link>
+                    </p>
+                  )}
                 </div>
                 <Link
                   href="/"

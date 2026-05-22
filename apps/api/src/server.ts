@@ -46,7 +46,10 @@ async function sendSignupVerificationEmail(to: string, token: string): Promise<v
   const verifyUrl = `${appBaseUrl.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(token)}`;
   const { createResendClient, createEmailSender } = await import('@cpa/email');
   const resendApiKey = process.env['RESEND_API_KEY'];
-  const client = createResendClient(resendApiKey ? { apiKey: resendApiKey } : {});
+  if (!resendApiKey) {
+    throw new Error('RESEND_API_KEY is not configured');
+  }
+  const client = createResendClient({ apiKey: resendApiKey });
   const sender = createEmailSender(client, {
     fromAddress:
       process.env['SIGNUP_FROM_ADDRESS'] ??
@@ -76,6 +79,9 @@ const app = buildApp({
     cookieSecure,
     ttlSeconds,
     sendVerificationEmail: sendSignupVerificationEmail,
+    allowManualVerification:
+      process.env['SIGNUP_EMAIL_MODE'] === 'manual' || process.env['NODE_ENV'] !== 'production',
+    verificationBaseUrl: appBaseUrl,
   },
 });
 

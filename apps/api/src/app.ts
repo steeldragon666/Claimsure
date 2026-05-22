@@ -29,6 +29,7 @@ import { registerClaimBudget } from './routes/claim-budget.js';
 import { registerPortalFields } from './routes/portal-fields.js';
 import { registerApplyRules } from './routes/apply-rules.js';
 import { registerArtefactLinks } from './routes/artefact-links.js';
+import { registerAuth0Auth } from './routes/auth/auth0.js';
 import { registerGoogleAuth } from './routes/auth/google.js';
 import { registerMicrosoftAuth } from './routes/auth/microsoft.js';
 import { registerDevLogin } from './routes/auth/dev-login.js';
@@ -511,6 +512,26 @@ export function buildApp(options: BuildAppOptions = {}): App {
   // 404 on this path. Designed for founder/operator emergency access
   // when OIDC isn't configured or the IdP is down.
   // See: apps/api/src/routes/auth/dev-login.ts for the full contract.
+  const auth0Domain = process.env['AUTH0_DOMAIN'];
+  const auth0ClientId = process.env['AUTH0_CLIENT_ID'];
+  const auth0ClientSecret = process.env['AUTH0_CLIENT_SECRET'];
+  if (auth0Domain && auth0ClientId && auth0ClientSecret) {
+    app.register(async (instance) => {
+      await registerAuth0Auth(instance, {
+        domain: auth0Domain,
+        clientId: auth0ClientId,
+        clientSecret: auth0ClientSecret,
+        redirectUri:
+          process.env['AUTH0_REDIRECT_URI'] ?? 'http://localhost:3000/v1/auth/auth0/callback',
+        sessionSecret,
+        cookieName,
+        cookieSecure,
+        ttlSeconds,
+        postLoginRedirect: process.env['AUTH0_POST_LOGIN_REDIRECT'] ?? DEFAULT_POST_LOGIN_REDIRECT,
+      });
+    });
+  }
+
   const devLoginToken = process.env['DEV_LOGIN_TOKEN'];
   if (devLoginToken) {
     app.register((instance, _opts, done) => {
