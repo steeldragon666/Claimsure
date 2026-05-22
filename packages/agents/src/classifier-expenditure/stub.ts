@@ -29,6 +29,57 @@ const PATTERNS: Array<[RegExp, StubMatch]> = [
     /atlassian|github|stripe|aws|datadog|cloudflare|sentry|notion|slack|zoom/i,
     { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.92 },
   ],
+  // INELIGIBLE — insurance, broker, risk transfer.
+  [
+    /\b(aon\s+(?:risk|insur|aviation)|marsh(?:\s+(?:insur|aviation|risk))?|nrma|qbe|insurance\s+(?:premium|renewal))\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.9 },
+  ],
+  // INELIGIBLE — tax, accounting, audit, statutory advisory.
+  [
+    /\b(?:pwc(?:\s+tax)?|ey\s+tax|kpmg(?:\s+tax)?|deloitte(?:\s+tax)?|grant\s+thornton|bdo(?:\s+(?:tax|accounting))?)\b|\b(?:tax|board)\s+(?:prep|advisor(?:y)?|return|pack)\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.9 },
+  ],
+  // INELIGIBLE — corporate travel.
+  [
+    /\b(?:webjet|qantas|virgin\s+aus|jetstar|flight\s+centre)\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.9 },
+  ],
+  // INELIGIBLE — fuel cards, petrol, vehicle running costs.
+  [
+    /\b(?:caltex|starcard|bp\s+(?:fuel|diesel)|shell\s+(?:card|fuel))\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.9 },
+  ],
+  // INELIGIBLE — non-R&D SaaS (sales / marketing / collab tools).
+  [
+    /\b(?:salesforce|hubspot|monday\.?com|asana|miro|figma)\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.9 },
+  ],
+  // INELIGIBLE — Australian telco accounts.
+  [
+    /\b(?:telstra|optus|vodafone(?:\s+aus)?|tpg\s+telecom)\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.9 },
+  ],
+  // INELIGIBLE — coworking / rent / office lease.
+  [
+    /\b(?:wework|hub\s+australia)\b|\b(?:office|premises)\s+(?:lease|rent)\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.9 },
+  ],
+  // INELIGIBLE — retail / general hardware stores.
+  [
+    /\b(?:officeworks|bunnings|jb\s+hi-?fi)\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.9 },
+  ],
+  // INELIGIBLE — general legal services (patent / legal review is
+  // caught by the §355-30 pattern below — order matters).
+  [
+    /\b(?:latitude\s+legal|general\s+counsel|company\s+secretarial)\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.85 },
+  ],
+  // INELIGIBLE — aviation regulator / permit fees (admin, not R&D).
+  [
+    /\bcasa\s+permit\b/i,
+    { decision: 'ineligible', statutory_anchor: 'ineligible', confidence: 0.85 },
+  ],
   // CLEARLY ELIGIBLE under §355-25 — research / lab / experimental vocabulary.
   [
     /research|laboratory|prototype|experiment|reagent|specimen|sigma[\s-]?aldrich|fisher scientific|thermo fisher|mass spectrometer/i,
