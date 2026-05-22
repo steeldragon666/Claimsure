@@ -145,14 +145,17 @@ export function registerExpenditures(app: FastifyInstance): void {
     total_amount: string;
     currency: string;
     source: string;
-    voided_at: Date | null;
+    voided_at: string | Date | null;
   }
 
   interface MappingEventRow {
     expenditure_id: string;
     kind: MappingChainEvent['kind'];
     payload: Record<string, unknown>;
-    captured_at: Date;
+    // postgres-js returns timestamptz as a Date in most configs but the
+    // workspace pool is set up to leave timestamps as ISO strings (see
+    // packages/db/src/client.ts). Normalise on the way out with `new Date(…)`.
+    captured_at: string | Date;
     id: string;
   }
 
@@ -204,7 +207,7 @@ export function registerExpenditures(app: FastifyInstance): void {
         list.push({
           kind: ev.kind,
           payload: ev.payload,
-          captured_at: ev.captured_at.toISOString(),
+          captured_at: new Date(ev.captured_at).toISOString(),
           id: ev.id,
         });
         byExp.set(ev.expenditure_id, list);
@@ -220,7 +223,7 @@ export function registerExpenditures(app: FastifyInstance): void {
           total_amount: r.total_amount,
           currency: r.currency,
           source: r.source,
-          voided_at: r.voided_at?.toISOString() ?? null,
+          voided_at: r.voided_at != null ? new Date(r.voided_at).toISOString() : null,
           current_mapping,
         };
       });
@@ -241,7 +244,7 @@ export function registerExpenditures(app: FastifyInstance): void {
     id: string;
     claim_id: string | null;
     subject_tenant_id: string;
-    voided_at: Date | null;
+    voided_at: string | Date | null;
   }
 
   async function lookupExpenditure(tenantId: string, expId: string): Promise<ExpLookup | null> {

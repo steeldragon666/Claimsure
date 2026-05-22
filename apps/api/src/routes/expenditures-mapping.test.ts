@@ -87,18 +87,21 @@ before(async () => {
   await privilegedSql`UPDATE expenditure SET voided_at = now() WHERE id = ${E_VOIDED}`;
   // Seed chain events: E2 pre-mapped to ACTIVITY_CA, E3 pre-apportioned 60/40.
   // Use direct INSERT (not insertEventWithChain) — we only need the rows, not the hash chain integrity.
+  // Explicit ::text casts are required: jsonb_build_object's value arg is `any`,
+  // which leaves Postgres no type to bind the postgres-js placeholders to
+  // (error 42P18 "could not determine data type of parameter").
   await privilegedSql`
-    INSERT INTO event (id, tenant_id, subject_tenant_id, kind, payload, hash, captured_at, received_at)
+    INSERT INTO event (id, tenant_id, subject_tenant_id, kind, payload, hash, captured_at, received_at, captured_by_user_id)
     VALUES
       (gen_random_uuid(), ${TENANT}, ${SUBJECT}, 'EXPENDITURE_MAPPED',
-       jsonb_build_object('expenditure_id', ${E2}, 'activity_id', ${ACTIVITY_CA}, 'activity_code', 'CA-001', 'activity_title', 'Activity One'),
-       encode(sha256('seed-e2'::bytea), 'hex'), now(), now()),
+       jsonb_build_object('expenditure_id', ${E2}::text, 'activity_id', ${ACTIVITY_CA}::text, 'activity_code', 'CA-001', 'activity_title', 'Activity One'),
+       encode(sha256('seed-e2'::bytea), 'hex'), now(), now(), ${USER}),
       (gen_random_uuid(), ${TENANT}, ${SUBJECT}, 'EXPENDITURE_APPORTIONED',
-       jsonb_build_object('expenditure_id', ${E3}, 'allocations',
+       jsonb_build_object('expenditure_id', ${E3}::text, 'allocations',
          jsonb_build_array(
-           jsonb_build_object('activity_id', ${ACTIVITY_CA}, 'activity_code', 'CA-001', 'activity_title', 'Activity One', 'percentage', 60),
-           jsonb_build_object('activity_id', ${ACTIVITY_SA}, 'activity_code', 'SA-001', 'activity_title', 'Supporting', 'percentage', 40))),
-       encode(sha256('seed-e3'::bytea), 'hex'), now(), now())
+           jsonb_build_object('activity_id', ${ACTIVITY_CA}::text, 'activity_code', 'CA-001', 'activity_title', 'Activity One', 'percentage', 60),
+           jsonb_build_object('activity_id', ${ACTIVITY_SA}::text, 'activity_code', 'SA-001', 'activity_title', 'Supporting', 'percentage', 40))),
+       encode(sha256('seed-e3'::bytea), 'hex'), now(), now(), ${USER})
   `;
 });
 
