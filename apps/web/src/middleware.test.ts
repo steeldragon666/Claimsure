@@ -63,6 +63,13 @@ test('middleware: /beta-access bypasses (the page itself) via NextResponse.next(
   assertPassThrough(res, '/beta-access bypass');
 });
 
+test('middleware: public marketing and signup pages bypass beta gate', async () => {
+  for (const path of ['/', '/signup', '/verify-email']) {
+    const res = await middleware(makeReq(path));
+    assertPassThrough(res, `${path} public bypass`);
+  }
+});
+
 test('middleware: BETA_GATE_ENABLED=0 -> NextResponse.next() pass through', async () => {
   process.env.BETA_GATE_ENABLED = '0';
   const res = await middleware(makeReq('/protected'));

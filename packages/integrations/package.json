@@ -50,6 +50,10 @@
       "types": "./dist/xero-accounting/index.d.ts",
       "import": "./dist/xero-accounting/index.js"
     },
+    "./myob-accounting": {
+      "types": "./dist/myob-accounting/index.d.ts",
+      "import": "./dist/myob-accounting/index.js"
+    },
     "./github-app": {
       "types": "./dist/github-app/index.d.ts",
       "import": "./dist/github-app/index.js"

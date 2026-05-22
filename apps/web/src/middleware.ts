@@ -2,7 +2,7 @@
  * Beta access gate — runs at the Vercel edge before every request.
  *
  * Reads beta_session cookie. If missing/invalid AND the path isn't a
- * gate-bypass (the /beta-access page, /api/beta/*, or static assets),
+ * gate-bypass (public marketing/signup pages, /beta-access, /api/beta/*, or static assets),
  * 302s to /beta-access?next=<original-path>.
  *
  * Toggles:
@@ -22,7 +22,8 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/beta-auth';
 
-const BYPASS_PREFIXES = ['/beta-access', '/api/beta/'];
+const BYPASS_PATHS = ['/', '/signup', '/verify-email'];
+const BYPASS_PREFIXES = ['/beta-access', '/api/beta/', '/marketing/'];
 
 export const config = {
   // Match all paths except _next internals and the favicon. Static assets
@@ -41,8 +42,10 @@ export async function middleware(req: Request): Promise<Response> {
   // Local dev: don't require beta auth.
   if (process.env.NODE_ENV !== 'production') return NextResponse.next();
 
-  // Bypass for gate's own routes.
-  if (BYPASS_PREFIXES.some((p) => path.startsWith(p))) return NextResponse.next();
+  // Bypass for public acquisition pages and the gate's own routes.
+  if (BYPASS_PATHS.includes(path) || BYPASS_PREFIXES.some((p) => path.startsWith(p))) {
+    return NextResponse.next();
+  }
 
   const cookieHeader = req.headers.get('cookie') ?? '';
   const cookieMatch = cookieHeader.match(/(?:^|;\s*)beta_session=([^;]+)/);

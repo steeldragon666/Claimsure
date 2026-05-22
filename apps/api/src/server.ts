@@ -32,6 +32,35 @@ import { registerDocumentExtractJob } from './jobs/document-extract.js';
 import { registerGenerateApplicationJob } from './jobs/generate-application.js';
 
 const repoRoot = process.env['REPO_ROOT'] ?? process.cwd();
+const appBaseUrl = process.env['APP_BASE_URL'] ?? process.env['WEB_BASE_URL'] ?? 'http://localhost:5173';
+const sessionSecret = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
+const verificationSecret =
+  process.env['SIGNUP_VERIFICATION_SECRET'] ??
+  process.env['SESSION_JWT_SECRET'] ??
+  'dev-only-signup-verification-pad!!';
+const cookieName = process.env['SESSION_COOKIE_NAME'] ?? 'cpa_session';
+const cookieSecure = process.env['NODE_ENV'] === 'production';
+const ttlSeconds = Number(process.env['SESSION_TTL_SECONDS'] ?? 24 * 60 * 60);
+
+async function sendSignupVerificationEmail(to: string, token: string): Promise<void> {
+  const verifyUrl = `${appBaseUrl.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(token)}`;
+  const { createResendClient, createEmailSender } = await import('@cpa/email');
+  const resendApiKey = process.env['RESEND_API_KEY'];
+  const client = createResendClient(resendApiKey ? { apiKey: resendApiKey } : {});
+  const sender = createEmailSender(client, {
+    fromAddress:
+      process.env['SIGNUP_FROM_ADDRESS'] ??
+      process.env['BETA_FROM_ADDRESS'] ??
+      'Claimsure <noreply@claimsure.app>',
+  });
+
+  await sender.send({
+    to,
+    subject: 'Verify your Claimsure trial signup',
+    text: `Complete your Claimsure trial signup:\n\n${verifyUrl}\n\nThis link expires in 24 hours.`,
+    html: `<p>Complete your Claimsure trial signup:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
+  });
+}
 
 const app = buildApp({
   promptSuggestions: {
@@ -39,6 +68,14 @@ const app = buildApp({
       defaultEvaluate({ suggestion: input.suggestion, repoRoot: input.repoRoot }),
     choreograph: (opts) => generatePullRequest(opts),
     runContractTest: buildContractTestRunner({ repoRoot }),
+  },
+  signup: {
+    sessionSecret,
+    verificationSecret,
+    cookieName,
+    cookieSecure,
+    ttlSeconds,
+    sendVerificationEmail: sendSignupVerificationEmail,
   },
 });
 

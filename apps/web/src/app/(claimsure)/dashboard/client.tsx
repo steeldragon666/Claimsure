@@ -1,408 +1,187 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  COMPANY,
-  PROJECTS,
-  ENGINEERS,
-  EXPENDITURE_CATEGORIES,
-  TOTAL_NOTIONAL,
-  REFUNDABLE_OFFSET,
-  NET_BENEFIT,
-  fmtAUD,
-} from '@/lib/claimsure-data';
-import {
-  KPICard,
-  CsChip,
-  CsButton,
-  ConfidenceViz,
-  CsAvatar,
-  CsSectionHeader,
-  CsSegmented,
-} from '@/components/claimsure/primitives';
+const kpis = [
+  ['ACTIVE CLAIMS', '14', 'across 11 entities', '+3 vs last FY'],
+  ['EVIDENCE INDEXED', '2,847', 'artefacts this FY', '+38%'],
+  ['AT-RISK', '2', 'needs your judgement', '-1 since yesterday'],
+  ['CHAIN COVERAGE', '94%', 'of FY26 claims', '+11pts YoY'],
+];
 
-const PROJECT_ACCENT_MAP = {
-  primary: 'primary',
-  secondary: 'secondary',
-  tertiary: 'tertiary',
-  warn: 'warn',
-} as const;
+const claims = [
+  ['VANT-7', 'Vantage Industries', 'STAGE 04 - APPORTION', 'UNDER REVIEW', '47', '$2.42M', true],
+  ['BORE-2', 'Borealis Bio', 'STAGE 03 - ASSEMBLE', 'DRAFTING', '28', '$1.18M', false],
+  ['LYRA-1', 'Lyra Compute', 'STAGE 02 - STAMP', 'DRAFTING', '19', '$840K', false],
+  ['GQHC-1', 'GQHC Materials', 'STAGE 06 - SEAL', 'SEALED', '92', '$3.16M', false],
+  ['OREN-1', 'Oren Robotics', 'STAGE 04 - APPORTION', 'FLAGGED', '22', '$610K', true],
+  ['ARI-3', 'Aristocrat sub-entity', 'STAGE 06 - SEAL', 'CHAIN-LOCKED', '142', '$5.04M', false],
+];
 
-export function DashboardClient() {
-  const [view, setView] = useState('overview');
+const watchSignals = [
+  ['ATO', 'TAXPAYER ALERT', 'TA 2026/03', 'Software development eligibility - new evidence standard', '3 CLAIMS EXPOSED'],
+  ['AUSINDUSTRY', 'GUIDANCE', 'GN 26-04', 'Updated guidance - supporting activities', '1 CLAIM EXPOSED'],
+  ['AAT', 'DECISION', '[2026] AATA 412', 'Body by Michael doctrine extended', '2 CLAIMS EXPOSED'],
+];
 
-  const registrationDaysLeft = Math.ceil(
-    (new Date('2026-04-30').getTime() - Date.now()) / 86_400_000,
+const blocks = [
+  ['#00184_3F', 'WHITEBOARD', 'VANT-7', '14:01'],
+  ['#00184_3E', 'VOICE NOTE', 'VANT-7', '13:48'],
+  ['#00184_3D', 'CALC', 'BORE-2', '12:22'],
+  ['#00184_3C', 'LAB BOOK', 'LYRA-1', '11:15'],
+];
+
+function Diamond({ className = '' }: { className?: string }) {
+  return <span className={`inline-block rotate-45 bg-[#e1a23a] ${className}`} aria-hidden="true" />;
+}
+
+function Mono({ children, muted = false }: { children: React.ReactNode; muted?: boolean }) {
+  return (
+    <span className={`font-mono text-[10px] uppercase tracking-[0.2em] ${muted ? 'text-[#8a857c]' : 'text-[#e1a23a]'}`}>
+      {children}
+    </span>
   );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const tone =
+    status === 'FLAGGED'
+      ? 'border-[#c46a48] bg-[#c46a48]/15 text-[#c46a48]'
+      : status === 'CHAIN-LOCKED'
+        ? 'border-[#7a9685] bg-[#7a9685]/15 text-[#9ab2a3]'
+        : status === 'SEALED' || status === 'UNDER REVIEW'
+          ? 'border-[#e1a23a] bg-[#e1a23a]/10 text-[#e1a23a]'
+          : 'border-[#f0ebe2]/20 bg-[#1c1c20] text-[#cdc7bd]';
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-10">
-      {/* Header */}
-      <CsSectionHeader
-        eyebrow="FY24-25 R&D Tax Incentive"
-        title={
-          <>
-            Claim <span style={{ color: 'var(--cs-primary-fixed-dim)' }}>Dashboard</span>
-          </>
-        }
-        sub={`${COMPANY.name} · ABN ${COMPANY.abn} · Income year ending ${COMPANY.fyEnd}`}
-        actions={
-          <>
-            <CsChip icon="schedule" color="warn">
-              {registrationDaysLeft}d to registration
-            </CsChip>
-            <CsButton icon="refresh" variant="secondary" size="sm">
-              Refresh
-            </CsButton>
-            <CsButton icon="auto_awesome" variant="ai" size="sm">
-              Run AI Sweep
-            </CsButton>
-          </>
-        }
-      />
+    <span className={`border px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.16em] ${tone}`}>
+      {status}
+    </span>
+  );
+}
 
-      {/* AI insight banner */}
-      <div
-        className="rounded-2xl p-5 flex items-start gap-4"
-        style={{
-          background:
-            'linear-gradient(135deg, rgba(70,72,212,0.18) 0%, rgba(79,219,200,0.08) 100%)',
-          border: '1px solid rgba(70,72,212,0.28)',
-        }}
-      >
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: 'rgba(70,72,212,0.25)' }}
-        >
-          <span
-            className="material-symbols-outlined"
-            style={{
-              fontSize: 22,
-              fontVariationSettings: "'FILL' 1",
-              color: 'var(--cs-primary-fixed-dim)',
-            }}
-          >
-            auto_awesome
-          </span>
-        </div>
-        <div className="flex-1">
-          <div
-            className="font-jakarta font-bold text-[14px] mb-1"
-            style={{ color: 'var(--cs-primary-fixed-dim)' }}
-          >
-            Atlas · AI Insight
-          </div>
-          <p className="text-[13px] leading-relaxed" style={{ color: 'var(--cs-on-surface)' }}>
-            I've finished sweeping FY24-25 evidence. Total notional deduction is tracking at{' '}
-            <strong>{fmtAUD(TOTAL_NOTIONAL, { compact: true })}</strong> — that's a{' '}
-            <strong style={{ color: 'var(--cs-success)' }}>
-              {fmtAUD(NET_BENEFIT, { compact: true })} net cash benefit
-            </strong>{' '}
-            after the 43.5% refundable offset and 25% base-rate company tax. RD-003 needs attention
-            before filing.
+export function DashboardClient() {
+  return (
+    <div className="-m-8 min-h-[calc(100vh-64px)] bg-[#0b0b0d] p-7 text-[#f0ebe2]">
+      <div className="mb-7 flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+        <div>
+          <Mono muted>Dashboard - FY26</Mono>
+          <h1 className="mt-3 font-display text-5xl font-light leading-none tracking-[-0.025em]">
+            Good morning, Anna.
+          </h1>
+          <p className="mt-3 text-sm text-[#8a857c]">
+            Three signals overnight. Two claims need your judgement today.
           </p>
         </div>
-        <CsButton icon="chevron_right" variant="ai" size="sm">
-          View details
-        </CsButton>
+        <div className="flex flex-wrap gap-2">
+          <button className="border border-[#f0ebe2]/20 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-[#cdc7bd] hover:border-[#e1a23a] hover:text-[#e1a23a]">
+            + Import client
+          </button>
+          <button className="bg-[#e1a23a] px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0b0b0d]">
+            + New claim
+          </button>
+        </div>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard
-          label="Notional Deduction"
-          value={fmtAUD(TOTAL_NOTIONAL, { compact: true })}
-          sub="Total eligible expenditure"
-          icon="receipt_long"
-          accent="primary"
-          trend={1}
-        />
-        <KPICard
-          label="Refundable Offset"
-          value={fmtAUD(REFUNDABLE_OFFSET, { compact: true })}
-          sub="43.5% · turnover <A$20M"
-          icon="savings"
-          accent="success"
-          trend={1}
-        />
-        <KPICard
-          label="Net Cash Benefit"
-          value={fmtAUD(NET_BENEFIT, { compact: true })}
-          sub="After 25% company tax credit"
-          icon="account_balance_wallet"
-          accent="secondary"
-          trend={1}
-        />
-        <KPICard
-          label="Active Projects"
-          value={String(PROJECTS.length)}
-          sub={`${PROJECTS.filter((p) => p.status === 'active').length} active · ${PROJECTS.filter((p) => p.status === 'review').length} review · ${PROJECTS.filter((p) => p.status === 'draft').length} draft`}
-          icon="folder_special"
-          accent="tertiary"
-        />
+      <div className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {kpis.map(([label, value, sub, trend]) => (
+          <article key={label} className="border border-[#f0ebe2]/20 bg-[#131316] p-5">
+            <Mono muted>{label}</Mono>
+            <div className={`mt-4 font-display text-5xl font-light leading-none tracking-[-0.025em] ${label === 'AT-RISK' ? 'text-[#c46a48]' : label === 'CHAIN COVERAGE' ? 'text-[#e1a23a]' : 'text-[#f0ebe2]'}`}>
+              {value}
+            </div>
+            <p className="mt-2 text-xs text-[#8a857c]">{sub}</p>
+            <p className="mt-3 border-t border-[#f0ebe2]/10 pt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-[#5d594f]">
+              {trend}
+            </p>
+          </article>
+        ))}
       </div>
 
-      {/* Projects + expenditure */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Projects list */}
-        <div className="lg:col-span-3 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3
-              className="font-jakarta font-bold text-[18px]"
-              style={{ color: 'var(--cs-on-surface)' }}
+      <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+        <section className="overflow-hidden border border-[#f0ebe2]/20 bg-[#131316]">
+          <div className="flex flex-col justify-between gap-3 border-b border-[#f0ebe2]/10 px-5 py-4 md:flex-row md:items-center">
+            <div className="flex items-center gap-3">
+              <Diamond className="h-2 w-2" />
+              <h2 className="font-display text-xl font-medium">Active claims</h2>
+              <Mono muted>- FY26 BOOK</Mono>
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#8a857c]">
+              <span className="text-[#f0ebe2]">All</span> - Drafting - Review - Sealed
+            </div>
+          </div>
+
+          <div className="hidden grid-cols-[90px_1fr_190px_140px_70px_90px] border-b border-[#f0ebe2]/10 px-5 py-3 font-mono text-[10px] uppercase tracking-[0.16em] text-[#8a857c] lg:grid">
+            <span>ID</span>
+            <span>Client</span>
+            <span>Stage</span>
+            <span>Status</span>
+            <span className="text-right">Evid</span>
+            <span className="text-right">Value</span>
+          </div>
+
+          {claims.map(([id, client, stage, status, evidence, value, gap]) => (
+            <div
+              key={id as string}
+              className="grid gap-3 border-b border-[#f0ebe2]/10 px-5 py-4 last:border-b-0 lg:grid-cols-[90px_1fr_190px_140px_70px_90px] lg:items-center"
             >
-              R&D Projects
-            </h3>
-            <CsSegmented
-              value={view}
-              onChange={setView}
-              options={['overview', 'spend', 'confidence']}
-            />
-          </div>
-          <div className="space-y-3">
-            {PROJECTS.map((project) => (
-              <div
-                key={project.id}
-                className="cs-glass rounded-2xl p-5 transition-all hover:border-white/20 cursor-pointer group"
-              >
-                <div className="flex items-start justify-between gap-4 mb-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <CsChip
-                        color={PROJECT_ACCENT_MAP[project.color]}
-                        icon={
-                          project.status === 'active'
-                            ? 'check_circle'
-                            : project.status === 'review'
-                              ? 'pending'
-                              : 'edit_note'
-                        }
-                      >
-                        {project.code}
-                      </CsChip>
-                      <CsChip
-                        color={
-                          project.status === 'active'
-                            ? 'success'
-                            : project.status === 'review'
-                              ? 'warn'
-                              : 'default'
-                        }
-                      >
-                        {project.status}
-                      </CsChip>
-                    </div>
-                    <div
-                      className="font-semibold text-[14px]"
-                      style={{ color: 'var(--cs-on-surface)' }}
-                    >
-                      {project.name}
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div
-                      className="font-mono font-bold text-[15px]"
-                      style={{ color: 'var(--cs-primary-fixed-dim)' }}
-                    >
-                      {fmtAUD(project.coreSpend + project.supportSpend, { compact: true })}
-                    </div>
-                    <div
-                      className="text-[10px] opacity-50"
-                      style={{ color: 'var(--cs-on-surface-variant)' }}
-                    >
-                      total spend
-                    </div>
-                  </div>
-                </div>
-
-                {view === 'confidence' && <ConfidenceViz value={project.confidence} style="bar" />}
-
-                {view === 'spend' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div
-                      className="rounded-xl px-3 py-2"
-                      style={{ background: 'rgba(70,72,212,0.08)' }}
-                    >
-                      <div
-                        className="text-[10px] opacity-50 mb-0.5"
-                        style={{ color: 'var(--cs-on-surface-variant)' }}
-                      >
-                        Core spend
-                      </div>
-                      <div
-                        className="font-mono font-semibold text-[13px]"
-                        style={{ color: 'var(--cs-primary-fixed-dim)' }}
-                      >
-                        {fmtAUD(project.coreSpend)}
-                      </div>
-                    </div>
-                    <div
-                      className="rounded-xl px-3 py-2"
-                      style={{ background: 'rgba(79,219,200,0.08)' }}
-                    >
-                      <div
-                        className="text-[10px] opacity-50 mb-0.5"
-                        style={{ color: 'var(--cs-on-surface-variant)' }}
-                      >
-                        Supporting spend
-                      </div>
-                      <div
-                        className="font-mono font-semibold text-[13px]"
-                        style={{ color: 'var(--cs-secondary-fixed-dim)' }}
-                      >
-                        {fmtAUD(project.supportSpend)}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {view === 'overview' && (
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex -space-x-1.5">
-                        {project.owners.map((o) => (
-                          <CsAvatar key={o} name={o} size={24} />
-                        ))}
-                      </div>
-                      <span
-                        className="text-[11px] opacity-50"
-                        style={{ color: 'var(--cs-on-surface-variant)' }}
-                      >
-                        {project.contemporaneousEvidence} evidence items
-                      </span>
-                    </div>
-                    <ConfidenceViz value={project.confidence} style="badge" />
-                  </div>
-                )}
-
-                {/* AI note */}
-                <div
-                  className="mt-3 flex items-start gap-2 px-3 py-2 rounded-xl"
-                  style={{ background: 'rgba(70,72,212,0.07)' }}
-                >
-                  <span
-                    className="material-symbols-outlined flex-shrink-0 mt-0.5"
-                    style={{
-                      fontSize: 13,
-                      color: 'var(--cs-primary-fixed-dim)',
-                      fontVariationSettings: "'FILL' 1",
-                    }}
-                  >
-                    auto_awesome
-                  </span>
-                  <p
-                    className="text-[11px] leading-relaxed"
-                    style={{ color: 'var(--cs-on-surface-variant)' }}
-                  >
-                    {project.aiNote}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Expenditure mix */}
-        <div className="lg:col-span-2 space-y-4">
-          <h3
-            className="font-jakarta font-bold text-[18px]"
-            style={{ color: 'var(--cs-on-surface)' }}
-          >
-            Expenditure Mix
-          </h3>
-          <div className="cs-glass rounded-2xl p-5 space-y-4">
-            {EXPENDITURE_CATEGORIES.map((cat) => (
-              <div key={cat.id}>
-                <div className="flex items-baseline justify-between mb-1.5">
-                  <span className="text-[12px]" style={{ color: 'var(--cs-on-surface-variant)' }}>
-                    {cat.label}
-                  </span>
-                  <span
-                    className="font-mono text-[12px] font-semibold"
-                    style={{ color: 'var(--cs-on-surface)' }}
-                  >
-                    {fmtAUD(cat.amount, { compact: true })}
-                  </span>
-                </div>
-                <div
-                  className="h-1.5 w-full rounded-full overflow-hidden"
-                  style={{ background: 'rgba(255,255,255,0.07)' }}
-                >
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${cat.pct}%`,
-                      background:
-                        cat.pct > 30
-                          ? 'var(--cs-primary-fixed-dim)'
-                          : cat.pct > 15
-                            ? 'var(--cs-secondary-fixed-dim)'
-                            : 'var(--cs-tertiary-fixed-dim)',
-                    }}
-                  />
-                </div>
-                <div
-                  className="text-right text-[10px] mt-0.5 font-mono opacity-50"
-                  style={{ color: 'var(--cs-on-surface-variant)' }}
-                >
-                  {cat.pct}%
-                </div>
-              </div>
-            ))}
-
-            <div className="pt-3 mt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-              <div className="flex justify-between items-center">
-                <span
-                  className="text-[11px] uppercase tracking-wider font-semibold opacity-60"
-                  style={{ color: 'var(--cs-on-surface-variant)' }}
-                >
-                  Total notional
-                </span>
-                <span
-                  className="font-jakarta font-extrabold text-[20px]"
-                  style={{ color: 'var(--cs-primary-fixed-dim)' }}
-                >
-                  {fmtAUD(TOTAL_NOTIONAL, { compact: true })}
-                </span>
-              </div>
+              <span className="font-mono text-xs tracking-[0.08em] text-[#e1a23a]">{id}</span>
+              <span className="flex items-center gap-2 text-sm font-medium text-[#f0ebe2]">
+                {client}
+                {gap ? <span className="h-1.5 w-1.5 rounded-full bg-[#c46a48] shadow-[0_0_8px_#c46a48]" /> : null}
+              </span>
+              <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[#8a857c]">{stage}</span>
+              <StatusPill status={status as string} />
+              <span className="font-mono text-xs text-[#cdc7bd] lg:text-right">{evidence}</span>
+              <span className="font-mono text-sm tracking-[0.04em] text-[#f0ebe2] lg:text-right">{value}</span>
             </div>
-          </div>
+          ))}
+        </section>
 
-          {/* Engineer allocation summary */}
-          <h3
-            className="font-jakarta font-bold text-[18px] pt-2"
-            style={{ color: 'var(--cs-on-surface)' }}
-          >
-            Key Engineers
-          </h3>
-          <div className="cs-glass rounded-2xl p-4 space-y-3">
-            {ENGINEERS.slice(0, 4).map((eng) => (
-              <div key={eng.id} className="flex items-center gap-3">
-                <CsAvatar name={eng.name} size={32} />
-                <div className="flex-1 min-w-0">
-                  <div
-                    className="font-semibold text-[12px] truncate"
-                    style={{ color: 'var(--cs-on-surface)' }}
-                  >
-                    {eng.name}
-                  </div>
-                  <div
-                    className="text-[10px] opacity-50 truncate"
-                    style={{ color: 'var(--cs-on-surface-variant)' }}
-                  >
-                    {eng.role}
-                  </div>
+        <aside className="space-y-4">
+          <section className="border border-[#f0ebe2]/20 bg-[#131316]">
+            <div className="flex items-center justify-between border-b border-[#f0ebe2]/10 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <Diamond className="h-2 w-2" />
+                <h2 className="font-display text-lg font-medium">Watch</h2>
+              </div>
+              <Mono muted>Today - 3 signals</Mono>
+            </div>
+            {watchSignals.map(([src, tag, code, title, exposure]) => (
+              <article key={`${src}-${code}`} className="border-b border-[#f0ebe2]/10 px-5 py-4 last:border-b-0">
+                <div className="mb-2 flex items-baseline justify-between">
+                  <Mono>{src}</Mono>
+                  <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5d594f]">LIVE</span>
                 </div>
-                <ConfidenceViz value={eng.rdPct} style="badge" label="R&D %" />
+                <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5d594f]">
+                  {tag} - <span className="text-[#8a857c]">{code}</span>
+                </p>
+                <p className="mt-2 text-sm leading-6 text-[#f0ebe2]">{title}</p>
+                <div className="mt-3 inline-block border border-[#e1a23a]/70 bg-[#e1a23a]/10 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[#e1a23a]">
+                  {exposure}
+                </div>
+              </article>
+            ))}
+          </section>
+
+          <section className="border border-[#f0ebe2]/20 bg-[#131316]">
+            <div className="flex items-center justify-between border-b border-[#f0ebe2]/10 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <Diamond className="h-2 w-2" />
+                <h2 className="font-display text-lg font-medium">Recent chain blocks</h2>
+              </div>
+              <Mono muted>Height - 3,247</Mono>
+            </div>
+            {blocks.map(([id, kind, claim, time]) => (
+              <div key={id} className="grid grid-cols-[110px_1fr_54px] items-center gap-3 border-b border-[#f0ebe2]/10 px-5 py-3 last:border-b-0">
+                <span className="font-mono text-[11px] tracking-[0.08em] text-[#e1a23a]">{id}</span>
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#8a857c]">{kind}</p>
+                  <p className="mt-1 font-mono text-[10px] tracking-[0.04em] text-[#f0ebe2]">{claim}</p>
+                </div>
+                <span className="text-right font-mono text-[10px] text-[#8a857c]">{time}</span>
               </div>
             ))}
-            <div className="pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <CsButton variant="ghost" size="sm" full icon="arrow_forward">
-                View all engineers
-              </CsButton>
-            </div>
-          </div>
-        </div>
+          </section>
+        </aside>
       </div>
     </div>
   );
