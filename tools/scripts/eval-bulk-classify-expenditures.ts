@@ -66,10 +66,13 @@ const { values } = parseArgs({
   options: {
     concurrency: { type: 'string', default: '3' },
     tenant: { type: 'string' },
+    // namespace prefix: c0a2 (bulk-claims, default) or c0a3 (stress-test).
+    namespace: { type: 'string', default: 'c0a2' },
   },
 });
 const CONCURRENCY = Math.max(1, Math.min(64, Number(values.concurrency ?? '3') || 3));
 const TENANT_FILTER = values.tenant;
+const NAMESPACE_PREFIX = `00000000-0000-4000-8000-${values.namespace ?? 'c0a2'}`;
 
 interface IngestedEventRow {
   id: string;
@@ -114,7 +117,7 @@ async function loadIngestedEvents(): Promise<IngestedEventRow[]> {
   return await privilegedSql<IngestedEventRow[]>`
     SELECT id::text, tenant_id::text, subject_tenant_id::text, project_id::text, payload, captured_at
     FROM event
-    WHERE tenant_id::text LIKE '00000000-0000-4000-8000-c0a2%'
+    WHERE tenant_id::text LIKE ${NAMESPACE_PREFIX + '%'}
       AND kind = 'EXPENDITURE_INGESTED'
       AND classification IS NULL
   `;

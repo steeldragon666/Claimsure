@@ -45,3 +45,5 @@ export * from './federation_invitation.js';
 export * from './federation_audit.js';
 export * from './cloud_sync_connection.js';
 export * from './ip-search.js';
+export * from './eval_run.js';
+export * from './eval_run_claim.js';
