@@ -31,8 +31,14 @@ import { registerClaimEvidenceBindingJob } from './jobs/claim-evidence-binding.j
 import { registerDocumentExtractJob } from './jobs/document-extract.js';
 import { registerGenerateApplicationJob } from './jobs/generate-application.js';
 
+import { getPublicBaseUrl } from './lib/public-base-url.js';
+
 const repoRoot = process.env['REPO_ROOT'] ?? process.cwd();
-const appBaseUrl = process.env['APP_BASE_URL'] ?? process.env['WEB_BASE_URL'] ?? 'http://localhost:5173';
+// Public web URL used for signup-verification + federation-invitation email
+// links. Resolves PUBLIC_BASE_URL → APP_BASE_URL → WEB_BASE_URL → dev default.
+// THROWS in production if none set (boot-time crash beats silent
+// localhost-link emails to real users).
+const appBaseUrl = getPublicBaseUrl();
 const sessionSecret = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
 const verificationSecret =
   process.env['SIGNUP_VERIFICATION_SECRET'] ??
