@@ -16,9 +16,10 @@ import {
   rust,
 } from './tokens';
 import { Diamond, MonoLabel, StatusPill, type StatusKind } from './atoms';
-import { useConsultantRecentChainBlocks } from '@/lib/hooks/use-consultant-recent-chain-blocks';
 import Link from 'next/link';
+import { useConsultantRecentChainBlocks } from '@/lib/hooks/use-consultant-recent-chain-blocks';
 import { useConsultantSignals } from '@/lib/hooks/use-consultant-signals';
+import { useConsultantKpis, type ConsultantKpisResponse } from '@/lib/hooks/use-consultant-kpis';
 
 export function DashboardView() {
   return (
@@ -102,23 +103,7 @@ export function DashboardView() {
           marginBottom: 22,
         }}
       >
-        <KPI k="ACTIVE CLAIMS" big="14" sub="across 11 entities" trend="+3 vs last FY" />
-        <KPI k="EVIDENCE INDEXED" big="2,847" sub="artifacts this FY" trend="↑ 38%" />
-        <KPI
-          k="AT-RISK"
-          big="2"
-          sub="needs your judgement"
-          tone="rust"
-          trend="−1 since yesterday"
-        />
-        <KPI
-          k="CHAIN COVERAGE"
-          big="94"
-          suffix="%"
-          sub="of FY26 claims"
-          tone="amber"
-          trend="+11pts YoY"
-        />
+        <KpiStrip fy="FY26" />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
@@ -137,7 +122,13 @@ interface KPIProps {
   big: string;
   suffix?: string;
   sub: string;
-  trend: string;
+  /**
+   * Trend string below the divider. When `null` the trend row is omitted
+   * entirely — used when the server returns a `null` delta (e.g.
+   * `atRiskVsYesterday` until the daily-snapshot job lands) or when the
+   * prior FY had no comparable baseline.
+   */
+  trend: string | null;
   tone?: 'rust' | 'amber';
 }
 
@@ -173,20 +164,145 @@ function KPI({ k, big, suffix, sub, trend, tone }: KPIProps) {
         {suffix && <span style={{ fontSize: 28, color: amber }}>{suffix}</span>}
       </div>
       <div style={{ fontFamily: fSans, fontSize: 12, color: bone3, marginTop: 8 }}>{sub}</div>
+      {trend !== null && (
+        <div
+          style={{
+            marginTop: 10,
+            paddingTop: 8,
+            borderTop: `1px solid ${rule}`,
+            fontFamily: fMono,
+            fontSize: 9,
+            color: bone4,
+            letterSpacing: '0.14em',
+          }}
+        >
+          {trend}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Skeleton with the same vertical footprint as the loaded KPI card — label
+ * row, big number (48px), sub row, divider + trend — so populating the
+ * strip causes no visible layout shift on first paint.
+ */
+function KPISkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading KPI"
+      style={{
+        padding: '18px 20px',
+        background: ink2,
+        border: `1px solid ${ruleStrong}`,
+        borderRadius: 4,
+      }}
+    >
+      <div style={{ height: 12, width: 110, background: rule, borderRadius: 2 }} />
+      <div
+        style={{
+          marginTop: 14,
+          height: 48,
+          width: 90,
+          background: rule,
+          borderRadius: 2,
+        }}
+      />
+      <div
+        style={{ marginTop: 8, height: 14, width: 140, background: rule, borderRadius: 2 }}
+      />
       <div
         style={{
           marginTop: 10,
           paddingTop: 8,
           borderTop: `1px solid ${rule}`,
-          fontFamily: fMono,
-          fontSize: 9,
-          color: bone4,
-          letterSpacing: '0.14em',
         }}
       >
-        {trend}
+        <div style={{ height: 10, width: 120, background: rule, borderRadius: 2 }} />
       </div>
     </div>
+  );
+}
+
+function formatActiveClaimsTrend(delta: number | null): string | null {
+  if (delta === null) return null;
+  if (delta === 0) return 'no change vs last FY';
+  const sign = delta > 0 ? '+' : '−';
+  return `${sign}${Math.abs(delta)} vs last FY`;
+}
+
+function formatEvidenceTrend(pct: number | null): string | null {
+  if (pct === null) return null;
+  if (pct === 0) return 'flat YoY';
+  const arrow = pct > 0 ? '↑' : '↓';
+  return `${arrow} ${Math.abs(pct)}%`;
+}
+
+function formatAtRiskTrend(delta: number | null): string | null {
+  if (delta === null) return null;
+  if (delta === 0) return 'no change since yesterday';
+  const sign = delta > 0 ? '+' : '−';
+  return `${sign}${Math.abs(delta)} since yesterday`;
+}
+
+function formatCoverageTrend(pts: number | null): string | null {
+  if (pts === null) return null;
+  if (pts === 0) return 'flat YoY';
+  const sign = pts > 0 ? '+' : '−';
+  return `${sign}${Math.abs(pts)}pts YoY`;
+}
+
+function formatBig(n: number): string {
+  return n.toLocaleString('en-AU');
+}
+
+function KpiStrip({ fy }: { fy: string }) {
+  const { data, isLoading } = useConsultantKpis({ fy });
+
+  if (isLoading || !data) {
+    return (
+      <>
+        <KPISkeleton />
+        <KPISkeleton />
+        <KPISkeleton />
+        <KPISkeleton />
+      </>
+    );
+  }
+
+  const k: ConsultantKpisResponse = data;
+  return (
+    <>
+      <KPI
+        k="ACTIVE CLAIMS"
+        big={formatBig(k.activeClaims)}
+        sub="this FY"
+        trend={formatActiveClaimsTrend(k.deltas.activeClaimsVsLastFy)}
+      />
+      <KPI
+        k="EVIDENCE INDEXED"
+        big={formatBig(k.evidenceIndexed)}
+        sub="artifacts this FY"
+        trend={formatEvidenceTrend(k.deltas.evidenceIndexedPctYoY)}
+      />
+      <KPI
+        k="AT-RISK"
+        big={formatBig(k.atRisk)}
+        sub="needs your judgement"
+        tone="rust"
+        trend={formatAtRiskTrend(k.deltas.atRiskVsYesterday)}
+      />
+      <KPI
+        k="CHAIN COVERAGE"
+        big={formatBig(k.chainCoveragePct)}
+        suffix="%"
+        sub={`of ${fy} claims`}
+        tone="amber"
+        trend={formatCoverageTrend(k.deltas.chainCoveragePtsYoY)}
+      />
+    </>
   );
 }
 

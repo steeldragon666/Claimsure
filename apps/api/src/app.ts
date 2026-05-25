@@ -88,6 +88,7 @@ import { registerFederation } from './routes/federation/index.js';
 import { registerCloudSync } from './routes/cloud-sync.js';
 import { registerEvidenceRoutes } from './routes/evidence.js';
 import { registerConsultantChain } from './routes/consultant/chain.js';
+import { registerConsultantKpis } from './routes/consultant/kpis.js';
 import { registerConsultantSignals } from './routes/consultant/signals.js';
 
 const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
@@ -422,6 +423,11 @@ export function buildApp(options: BuildAppOptions = {}): App {
   // Consultant dashboard signals feed (GET /v1/consultant/signals) — D2.
   app.register((instance, _opts, done) => {
     registerConsultantSignals(instance);
+    done();
+  });
+  // Consultant dashboard KPI strip (GET /v1/consultant/kpis) — D4.
+  app.register((instance, _opts, done) => {
+    registerConsultantKpis(instance);
     done();
   });
   // Prompt-suggestions routes require explicit deps (esp. `runContractTest`,
