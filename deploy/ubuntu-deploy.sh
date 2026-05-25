@@ -31,10 +31,10 @@ cd /opt/archiveone
 
 if [ ! -f .env.production ]; then
   cp deploy/archiveone.env.example .env.production
-  POSTGRES_PASSWORD="$(openssl rand -base64 36 | tr -d '\n')"
-  CPA_APP_PASSWORD="$(openssl rand -base64 36 | tr -d '\n')"
-  SESSION_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
-  SIGNUP_VERIFICATION_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+  POSTGRES_PASSWORD="$(openssl rand -hex 32 | tr -d '\n')"
+  CPA_APP_PASSWORD="$(openssl rand -hex 32 | tr -d '\n')"
+  SESSION_JWT_SECRET="$(openssl rand -hex 48 | tr -d '\n')"
+  SIGNUP_VERIFICATION_SECRET="$(openssl rand -hex 48 | tr -d '\n')"
   TOKEN_ENCRYPTION_KEY="$(openssl rand -hex 32 | tr -d '\n')"
   CLOUD_SYNC_TOKEN_KEY="$(openssl rand -hex 32 | tr -d '\n')"
   sed -i "s|replace-with-a-long-random-password|${POSTGRES_PASSWORD}|g" .env.production
