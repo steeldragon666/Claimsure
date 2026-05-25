@@ -133,4 +133,8 @@ EXPOSE 5173
 # node_modules/.bin/, not in the root. The previous root-relative path
 # crash-looped with MODULE_NOT_FOUND: '/app/node_modules/.bin/next'
 # on first VPS deploy.
-CMD ["apps/web/node_modules/.bin/next", "start", "--port", "5173", "-d", "apps/web"]
+#
+# `next start` takes the project directory as a POSITIONAL argument, not
+# via `-d` (which next.js doesn't have — the original CMD had `-d apps/web`
+# and crash-looped with `error: unknown option '-d'`).
+CMD ["apps/web/node_modules/.bin/next", "start", "--port", "5173", "apps/web"]
