@@ -12,16 +12,32 @@ import { getAppDatabaseUrl, getDatabasePoolMax, getDatabaseUrl } from './env.js'
  * to keep TLS encryption but skip CA-chain validation — the connection
  * is still TLS, just trust-on-first-use.
  *
- * Triggered when:
- *   - URL contains `sslmode=require|verify-ca|verify-full|prefer`, OR
- *   - NODE_ENV is `production` (assume all prod connections are over TLS)
- * Otherwise (local docker pg on 5433) returns `false` → plain TCP.
+ * Resolution order:
+ *   1. `sslmode=disable` in URL → plain TCP, no TLS.
+ *      Used for container-to-container connections (e.g., the VPS deploy
+ *      where the postgres container doesn't have TLS configured). The
+ *      explicit opt-out MUST win over the production default below; this
+ *      was a real bug discovered on the archiveone.com.au first deploy —
+ *      dev-login 500'd because the URL said sslmode=disable but the
+ *      production default still forced TLS, and the postgres container
+ *      reset the half-handshake.
+ *   2. `sslmode=require|verify-ca|verify-full|prefer` in URL → TLS with
+ *      `rejectUnauthorized: false` (Supabase-style chain).
+ *   3. `NODE_ENV=production` → TLS with `rejectUnauthorized: false`
+ *      (assume managed Postgres unless explicitly opted out).
+ *   4. Otherwise (local docker pg on 5433) → plain TCP.
  */
 function resolveSsl(url: string): { rejectUnauthorized: false } | false {
+  // Step 1: explicit opt-out wins.
+  if (/[?&]sslmode=disable\b/.test(url)) return false;
+
+  // Step 2 + 3: any other sslmode, or production default.
   const hasSslMode = /[?&]sslmode=(?!disable)/.test(url);
   if (hasSslMode || process.env['NODE_ENV'] === 'production') {
     return { rejectUnauthorized: false };
   }
+
+  // Step 4: dev default.
   return false;
 }
 
