@@ -16,6 +16,9 @@ import {
   rust,
 } from './tokens';
 import { Diamond, MonoLabel, StatusPill, type StatusKind } from './atoms';
+import { useConsultantRecentChainBlocks } from '@/lib/hooks/use-consultant-recent-chain-blocks';
+import Link from 'next/link';
+import { useConsultantSignals } from '@/lib/hooks/use-consultant-signals';
 
 export function DashboardView() {
   return (
@@ -400,43 +403,10 @@ function ClaimsPanel() {
   );
 }
 
-interface Signal {
-  src: string;
-  tag: string;
-  code: string;
-  title: string;
-  exposure: number;
-  when: string;
-}
-
-const SIGNALS: Signal[] = [
-  {
-    src: 'ATO',
-    tag: 'TAXPAYER ALERT',
-    code: 'TA 2026/03',
-    title: 'Software development eligibility — new evidence standard',
-    exposure: 3,
-    when: '14:01',
-  },
-  {
-    src: 'AUSINDUSTRY',
-    tag: 'GUIDANCE',
-    code: 'GN 26-04',
-    title: 'Updated guidance — supporting activities',
-    exposure: 1,
-    when: '09:42',
-  },
-  {
-    src: 'AAT',
-    tag: 'DECISION',
-    code: '[2026] AATA 412',
-    title: 'Body by Michael — doctrine extended',
-    exposure: 2,
-    when: '08:15',
-  },
-];
-
 function WatchPanel() {
+  const { data } = useConsultantSignals({ window: '24h' });
+  const signals = data?.signals ?? [];
+
   return (
     <div
       style={{
@@ -461,70 +431,88 @@ function WatchPanel() {
           </span>
         </div>
         <MonoLabel size={9} color={bone3}>
-          TODAY · 3 SIGNALS
+          {`TODAY · ${signals.length} SIGNAL${signals.length !== 1 ? 'S' : ''}`}
         </MonoLabel>
       </div>
-      {SIGNALS.map((s, i) => (
+      {signals.length === 0 && (
         <div
-          key={s.code}
           style={{
-            padding: '14px 18px',
-            borderBottom: i < SIGNALS.length - 1 ? `1px solid ${rule}` : 'none',
-            background: s.exposure >= 3 ? 'rgba(225,162,58,0.04)' : 'transparent',
+            padding: '24px 18px',
+            fontFamily: fSans,
+            fontSize: 13,
+            color: bone3,
+            textAlign: 'center',
           }}
+        >
+          Watch is quiet — no new signals in the last 24h
+        </div>
+      )}
+      {signals.map((s, i) => (
+        <Link
+          key={s.code}
+          href={`/consultant/watch?signal=${encodeURIComponent(s.code)}`}
+          style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
         >
           <div
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'baseline',
-              marginBottom: 8,
+              padding: '14px 18px',
+              borderBottom: i < signals.length - 1 ? `1px solid ${rule}` : 'none',
+              background: s.exposure >= 3 ? 'rgba(225,162,58,0.04)' : 'transparent',
             }}
           >
-            <MonoLabel size={10}>{s.src}</MonoLabel>
-            <span
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                marginBottom: 8,
+              }}
+            >
+              <MonoLabel size={10}>{s.src}</MonoLabel>
+              <span
+                style={{
+                  fontFamily: fMono,
+                  fontSize: 9.5,
+                  color: bone4,
+                  letterSpacing: '0.14em',
+                }}
+              >
+                {s.when}
+              </span>
+            </div>
+            <div
               style={{
                 fontFamily: fMono,
                 fontSize: 9.5,
                 color: bone4,
                 letterSpacing: '0.14em',
+                marginBottom: 4,
               }}
             >
-              {s.when}
-            </span>
-          </div>
-          <div
-            style={{
-              fontFamily: fMono,
-              fontSize: 9.5,
-              color: bone4,
-              letterSpacing: '0.14em',
-              marginBottom: 4,
-            }}
-          >
-            {s.tag} · <span style={{ color: bone3 }}>{s.code}</span>
-          </div>
-          <div style={{ fontFamily: fSans, fontSize: 13.5, color: bone, lineHeight: 1.4 }}>
-            {s.title}
-          </div>
-          {s.exposure > 0 && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: '4px 8px',
-                border: `1px solid ${s.exposure >= 3 ? amber : ruleStrong}`,
-                background: s.exposure >= 3 ? 'rgba(225,162,58,0.08)' : 'transparent',
-                fontFamily: fMono,
-                fontSize: 10,
-                color: s.exposure >= 3 ? amber : bone2,
-                letterSpacing: '0.12em',
-                display: 'inline-block',
-              }}
-            >
-              {s.exposure} CLAIM{s.exposure > 1 ? 'S' : ''} EXPOSED
+              {s.tag} · <span style={{ color: bone3 }}>{s.code}</span>
             </div>
-          )}
-        </div>
+            <div style={{ fontFamily: fSans, fontSize: 13.5, color: bone, lineHeight: 1.4 }}>
+              {s.title}
+            </div>
+            {s.exposure > 0 && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '4px 8px',
+                  border: `1px solid ${s.exposure >= 3 ? amber : ruleStrong}`,
+                  background: s.exposure >= 3 ? 'rgba(225,162,58,0.08)' : 'transparent',
+                  fontFamily: fMono,
+                  fontSize: 10,
+                  color: s.exposure >= 3 ? amber : bone2,
+                  letterSpacing: '0.12em',
+                  display: 'inline-block',
+                }}
+              >
+                {s.exposure} CLAIM{s.exposure > 1 ? 'S' : ''} EXPOSED
+              </div>
+            )}
+          </div>
+        </Link>
       ))}
     </div>
   );
@@ -537,14 +525,33 @@ interface ChainBlock {
   claim: string;
 }
 
-const BLOCKS: ChainBlock[] = [
-  { id: '00184_3F', kind: 'WHITEBOARD', when: '14:01', claim: 'VANT-7' },
-  { id: '00184_3E', kind: 'VOICE NOTE', when: '13:48', claim: 'VANT-7' },
-  { id: '00184_3D', kind: 'CALC', when: '12:22', claim: 'BORE-2' },
-  { id: '00184_3C', kind: 'LAB BOOK', when: '11:15', claim: 'LYRA-1' },
-];
+/**
+ * Format an ISO-8601 timestamp as a local HH:MM string for the chain
+ * panel's right-aligned "when" column. Returns the raw input on parse
+ * failure (defensive — keeps the layout intact rather than rendering
+ * "Invalid Date" or "NaN:NaN" if the API ever returns garbage).
+ */
+function formatChainWhen(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+/**
+ * Format the chain head height as a thousands-separated count.
+ * Mirrors the mocked "3,247" aesthetic without hardcoding the value.
+ */
+function formatHeight(h: number): string {
+  return h.toLocaleString('en-US');
+}
 
 function ChainPanel() {
+  const { data, isLoading } = useConsultantRecentChainBlocks({ limit: 4 });
+  const blocks = data?.blocks ?? [];
+  const height = data?.height ?? 0;
+
   return (
     <div style={{ background: ink2, border: `1px solid ${ruleStrong}`, borderRadius: 4 }}>
       <div
@@ -563,66 +570,98 @@ function ChainPanel() {
           </span>
         </div>
         <MonoLabel size={9} color={bone3}>
-          HEIGHT · 3,247
+          HEIGHT · {formatHeight(height)}
         </MonoLabel>
       </div>
-      {BLOCKS.map((b, i) => (
+      {isLoading && (
         <div
-          key={b.id}
           style={{
-            display: 'grid',
-            gridTemplateColumns: '110px 1fr 70px',
-            padding: '12px 18px',
-            alignItems: 'center',
-            gap: 12,
-            borderBottom: i < BLOCKS.length - 1 ? `1px solid ${rule}` : 'none',
+            padding: '24px 18px',
+            textAlign: 'center',
+            fontFamily: fMono,
+            fontSize: 11,
+            color: bone3,
+            letterSpacing: '0.14em',
           }}
         >
-          <span
+          Loading…
+        </div>
+      )}
+      {!isLoading && blocks.length === 0 && (
+        <div
+          style={{
+            padding: '24px 18px',
+            textAlign: 'center',
+            fontFamily: fSans,
+            fontSize: 13,
+            color: bone3,
+          }}
+        >
+          Chain quiet — no blocks today
+        </div>
+      )}
+      {!isLoading &&
+        blocks.map((b, i) => (
+          <Link
+            key={b.id + b.when}
+            href={`/consultant/chain?block=${encodeURIComponent(b.id)}`}
             style={{
-              fontFamily: fMono,
-              fontSize: 11.5,
-              color: amber,
-              letterSpacing: '0.08em',
+              display: 'grid',
+              gridTemplateColumns: '110px 1fr 70px',
+              padding: '12px 18px',
+              alignItems: 'center',
+              gap: 12,
+              borderBottom: i < blocks.length - 1 ? `1px solid ${rule}` : 'none',
+              textDecoration: 'none',
+              color: 'inherit',
+              cursor: 'pointer',
             }}
           >
-            #{b.id}
-          </span>
-          <div>
-            <div
+            <span
               style={{
                 fontFamily: fMono,
-                fontSize: 10,
-                color: bone3,
-                letterSpacing: '0.16em',
+                fontSize: 11.5,
+                color: amber,
+                letterSpacing: '0.08em',
               }}
             >
-              {b.kind}
+              #{b.id}
+            </span>
+            <div>
+              <div
+                style={{
+                  fontFamily: fMono,
+                  fontSize: 10,
+                  color: bone3,
+                  letterSpacing: '0.16em',
+                }}
+              >
+                {b.kind}
+              </div>
+              <div
+                style={{
+                  fontFamily: fMono,
+                  fontSize: 10.5,
+                  color: bone,
+                  letterSpacing: '0.04em',
+                  marginTop: 2,
+                }}
+              >
+                {b.claim}
+              </div>
             </div>
-            <div
+            <span
               style={{
                 fontFamily: fMono,
                 fontSize: 10.5,
-                color: bone,
-                letterSpacing: '0.04em',
-                marginTop: 2,
+                color: bone3,
+                textAlign: 'right',
               }}
             >
-              {b.claim}
-            </div>
-          </div>
-          <span
-            style={{
-              fontFamily: fMono,
-              fontSize: 10.5,
-              color: bone3,
-              textAlign: 'right',
-            }}
-          >
-            {b.when}
-          </span>
-        </div>
-      ))}
+              {formatChainWhen(b.when)}
+            </span>
+          </Link>
+        ))}
     </div>
   );
 }
