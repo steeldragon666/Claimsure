@@ -125,5 +125,12 @@ USER appuser
 
 EXPOSE 5173
 
-# Run next start from the monorepo root so workspace module resolution works
-CMD ["node_modules/.bin/next", "start", "--port", "5173", "-d", "apps/web"]
+# Run `next start` from the monorepo root so workspace module resolution
+# works.
+#
+# Path is `apps/web/node_modules/.bin/next`, NOT `node_modules/.bin/next` —
+# pnpm installs per-app binaries in the consuming workspace's
+# node_modules/.bin/, not in the root. The previous root-relative path
+# crash-looped with MODULE_NOT_FOUND: '/app/node_modules/.bin/next'
+# on first VPS deploy.
+CMD ["apps/web/node_modules/.bin/next", "start", "--port", "5173", "-d", "apps/web"]
