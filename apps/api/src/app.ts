@@ -87,6 +87,8 @@ import { registerWhoami } from './routes/whoami.js';
 import { registerFederation } from './routes/federation/index.js';
 import { registerCloudSync } from './routes/cloud-sync.js';
 import { registerEvidenceRoutes } from './routes/evidence.js';
+import { registerConsultantChain } from './routes/consultant/chain.js';
+import { registerConsultantSignals } from './routes/consultant/signals.js';
 
 const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
 const DEFAULT_SESSION_COOKIE_NAME = 'cpa_session';
@@ -410,6 +412,16 @@ export function buildApp(options: BuildAppOptions = {}): App {
   // Cross-claimant evidence feed (GET /v1/evidence).
   app.register((instance, _opts, done) => {
     registerEvidenceRoutes(instance);
+    done();
+  });
+  // Consultant dashboard chain feed (GET /v1/consultant/chain/recent) — D3.
+  app.register((instance, _opts, done) => {
+    registerConsultantChain(instance);
+    done();
+  });
+  // Consultant dashboard signals feed (GET /v1/consultant/signals) — D2.
+  app.register((instance, _opts, done) => {
+    registerConsultantSignals(instance);
     done();
   });
   // Prompt-suggestions routes require explicit deps (esp. `runContractTest`,
