@@ -19,8 +19,12 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
-# Copy workspace manifests so pnpm can resolve the workspace graph
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+# Copy workspace manifests so pnpm can resolve the workspace graph,
+# plus the root tsconfig.base.json that apps/web/tsconfig.json extends.
+# Next.js's TypeScript pipeline resolves tsconfig.json's `extends` field
+# at build time; if /app/tsconfig.base.json is missing, `next build` fails
+# with TS5083: Cannot read file '/app/tsconfig.base.json'.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 
 # Copy every package.json in packages/ (needed for workspace resolution)
 COPY packages/agents/package.json       packages/agents/
