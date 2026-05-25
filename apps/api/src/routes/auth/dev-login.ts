@@ -27,7 +27,16 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { sql } from '@cpa/db/client';
+// dev-login MUST use the privileged (cpa role / BYPASSRLS) connection
+// for the user + tenant_user lookups: the session this route is about
+// to MINT doesn't exist yet, so we can't set the `app.current_tenant_id`
+// GUC that cpa_app's RLS policies require. With the regular `sql`
+// (cpa_app), the lookup returns 0 rows on a non-Supabase deploy where
+// the connection authenticates directly as cpa_app — produces a false
+// 403 no_tenant_membership. Discovered on the archiveone.com.au first
+// deploy where postgres-js connects directly as cpa_app (no Supavisor
+// BYPASSRLS short-circuit).
+import { privilegedSql as sql } from '@cpa/db/client';
 import { signSession, type AvailableTenant } from '@cpa/auth';
 
 export interface DevLoginConfig {
