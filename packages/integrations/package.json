@@ -65,6 +65,10 @@
     "./google-drive": {
       "types": "./dist/google-drive/index.d.ts",
       "import": "./dist/google-drive/index.js"
+    },
+    "./ip-australia": {
+      "types": "./dist/ip-australia/index.d.ts",
+      "import": "./dist/ip-australia/index.js"
     }
   },
   "scripts": {
