@@ -18,6 +18,7 @@ export * from './integration_connection.js';
 export * from './audit_score_snapshot.js';
 export * from './project.js';
 export * from './claim.js';
+export * from './engagement_letter.js';
 export * from './activity.js';
 export * from './expenditure.js';
 export * from './expenditure_line.js';

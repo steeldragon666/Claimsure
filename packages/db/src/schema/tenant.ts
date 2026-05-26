@@ -25,6 +25,12 @@ export const tenant = pgTable('tenant', {
   primaryIdp: text('primary_idp', { enum: ['microsoft', 'google', 'mixed'] })
     .notNull()
     .default('mixed'),
+  // Wizard Step 1 (migration 0085). Per-firm engagement-letter template
+  // in markdown with {{variable}} placeholders. NULL = firm has not yet
+  // configured a letter and the wizard's "send" action is gated off.
+  // Rendered per-claim at send time into engagement_letter.rendered_markdown
+  // (snapshot, immutable post-sign).
+  engagementLetterTemplateMd: text('engagement_letter_template_md'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()

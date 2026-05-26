@@ -70,6 +70,32 @@ export const CLAIM_STAGES = [
 ] as const;
 export type ClaimStage = (typeof CLAIM_STAGES)[number];
 
+/**
+ * Wizard Step 1 engagement-status lifecycle (migration 0085). SOT for
+ * the union — declared here (not engagement_letter.ts) because the
+ * `engagement_status` column lives on `claim`; engagement_letter.ts
+ * imports this constant rather than redeclaring it (avoids drift and a
+ * duplicate barrel export).
+ *
+ * Keep in sync with the `engagement_status` CHECK constraint defined
+ * in migration 0087 — divergence surfaces as a CHECK violation at
+ * write time (see CLAIM_STAGES precedent above).
+ *
+ *   `pending_send` — letter not yet sent to claimant (default on insert)
+ *   `sent`         — letter sent, awaiting signature
+ *   `signed`       — claimant signed (counter-sign may still be pending)
+ *   `declined`     — claimant declined; carries `declined_reason`
+ *   `expired`      — no signature within the configured window
+ */
+export const ENGAGEMENT_STATUSES = [
+  'pending_send',
+  'sent',
+  'signed',
+  'declined',
+  'expired',
+] as const;
+export type EngagementStatus = (typeof ENGAGEMENT_STATUSES)[number];
+
 export const claim = pgTable(
   'claim',
   {
@@ -105,6 +131,13 @@ export const claim = pgTable(
     // { agreed_at: ISO, agreed_by: <user_uuid> } } }. NO DEFAULT — the
     // null sentinel distinguishes legacy from wizard claims.
     workflowState: jsonb('workflow_state'),
+    // Wizard Step 1 engagement-letter status (migration 0085). Drives
+    // the wizard's first step gate. NOT NULL with default 'pending_send'
+    // so existing claim rows backfill automatically. CHECK constraint
+    // narrows to ENGAGEMENT_STATUSES — see the const JSDoc above.
+    engagementStatus: text('engagement_status', { enum: ENGAGEMENT_STATUSES })
+      .notNull()
+      .default('pending_send'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
