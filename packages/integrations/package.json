@@ -73,6 +73,14 @@
     "./semantic-scholar": {
       "types": "./dist/semantic-scholar/index.d.ts",
       "import": "./dist/semantic-scholar/index.js"
+    },
+    "./pubmed": {
+      "types": "./dist/pubmed/index.d.ts",
+      "import": "./dist/pubmed/index.js"
+    },
+    "./arxiv": {
+      "types": "./dist/arxiv/index.d.ts",
+      "import": "./dist/arxiv/index.js"
     }
   },
   "scripts": {
@@ -86,6 +94,7 @@
     "@cpa/db": "workspace:*",
     "@cpa/observability": "workspace:*",
     "@cpa/schemas": "workspace:*",
+    "fast-xml-parser": "^4.5.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
