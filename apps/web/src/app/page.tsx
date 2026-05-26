@@ -71,6 +71,9 @@ export default function MarketingHomePage() {
             <Link href="#workflow" className="hover:text-[#f7f1e4]">
               Workflow
             </Link>
+            <Link href="/blog" className="hover:text-[#f7f1e4]">
+              Blog
+            </Link>
             <Link href="#pilot" className="hover:text-[#f7f1e4]">
               Pilot
             </Link>
@@ -208,6 +211,43 @@ export default function MarketingHomePage() {
                 <h3 className="font-display text-3xl font-light text-[#f7f1e4]">{title}</h3>
                 <p className="font-body text-sm leading-7 text-[#cfc5b3]">{body}</p>
               </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-b border-[#f7f1e4]/10 bg-[#f3ebdd] text-[#181a16]">
+        <div className="mx-auto grid max-w-[1420px] gap-10 px-5 py-20 sm:px-8 lg:grid-cols-[0.8fr_1.2fr] lg:px-12">
+          <div>
+            <SectionLabel>Field notes</SectionLabel>
+            <h2 className="mt-6 max-w-xl font-display text-5xl font-light leading-tight tracking-tight md:text-7xl">
+              Evidence, workflow, and review readiness.
+            </h2>
+            <Link
+              href="/blog"
+              className="mt-8 inline-flex border border-[#181a16]/20 px-5 py-4 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[#181a16] transition hover:border-[#d8b15f] hover:text-[#8a6728]"
+            >
+              Read the blog
+            </Link>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {[
+              {
+                title: 'What contemporaneous documentation looks like in 2026',
+                body: 'A practical guide for evidence that can be inspected, traced, and understood.',
+                href: '/blog/contemporaneous-documentation-2026',
+              },
+              {
+                title: 'Hypothesis articulation for software R&D',
+                body: 'A working frame for uncertainty, experiment, and technical learning.',
+                href: '/blog/hypothesis-articulation-software-rd',
+              },
+            ].map(({ title, body, href }) => (
+              <Link key={title} href={href} className="border border-[#181a16]/15 bg-white p-6">
+                <Mark />
+                <h3 className="mt-8 font-display text-3xl font-light">{title}</h3>
+                <p className="mt-4 font-body text-sm leading-7 text-[#5f5a50]">{body}</p>
+              </Link>
             ))}
           </div>
         </div>
