@@ -69,6 +69,10 @@
     "./ip-australia": {
       "types": "./dist/ip-australia/index.d.ts",
       "import": "./dist/ip-australia/index.js"
+    },
+    "./semantic-scholar": {
+      "types": "./dist/semantic-scholar/index.d.ts",
+      "import": "./dist/semantic-scholar/index.js"
     }
   },
   "scripts": {
