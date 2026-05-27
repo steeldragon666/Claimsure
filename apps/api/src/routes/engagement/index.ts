@@ -5,11 +5,12 @@ import { registerEngagementCountersign } from './countersign.js';
 import { registerEngagementDecline } from './decline.js';
 import { registerEngagementGet } from './get.js';
 import { registerEngagementGetByToken } from './get-by-token.js';
+import { registerEngagementMePending } from './me-pending.js';
 
 /**
  * Engagement-letter route surface — Wizard Step 1 (docs/plans/wizard-step-1/).
  *
- * Six endpoints, split across two auth tiers:
+ * Seven endpoints, split across three auth tiers:
  *
  * Session-required (RLS-scoped via `sql.begin` + GUC):
  *   - POST /v1/claims/:id/engagement/send
@@ -20,6 +21,9 @@ import { registerEngagementGetByToken } from './get-by-token.js';
  *   - GET  /v1/engagement/by-token/:token
  *   - POST /v1/engagement/:token/sign
  *   - POST /v1/engagement/:token/decline
+ *
+ * Mobile-session (requireMobileSession + RLS GUC on the consultant tenant):
+ *   - GET  /v1/me/pending-engagement
  *
  * Each handler lives in its own file for blame-isolation; this index
  * is a thin barrel.
@@ -37,4 +41,5 @@ export function registerEngagementRoutes(app: FastifyInstance): void {
   registerEngagementGetByToken(app);
   registerEngagementSign(app);
   registerEngagementDecline(app);
+  registerEngagementMePending(app);
 }
