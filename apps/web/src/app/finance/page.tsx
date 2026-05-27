@@ -229,7 +229,7 @@ function SubscriptionSnapshot({ tenantName }: { tenantName: string }) {
       </CardHeader>
       <CardContent className="flex flex-wrap items-end justify-between gap-4">
         <p className="text-sm text-muted-foreground max-w-md">
-          Manage your Claimsure subscription, payment method, and download invoice history. All
+          Manage your ArchiveOne subscription, payment method, and download invoice history. All
           amounts include 10% Australian GST.
         </p>
         <div className="flex flex-wrap gap-2">

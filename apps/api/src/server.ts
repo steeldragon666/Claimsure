@@ -7,16 +7,11 @@ import './force-env.js';
 // any module that fastify/pino/postgres-js depends on is loaded.
 import { sdk } from './tracer-init.js';
 
-// TODO(P9.1): Initialize Sentry SDK here using process.env.SENTRY_DSN_API
-// SENTRY_DSN_API is already injected by cloudrun-deploy.sh via Secret Manager.
-// Prerequisites before activating:
-//   pnpm --filter @cpa/api add @sentry/node @sentry/opentelemetry
-// Then replace this comment with:
-//   import * as Sentry from '@sentry/node';
-//   import { buildApiSentryOptions } from '../../../tools/monitoring/sentry-config.js';
-//   Sentry.init(buildApiSentryOptions());
-// Sentry must init AFTER the OTel SDK starts (above) and BEFORE Fastify loads.
-// See tools/monitoring/sentry-config.ts for the canonical options reference.
+// Sentry must init AFTER the OTel SDK starts (above) and BEFORE Fastify
+// or any module that uses http/postgres is imported. If SENTRY_DSN is
+// unset this is a no-op (Sentry SDK never initialises). See ./sentry-init.ts.
+import { initSentry, Sentry } from './sentry-init.js';
+initSentry();
 
 import { buildApp } from './app.js';
 import { evaluate as defaultEvaluate } from '@cpa/agents/suggestion-evaluator';
@@ -30,6 +25,7 @@ import { registerClaimActivityProposalJob } from './jobs/claim-activity-proposal
 import { registerClaimEvidenceBindingJob } from './jobs/claim-evidence-binding.js';
 import { registerDocumentExtractJob } from './jobs/document-extract.js';
 import { registerGenerateApplicationJob } from './jobs/generate-application.js';
+import { registerIpSearchReportRenderPdfJob } from './jobs/ip-search-report-render-pdf.js';
 import { getPublicBaseUrl, publicUrl } from './lib/public-base-url.js';
 import { assertDistinctProductionSecrets, readSecretEnv } from './lib/production-secrets.js';
 
@@ -123,6 +119,8 @@ if (process.env['NODE_ENV'] !== 'test') {
     app.log.info('document-extract job registered');
     await registerGenerateApplicationJob(boss);
     app.log.info('generate-application job registered');
+    await registerIpSearchReportRenderPdfJob(boss);
+    app.log.info('ip-search-report-render-pdf job registered');
   } catch (err) {
     // Pino async transport can swallow this when process.exit(1) fires before
     // flush (observed on Railway boot crashes). Write to stderr synchronously
@@ -153,12 +151,15 @@ try {
 process.on('uncaughtException', (err) => {
   console.error('[UNCAUGHT EXCEPTION]', err);
   if (err.stack) console.error(err.stack);
-  process.exit(1);
+  Sentry.captureException(err);
+  // Best-effort flush before exit; bounded so we never hang the container.
+  void Sentry.close(2000).finally(() => process.exit(1));
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[UNHANDLED REJECTION]', reason);
   if (reason instanceof Error && reason.stack) console.error(reason.stack);
-  process.exit(1);
+  Sentry.captureException(reason);
+  void Sentry.close(2000).finally(() => process.exit(1));
 });
 
 const shutdown = async (signal: string): Promise<void> => {

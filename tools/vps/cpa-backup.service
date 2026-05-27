@@ -1,0 +1,30 @@
+[Unit]
+Description=ArchiveOne / CPA Platform nightly backup (pg_dump + restic)
+Documentation=file:///opt/cpa-platform/tools/vps/BACKUPS.md
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/cpa/backup.env
+ExecStart=/opt/cpa-platform/tools/vps/backup.sh
+
+# Hardening
+User=root
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+
+# Stdout/stderr go to the journal in addition to /var/log/cpa-backup.log.
+StandardOutput=journal
+StandardError=journal
+
+# Hook a paging alert into OnFailure (see BACKUPS.md "Alerting").
+# OnFailure=cpa-backup-alert@%n.service
+
+[Install]
+WantedBy=multi-user.target

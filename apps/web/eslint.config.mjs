@@ -23,6 +23,12 @@ export default [
       'src/components/ui/**',
       'src/hooks/use-toast.ts',
       'e2e/**',
+      // Sentry runtime config files at the workspace root — outside the Next
+      // tsconfig project service (loaded directly by @sentry/nextjs's webpack
+      // plugin and the instrumentation hook).
+      'sentry.client.config.ts',
+      'sentry.server.config.ts',
+      'sentry.edge.config.ts',
     ],
   },
 ];

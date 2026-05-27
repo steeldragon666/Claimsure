@@ -1,4 +1,5 @@
 import cookie from '@fastify/cookie';
+import * as Sentry from '@sentry/node';
 import Fastify from 'fastify';
 import type {
   FastifyBaseLogger,
@@ -87,10 +88,12 @@ import { registerWhoami } from './routes/whoami.js';
 import { registerFederation } from './routes/federation/index.js';
 import { registerCloudSync } from './routes/cloud-sync.js';
 import { registerEvidenceRoutes } from './routes/evidence.js';
+import { registerIpSearchReportRoute } from './routes/ip-search/report.js';
 import { registerConsultantChain } from './routes/consultant/chain.js';
 import { registerConsultantKpis } from './routes/consultant/kpis.js';
 import { registerConsultantSignals } from './routes/consultant/signals.js';
 import { registerIpSearch } from './routes/ip-search/index.js';
+import { registerEngagementRoutes } from './routes/engagement/index.js';
 import { publicUrl } from './lib/public-base-url.js';
 import { readSecretEnv } from './lib/production-secrets.js';
 
@@ -298,6 +301,10 @@ export function buildApp(options: BuildAppOptions = {}): App {
     done();
   });
   app.register((instance, _opts, done) => {
+    registerIpSearchReportRoute(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
     registerRefreshRoute(instance);
     done();
   });
@@ -440,6 +447,11 @@ export function buildApp(options: BuildAppOptions = {}): App {
     registerIpSearch(instance);
     done();
   });
+  // Engagement letter endpoints — Wizard Step 1 (Task 02).
+  app.register((instance, _opts, done) => {
+    registerEngagementRoutes(instance);
+    done();
+  });
   // Prompt-suggestions routes require explicit deps (esp. `runContractTest`,
   // which closes the I3 skip-gate at the type level — see
   // PromptSuggestionsRouteDeps in routes/prompt-suggestions.ts). Tests that
@@ -580,7 +592,11 @@ export function buildApp(options: BuildAppOptions = {}): App {
     // which produce Error instances, so .name/.message are present.
     const e = err as Error & { statusCode?: number };
     const status = e.statusCode ?? 500;
+    // Forward server-side errors (5xx) to Sentry. 4xx are client mistakes
+    // (validation, auth) and would only flood the inbox. Sentry.init is a
+    // no-op when SENTRY_DSN is unset, so this is safe to call unconditionally.
     if (status >= 500) {
+      Sentry.captureException(e, { tags: { reqId: String(req.id) } });
       app.log.error({ err: e, reqId: req.id }, 'request failed');
     } else {
       app.log.warn({ err: e, reqId: req.id }, 'request failed');

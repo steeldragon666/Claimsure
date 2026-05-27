@@ -97,6 +97,12 @@ export default tseslint.config(
       'apps/web/tailwind.config.ts',
       'apps/web/postcss.config.mjs',
       'apps/web/playwright.config.ts',
+      // Sentry runtime config files at the workspace root — outside the Next
+      // tsconfig project service (loaded by @sentry/nextjs's webpack plugin
+      // and the instrumentation hook). See apps/web/eslint.config.mjs.
+      'apps/web/sentry.client.config.ts',
+      'apps/web/sentry.server.config.ts',
+      'apps/web/sentry.edge.config.ts',
     ],
   },
 );

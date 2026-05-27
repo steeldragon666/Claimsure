@@ -57,6 +57,10 @@
     "./ip-search-verdict": {
       "types": "./dist/ip-search-verdict/index.d.ts",
       "import": "./dist/ip-search-verdict/index.js"
+    },
+    "./signup-evaluator": {
+      "types": "./dist/signup-evaluator/index.d.ts",
+      "import": "./dist/signup-evaluator/index.js"
     }
   },
   "scripts": {

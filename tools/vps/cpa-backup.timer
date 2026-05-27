@@ -1,0 +1,17 @@
+[Unit]
+Description=Run cpa-backup.service nightly at 02:30 Melbourne time
+Documentation=file:///opt/cpa-platform/tools/vps/BACKUPS.md
+
+[Timer]
+# 02:30 local time, every day. The host should be set to Australia/Melbourne
+# (`timedatectl set-timezone Australia/Melbourne`). Persistent=true ensures a
+# missed run (host powered off / agent stopped) fires as soon as the system is
+# back online.
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=0
+Unit=cpa-backup.service
+
+[Install]
+WantedBy=timers.target

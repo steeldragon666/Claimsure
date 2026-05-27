@@ -8,14 +8,16 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "onboard-tenant": "tsx --env-file-if-exists=../../.env onboard-tenant.ts",
-    "reconcile-prompt-suggestion-prs": "tsx --env-file-if-exists=../../.env reconcile-prompt-suggestion-prs.ts"
+    "reconcile-prompt-suggestion-prs": "tsx --env-file-if-exists=../../.env reconcile-prompt-suggestion-prs.ts",
+    "smoke:data-plane": "tsx --env-file-if-exists=../../.env smoke-data-plane.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "@cpa/agents": "workspace:*",
     "@cpa/auth": "workspace:*",
     "@cpa/db": "workspace:*",
-    "@cpa/integrations": "workspace:*"
+    "@cpa/integrations": "workspace:*",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -407,6 +407,20 @@
       "when": 1779001200000,
       "tag": "0087_engagement_letter",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1779260400000,
+      "tag": "0088_signup_decision",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1779433200000,
+      "tag": "0089_signup_pipeline_hardening",
+      "breakpoints": true
     }
   ]
 }
