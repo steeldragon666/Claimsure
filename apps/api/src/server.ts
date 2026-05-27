@@ -30,6 +30,7 @@ import { registerClaimActivityProposalJob } from './jobs/claim-activity-proposal
 import { registerClaimEvidenceBindingJob } from './jobs/claim-evidence-binding.js';
 import { registerDocumentExtractJob } from './jobs/document-extract.js';
 import { registerGenerateApplicationJob } from './jobs/generate-application.js';
+import { registerIpSearchReportRenderPdfJob } from './jobs/ip-search-report-render-pdf.js';
 import { getPublicBaseUrl, publicUrl } from './lib/public-base-url.js';
 import { assertDistinctProductionSecrets, readSecretEnv } from './lib/production-secrets.js';
 
@@ -123,6 +124,8 @@ if (process.env['NODE_ENV'] !== 'test') {
     app.log.info('document-extract job registered');
     await registerGenerateApplicationJob(boss);
     app.log.info('generate-application job registered');
+    await registerIpSearchReportRenderPdfJob(boss);
+    app.log.info('ip-search-report-render-pdf job registered');
   } catch (err) {
     // Pino async transport can swallow this when process.exit(1) fires before
     // flush (observed on Railway boot crashes). Write to stderr synchronously
