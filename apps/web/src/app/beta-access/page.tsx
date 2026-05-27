@@ -29,7 +29,7 @@ function BetaAccessForm() {
     <div className="max-w-md w-full space-y-6 rounded-lg border border-border bg-card p-8">
       <header className="space-y-2">
         <h1 className="font-display text-2xl font-semibold tracking-tight">
-          Claimsure beta access
+          ArchiveOne beta access
         </h1>
         <p className="text-sm text-muted-foreground leading-relaxed">
           Enter your email. If it&apos;s on the beta allowlist, you&apos;ll get a magic link valid

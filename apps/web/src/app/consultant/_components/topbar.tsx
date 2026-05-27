@@ -60,7 +60,7 @@ export function TopBar({ user }: { user: ConsultantUser }) {
             letterSpacing: '-0.01em',
           }}
         >
-          ClaimSure
+          ArchiveOne
         </span>
       </div>
 

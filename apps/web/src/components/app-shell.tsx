@@ -110,7 +110,7 @@ function Header({
     <header className="border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-30">
       <div className="flex items-center justify-between gap-4 px-6 h-14">
         <Link href="/subject-tenants" className="flex items-baseline gap-2 group">
-          <span className="font-display text-xl font-semibold tracking-tight">Claimsure</span>
+          <span className="font-display text-xl font-semibold tracking-tight">ArchiveOne</span>
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground group-hover:text-foreground transition-colors">
             R&amp;D Tax Incentive
           </span>
