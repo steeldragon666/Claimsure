@@ -16,12 +16,25 @@ console.log('[next.config] API_URL rewrite target:', API_URL);
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(import.meta.dirname, '..', '..'),
   async rewrites() {
-    return [
-      {
-        source: '/v1/:path*',
-        destination: `${API_URL}/v1/:path*`,
-      },
-    ];
+    // beforeFiles runs before the Next.js file-system router, so the home
+    // page rewrite below takes precedence over any app/page.tsx. The
+    // marketing HTML is served from public/landing/index.html; signup,
+    // login, /consultant, etc. continue to use their own app routes.
+    return {
+      beforeFiles: [
+        {
+          source: '/',
+          destination: '/landing/index.html',
+        },
+      ],
+      afterFiles: [
+        {
+          source: '/v1/:path*',
+          destination: `${API_URL}/v1/:path*`,
+        },
+      ],
+      fallback: [],
+    };
   },
   reactStrictMode: true,
 };
