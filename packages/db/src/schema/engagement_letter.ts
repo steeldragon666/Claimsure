@@ -92,6 +92,14 @@ export const engagementLetter = pgTable(
     declinedAt: timestamp('declined_at', { withTimezone: true }),
     declinedReason: text('declined_reason'),
     expiredAt: timestamp('expired_at', { withTimezone: true }),
+    // Wizard Step 1 Task 04 (migration 0088) — idempotency bookmarks
+    // for the daily engagement-reminder-tick pg-boss job. Set in the
+    // same UPDATE…RETURNING that queues the email, so a same-day
+    // re-run of the job filters the row out via `IS NULL` predicate.
+    // 30-day auto-expire piggy-backs on `expired_at` + `engagement_status`
+    // and needs no extra bookmark.
+    remindedAt7d: timestamp('reminded_7d_at', { withTimezone: true }),
+    remindedAt14d: timestamp('reminded_14d_at', { withTimezone: true }),
   },
   (t) => ({
     oneLetterPerClaim: unique('one_letter_per_claim').on(t.claimId),
