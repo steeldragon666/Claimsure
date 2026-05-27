@@ -26,7 +26,6 @@ import { DashboardView } from './_components/dashboard-view';
 import { WizardView } from './_components/wizard-view';
 import { WatchView } from './_components/watch-view';
 import { FinancingView } from './_components/financing-view';
-import { PreviewBanner } from './_components/preview-banner';
 import { bone, fSans, ink } from './_components/tokens';
 
 const DEMO_USER: ConsultantUser = {
@@ -51,7 +50,6 @@ export default function ConsultantWorkspace() {
         fontFamily: fSans,
       }}
     >
-      <PreviewBanner />
       <TopBar user={DEMO_USER} />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <Sidebar view={view} setView={setView} />
