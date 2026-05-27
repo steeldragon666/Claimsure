@@ -74,6 +74,14 @@ import {
   type BillingWebhookRouteDeps,
 } from './routes/billing-webhook.js';
 import { registerSignupRoutes, type SignupRouteDeps } from './routes/auth/signup.js';
+import {
+  registerFounderApprove,
+  type FounderApproveRouteDeps,
+} from './routes/auth/founder-approve.js';
+import {
+  registerFounderSignin,
+  type FounderSigninRouteDeps,
+} from './routes/auth/founder-signin.js';
 import { registerTenantActivationGate } from './middleware/auth.js';
 import { registerCompliance } from './routes/compliance.js';
 import { registerIntelligence } from './routes/intelligence.js';
@@ -150,6 +158,8 @@ export interface BuildAppOptions {
   billing?: BillingRouteDeps;
   billingWebhook?: BillingWebhookRouteDeps;
   signup?: SignupRouteDeps;
+  founderApprove?: FounderApproveRouteDeps;
+  founderSignin?: FounderSigninRouteDeps;
 }
 
 export function buildApp(options: BuildAppOptions = {}): App {
@@ -481,6 +491,18 @@ export function buildApp(options: BuildAppOptions = {}): App {
   if (options.signup) {
     app.register((instance, _opts, done) => {
       registerSignupRoutes(instance, options.signup!);
+      done();
+    });
+  }
+  if (options.founderApprove) {
+    app.register((instance, _opts, done) => {
+      registerFounderApprove(instance, options.founderApprove!);
+      done();
+    });
+  }
+  if (options.founderSignin) {
+    app.register((instance, _opts, done) => {
+      registerFounderSignin(instance, options.founderSignin!);
       done();
     });
   }

@@ -49,6 +49,19 @@ const cookieName = process.env['SESSION_COOKIE_NAME'] ?? 'cpa_session';
 const cookieSecure = process.env['NODE_ENV'] === 'production';
 const ttlSeconds = Number(process.env['SESSION_TTL_SECONDS'] ?? 24 * 60 * 60);
 
+// Founder notification + magic-link override.
+// FOUNDER_NOTIFICATION_EMAIL turns the feature on. FOUNDER_OVERRIDE_SECRET
+// must accompany it — we throw at boot if one is set without the other so a
+// notification email never ships with an unsignable / weakly-signed link.
+const founderNotificationEmail = process.env['FOUNDER_NOTIFICATION_EMAIL']?.trim() ?? '';
+const founderOverrideSecret = process.env['FOUNDER_OVERRIDE_SECRET']?.trim() ?? '';
+if (founderNotificationEmail.length > 0 && founderOverrideSecret.length === 0) {
+  throw new Error(
+    'FOUNDER_NOTIFICATION_EMAIL is set but FOUNDER_OVERRIDE_SECRET is missing; set both or neither.',
+  );
+}
+const founderApproveEnabled = founderNotificationEmail.length > 0;
+
 async function sendSignupVerificationEmail(to: string, token: string): Promise<void> {
   const verifyUrl = publicUrl(`/verify-email?token=${encodeURIComponent(token)}`);
   const { createResendClient, createEmailSender } = await import('@cpa/email');
@@ -90,6 +103,22 @@ const app = buildApp({
       process.env['SIGNUP_EMAIL_MODE'] === 'manual' || process.env['NODE_ENV'] !== 'production',
     verificationBaseUrl: appBaseUrl,
   },
+  // Founder magic-link override is always wired when the feature is on; the
+  // signin endpoint is registered alongside so the applicant link works.
+  ...(founderApproveEnabled
+    ? {
+        founderApprove: {
+          overrideSecret: founderOverrideSecret,
+          sessionSecret,
+        },
+        founderSignin: {
+          sessionSecret,
+          cookieName,
+          cookieSecure,
+          ttlSeconds,
+        },
+      }
+    : {}),
 });
 
 // Port resolution: prefer PORT (Railway/Fly/Render/Heroku inject this) →

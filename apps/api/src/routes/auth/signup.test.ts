@@ -349,6 +349,151 @@ test('POST /v1/auth/signup: second signup with same email returns 409 and create
 // Legacy /v1/auth/verify-email — returns 410 Gone
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Founder notification side-effect
+// ---------------------------------------------------------------------------
+
+interface RecordedFounderSend {
+  to: string | string[];
+  subject: string;
+  text: string;
+  html: string;
+}
+
+function founderRecorder(): {
+  sender: { send: (input: RecordedFounderSend) => Promise<{ id: string }> };
+  sent: RecordedFounderSend[];
+} {
+  const sent: RecordedFounderSend[] = [];
+  return {
+    sent,
+    sender: {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async send(input: RecordedFounderSend): Promise<{ id: string }> {
+        sent.push(input);
+        return { id: `founder-${sent.length}` };
+      },
+    },
+  };
+}
+
+function buildSignupAppWithFounder(
+  evaluator: SignupEvaluator,
+  founderSender: ReturnType<typeof founderRecorder>['sender'],
+) {
+  const app = buildApp({
+    signup: {
+      sessionSecret: TEST_SESSION_SECRET,
+      verificationSecret: TEST_VERIFICATION_SECRET,
+      cookieName: 'cpa_session',
+      cookieSecure: false,
+      ttlSeconds: 3600,
+      signupEvaluator: evaluator,
+      founderNotificationSender: founderSender,
+    },
+  });
+  return { app };
+}
+
+test('signup: fires founder notification on approve when FOUNDER_NOTIFICATION_EMAIL is set', async () => {
+  await cleanup();
+  const TEST_FOUNDER = 'founder-notify@example.com';
+  process.env['FOUNDER_NOTIFICATION_EMAIL'] = TEST_FOUNDER;
+  process.env['FOUNDER_OVERRIDE_SECRET'] = 'test-override-secret-32+bytes-of-entropy!!';
+  try {
+    const rec = founderRecorder();
+    const { app } = buildSignupAppWithFounder(approveEvaluator(), rec.sender);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/signup',
+      payload: { email: TEST_EMAIL, firmName: TEST_FIRM, displayName: 'Founder Notify' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(rec.sent.length, 1, 'founder must receive exactly one notification');
+    assert.deepEqual(rec.sent[0]!.to, [TEST_FOUNDER]);
+    assert.match(rec.sent[0]!.subject, /\[ArchiveOne signup\] approve:/);
+    assert.ok(
+      !rec.sent[0]!.text.includes('1-click approve override'),
+      'approve email must not include override link',
+    );
+    await app.close();
+  } finally {
+    delete process.env['FOUNDER_NOTIFICATION_EMAIL'];
+    delete process.env['FOUNDER_OVERRIDE_SECRET'];
+  }
+});
+
+test('signup: fires founder notification on claude_deny with override link', async () => {
+  await cleanup();
+  const TEST_FOUNDER = 'founder-notify@example.com';
+  process.env['FOUNDER_NOTIFICATION_EMAIL'] = TEST_FOUNDER;
+  process.env['FOUNDER_OVERRIDE_SECRET'] = 'test-override-secret-32+bytes-of-entropy!!';
+  try {
+    const rec = founderRecorder();
+    const { app } = buildSignupAppWithFounder(denyEvaluator(), rec.sender);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/signup',
+      payload: { email: TEST_EMAIL_DENY, firmName: TEST_FIRM_DENY },
+    });
+    assert.equal(res.statusCode, 403);
+    assert.equal(rec.sent.length, 1);
+    assert.match(rec.sent[0]!.subject, /\[ArchiveOne signup\] deny:/);
+    assert.match(rec.sent[0]!.text, /1-click approve override:/);
+    assert.match(rec.sent[0]!.text, /\/v1\/admin\/signup-decisions\//);
+    await app.close();
+  } finally {
+    delete process.env['FOUNDER_NOTIFICATION_EMAIL'];
+    delete process.env['FOUNDER_OVERRIDE_SECRET'];
+  }
+});
+
+test('signup: skips founder notification when FOUNDER_NOTIFICATION_EMAIL is unset', async () => {
+  await cleanup();
+  const prevEmail = process.env['FOUNDER_NOTIFICATION_EMAIL'];
+  delete process.env['FOUNDER_NOTIFICATION_EMAIL'];
+  try {
+    const rec = founderRecorder();
+    const { app } = buildSignupAppWithFounder(approveEvaluator(), rec.sender);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/signup',
+      payload: { email: TEST_EMAIL, firmName: TEST_FIRM },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(rec.sent.length, 0, 'no notification when env var unset');
+    await app.close();
+  } finally {
+    if (prevEmail !== undefined) process.env['FOUNDER_NOTIFICATION_EMAIL'] = prevEmail;
+  }
+});
+
+test('signup: signup response succeeds even if founder notification throws', async () => {
+  await cleanup();
+  process.env['FOUNDER_NOTIFICATION_EMAIL'] = 'founder-notify@example.com';
+  process.env['FOUNDER_OVERRIDE_SECRET'] = 'test-override-secret-32+bytes-of-entropy!!';
+  try {
+    const throwingSender = {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async send(): Promise<{ id: string }> {
+        throw new Error('test: founder sender intentionally fails');
+      },
+    };
+    const { app } = buildSignupAppWithFounder(approveEvaluator(), throwingSender);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/signup',
+      payload: { email: TEST_EMAIL, firmName: TEST_FIRM },
+    });
+    // The signup must still succeed.
+    assert.equal(res.statusCode, 200);
+    await app.close();
+  } finally {
+    delete process.env['FOUNDER_NOTIFICATION_EMAIL'];
+    delete process.env['FOUNDER_OVERRIDE_SECRET'];
+  }
+});
+
 test('POST /v1/auth/verify-email: legacy endpoint returns 410 with explanation', async () => {
   const { app } = buildSignupApp(approveEvaluator());
   const res = await app.inject({

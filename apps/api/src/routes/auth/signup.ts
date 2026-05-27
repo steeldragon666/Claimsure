@@ -10,6 +10,12 @@ import {
   type SignupPipelineDeps,
   type SignupPipelineResult,
 } from '../../lib/signup-pipeline.js';
+import {
+  parseFounderRecipients,
+  sendFounderNotification,
+  type FounderNotificationSender,
+} from '../../lib/founder-notification.js';
+import { getPublicBaseUrl } from '../../lib/public-base-url.js';
 
 /**
  * Self-service signup routes — autonomous AI-gated approval.
@@ -60,6 +66,13 @@ export interface SignupRouteDeps {
    * unset and the route resolves the factory at first call.
    */
   signupEvaluator?: SignupEvaluator;
+  /**
+   * Optional founder-notification sender override (tests pass a recorder).
+   * Production: if FOUNDER_NOTIFICATION_EMAIL is set and this is unset, the
+   * route lazy-imports @cpa/email and constructs a sender on first use. If
+   * FOUNDER_NOTIFICATION_EMAIL is unset, no notification fires (feature off).
+   */
+  founderNotificationSender?: FounderNotificationSender;
 }
 
 const TRIAL_DAYS = 30;
@@ -277,6 +290,95 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
     return cachedEvaluator;
   }
 
+  // Lazy-resolve the founder-notification sender. Tests inject via
+  // deps.founderNotificationSender; production lazy-imports @cpa/email at
+  // first use (mirrors the engagement-reminder pattern). If neither is
+  // available AND FOUNDER_NOTIFICATION_EMAIL is unset, the feature is off.
+  let cachedFounderSender: FounderNotificationSender | null = null;
+  async function getFounderSender(): Promise<FounderNotificationSender | null> {
+    if (deps.founderNotificationSender) return deps.founderNotificationSender;
+    if (cachedFounderSender) return cachedFounderSender;
+    const resendApiKey = process.env['RESEND_API_KEY'];
+    if (!resendApiKey || resendApiKey.length === 0) return null;
+    const { createResendClient, createEmailSender } = await import('@cpa/email');
+    const client = createResendClient({ apiKey: resendApiKey });
+    cachedFounderSender = createEmailSender(client, {
+      fromAddress:
+        process.env['FOUNDER_FROM_ADDRESS'] ??
+        process.env['BETA_FROM_ADDRESS'] ??
+        'ArchiveOne <noreply@archiveone.com.au>',
+    });
+    return cachedFounderSender;
+  }
+
+  /**
+   * Fire-and-log founder notification. Never throws — must not block the
+   * signup response. The caller passes the decisionId returned by the
+   * audit insert; if that insert itself failed, the caller passes null and
+   * we silently skip (we don't have a stable id to put in the override
+   * link).
+   */
+  async function notifyFounderSafely(args: {
+    decisionId: string | null;
+    email: string;
+    firmName: string;
+    displayName: string | null;
+    clientIp: string | null;
+    userAgent: string | null;
+    result: SignupPipelineResult;
+    logger: typeof app.log;
+  }): Promise<void> {
+    const recipients = parseFounderRecipients(process.env['FOUNDER_NOTIFICATION_EMAIL']);
+    if (recipients.length === 0) return;
+    if (args.decisionId === null) {
+      args.logger.warn(
+        { email: args.email },
+        'signup: skipping founder notification — no decisionId (audit insert failed)',
+      );
+      return;
+    }
+    const overrideSecret = process.env['FOUNDER_OVERRIDE_SECRET'];
+    if (!overrideSecret || overrideSecret.length === 0) {
+      // server.ts asserts this at boot, but defensive guard in tests too.
+      args.logger.warn(
+        'signup: FOUNDER_NOTIFICATION_EMAIL set but FOUNDER_OVERRIDE_SECRET missing; skipping',
+      );
+      return;
+    }
+    const sender = await getFounderSender();
+    if (!sender) {
+      args.logger.warn(
+        'signup: FOUNDER_NOTIFICATION_EMAIL set but no sender available (RESEND_API_KEY unset?); skipping',
+      );
+      return;
+    }
+    try {
+      await sendFounderNotification(
+        sender,
+        {
+          decisionId: args.decisionId,
+          email: args.email,
+          firmName: args.firmName,
+          displayName: args.displayName,
+          clientIp: args.clientIp,
+          userAgent: args.userAgent,
+          outcome: args.result.outcome,
+          audit: args.result.audit,
+        },
+        {
+          recipients,
+          overrideSecret,
+          publicBaseUrl: getPublicBaseUrl(),
+        },
+      );
+    } catch (err) {
+      args.logger.warn(
+        { err: err instanceof Error ? err.message : String(err), email: args.email },
+        'signup: founder notification email failed (signup response not affected)',
+      );
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // POST /v1/auth/signup — the autonomous pipeline
   // ---------------------------------------------------------------------------
@@ -366,8 +468,9 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
     // -----------------------------------------------------------------------
     if (result.outcome.decision === 'deny') {
       // Audit first — never silently drop the forensic row.
+      let denyDecisionId: string | null = null;
       try {
-        await writeSignupDecisionAudit(privilegedSql, {
+        const written = await writeSignupDecisionAudit(privilegedSql, {
           email: normalizedEmail,
           firmName,
           displayName: displayName ?? null,
@@ -378,6 +481,7 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
           outcome: result.outcome,
           audit: result.audit,
         });
+        denyDecisionId = written.id;
       } catch (err) {
         req.log.error(
           { err: err instanceof Error ? err.message : String(err) },
@@ -389,6 +493,20 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
         { reason: result.outcome.reason, email: normalizedEmail, firmName, clientIp },
         'signup denied by pipeline',
       );
+
+      // Fire founder notification before sending the response. Wrapped in
+      // try/catch inside notifyFounderSafely so it never blocks the reply.
+      await notifyFounderSafely({
+        decisionId: denyDecisionId,
+        email: normalizedEmail,
+        firmName,
+        displayName: displayName ?? null,
+        clientIp,
+        userAgent,
+        result,
+        logger: req.log,
+      });
+
       return reply.status(403).send({
         ok: false,
         decision: 'denied',
@@ -413,8 +531,10 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
         // see the duplicate attempt, but DON'T set resulting_{tenant,user}_id.
         // Use the route-level terminal reason `already_registered` — the
         // pipeline approved but tenant creation refused.
+        const dupOutcome = { decision: 'deny', reason: 'already_registered' } as const;
+        let dupDecisionId: string | null = null;
         try {
-          await writeSignupDecisionAudit(privilegedSql, {
+          const written = await writeSignupDecisionAudit(privilegedSql, {
             email: normalizedEmail,
             firmName,
             displayName: displayName ?? null,
@@ -422,15 +542,26 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
             userAgent,
             resultingTenantId: null,
             resultingUserId: null,
-            outcome: { decision: 'deny', reason: 'already_registered' },
+            outcome: dupOutcome,
             audit: result.audit,
           });
+          dupDecisionId = written.id;
         } catch (auditErr) {
           req.log.error(
             { err: auditErr instanceof Error ? auditErr.message : String(auditErr) },
             'signup: duplicate-path audit write failed',
           );
         }
+        await notifyFounderSafely({
+          decisionId: dupDecisionId,
+          email: normalizedEmail,
+          firmName,
+          displayName: displayName ?? null,
+          clientIp,
+          userAgent,
+          result: { outcome: dupOutcome, audit: result.audit },
+          logger: req.log,
+        });
         return reply.status(409).send({
           error: 'already_registered',
           message: 'An account with this email already exists.',
@@ -466,8 +597,9 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
     // A failure here would NOT roll back the tenant — that's intentional: a
     // missing audit row is recoverable from the request log; a rolled-back tenant
     // creation is not. Loud-log on failure.
+    let approveDecisionId: string | null = null;
     try {
-      await writeSignupDecisionAudit(privilegedSql, {
+      const written = await writeSignupDecisionAudit(privilegedSql, {
         email: normalizedEmail,
         firmName,
         displayName: displayName ?? null,
@@ -478,6 +610,7 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
         outcome: result.outcome,
         audit: result.audit,
       });
+      approveDecisionId = written.id;
     } catch (err) {
       req.log.error(
         {
@@ -488,6 +621,17 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
         'signup: approve-path audit write failed (tenant created OK, audit row missing)',
       );
     }
+
+    await notifyFounderSafely({
+      decisionId: approveDecisionId,
+      email: normalizedEmail,
+      firmName,
+      displayName: displayName ?? null,
+      clientIp,
+      userAgent,
+      result,
+      logger: req.log,
+    });
 
     return reply.status(200).send({
       ok: true,

@@ -249,13 +249,19 @@ export interface SignupAuditRow extends SignupPipelineResult {
 export async function writeSignupDecisionAudit(
   privilegedSql: Sql,
   row: SignupAuditRow,
-): Promise<void> {
+): Promise<{ id: string }> {
   const { outcome, audit } = row;
   // Postgres-js automatically serialises plain objects / arrays for jsonb
   // columns, but the `chain.ts` precedent here is to double-cast to be
   // explicit about the binding shape. We follow that pattern for the
   // abr_lookup and red_flags jsonb columns.
-  await privilegedSql`
+  //
+  // RETURNING the row id lets callers correlate downstream side-effects
+  // (founder notification email, magic-link override) with the exact audit
+  // row they wrote. The Drizzle default expression (`crypto.randomUUID()`)
+  // is not in play here — we INSERT via the postgres-js tagged template
+  // and rely on the column's DEFAULT (see migration 0088).
+  const rows = await privilegedSql<{ id: string }[]>`
     INSERT INTO signup_decision (
       email, firm_name, display_name, client_ip, user_agent,
       decision, reason,
@@ -280,7 +286,13 @@ export async function writeSignupDecisionAudit(
       ${audit.classifierModel}, ${audit.promptVersion},
       ${audit.tokensIn}, ${audit.tokensOut}, ${audit.elapsedMs}
     )
+    RETURNING id::text AS id
   `;
+  const id = rows[0]?.id;
+  if (!id) {
+    throw new Error('writeSignupDecisionAudit: INSERT returned no id');
+  }
+  return { id };
 }
 
 // ---------------------------------------------------------------------------
