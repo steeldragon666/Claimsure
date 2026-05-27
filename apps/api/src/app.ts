@@ -88,6 +88,7 @@ import { registerWhoami } from './routes/whoami.js';
 import { registerFederation } from './routes/federation/index.js';
 import { registerCloudSync } from './routes/cloud-sync.js';
 import { registerEvidenceRoutes } from './routes/evidence.js';
+import { registerIpSearchReportRoute } from './routes/ip-search/report.js';
 import { registerConsultantChain } from './routes/consultant/chain.js';
 import { registerConsultantKpis } from './routes/consultant/kpis.js';
 import { registerConsultantSignals } from './routes/consultant/signals.js';
@@ -296,6 +297,10 @@ export function buildApp(options: BuildAppOptions = {}): App {
   });
   app.register((instance, _opts, done) => {
     registerClaimPdf(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerIpSearchReportRoute(instance);
     done();
   });
   app.register((instance, _opts, done) => {
