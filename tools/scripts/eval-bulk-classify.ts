@@ -30,10 +30,14 @@ const { values } = parseArgs({
   options: {
     concurrency: { type: 'string', default: '8' },
     tenant: { type: 'string' }, // optional: scope to one tenant
+    // namespace prefix: c0a2 (bulk-claims, default) or c0a3 (stress-test).
+    // Tenant UUIDs look like 00000000-0000-4000-8000-<prefix><ii>010000.
+    namespace: { type: 'string', default: 'c0a2' },
   },
 });
 const CONCURRENCY = Math.max(1, Math.min(64, Number(values.concurrency ?? '8') || 8));
 const TENANT_FILTER = values.tenant; // when set, only that tenant runs
+const NAMESPACE_PREFIX = `00000000-0000-4000-8000-${values.namespace ?? 'c0a2'}`;
 
 interface EventRow {
   id: string;
@@ -55,7 +59,7 @@ async function loadEvents(): Promise<EventRow[]> {
   return await privilegedSql<EventRow[]>`
     SELECT id::text, tenant_id::text, payload->>'raw_text' AS raw_text
     FROM event
-    WHERE tenant_id::text LIKE '00000000-0000-4000-8000-c0a2%'
+    WHERE tenant_id::text LIKE ${NAMESPACE_PREFIX + '%'}
       AND payload ? 'raw_text'
       AND payload->>'raw_text' IS NOT NULL
       AND classification IS NULL
