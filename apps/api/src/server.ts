@@ -31,14 +31,22 @@ import { registerClaimEvidenceBindingJob } from './jobs/claim-evidence-binding.j
 import { registerDocumentExtractJob } from './jobs/document-extract.js';
 import { registerGenerateApplicationJob } from './jobs/generate-application.js';
 import { getPublicBaseUrl, publicUrl } from './lib/public-base-url.js';
+import { assertDistinctProductionSecrets, readSecretEnv } from './lib/production-secrets.js';
 
 const repoRoot = process.env['REPO_ROOT'] ?? process.cwd();
 const appBaseUrl = getPublicBaseUrl();
-const sessionSecret = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
-const verificationSecret =
-  process.env['SIGNUP_VERIFICATION_SECRET'] ??
-  process.env['SESSION_JWT_SECRET'] ??
-  'dev-only-signup-verification-pad!!';
+const sessionSecret = readSecretEnv('SESSION_JWT_SECRET', {
+  devFallback: 'dev-only-32-bytes-of-entropy-pad!',
+});
+const verificationSecret = readSecretEnv('SIGNUP_VERIFICATION_SECRET', {
+  devFallback: process.env['SESSION_JWT_SECRET'] ?? 'dev-only-signup-verification-pad!!',
+});
+assertDistinctProductionSecrets(
+  'SESSION_JWT_SECRET',
+  sessionSecret,
+  'SIGNUP_VERIFICATION_SECRET',
+  verificationSecret,
+);
 const cookieName = process.env['SESSION_COOKIE_NAME'] ?? 'cpa_session';
 const cookieSecure = process.env['NODE_ENV'] === 'production';
 const ttlSeconds = Number(process.env['SESSION_TTL_SECONDS'] ?? 24 * 60 * 60);

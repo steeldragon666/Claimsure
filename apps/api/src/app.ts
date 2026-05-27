@@ -91,6 +91,7 @@ import { registerConsultantChain } from './routes/consultant/chain.js';
 import { registerConsultantKpis } from './routes/consultant/kpis.js';
 import { registerConsultantSignals } from './routes/consultant/signals.js';
 import { publicUrl } from './lib/public-base-url.js';
+import { readSecretEnv } from './lib/production-secrets.js';
 
 const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
 const DEFAULT_SESSION_COOKIE_NAME = 'cpa_session';
@@ -188,7 +189,9 @@ export function buildApp(options: BuildAppOptions = {}): App {
   // sets app.current_tenant_id GUC for RLS-scoped queries.
   // Production must set SESSION_JWT_SECRET (the dev default is a constant
   // string and is NOT secure for any non-local environment).
-  const sessionSecret = process.env['SESSION_JWT_SECRET'] ?? DEFAULT_DEV_SESSION_SECRET;
+  const sessionSecret = readSecretEnv('SESSION_JWT_SECRET', {
+    devFallback: DEFAULT_DEV_SESSION_SECRET,
+  });
   const cookieName = process.env['SESSION_COOKIE_NAME'] ?? DEFAULT_SESSION_COOKIE_NAME;
   app.register(sessionPlugin, { secret: sessionSecret, cookieName });
 
