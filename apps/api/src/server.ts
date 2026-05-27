@@ -30,10 +30,10 @@ import { registerClaimActivityProposalJob } from './jobs/claim-activity-proposal
 import { registerClaimEvidenceBindingJob } from './jobs/claim-evidence-binding.js';
 import { registerDocumentExtractJob } from './jobs/document-extract.js';
 import { registerGenerateApplicationJob } from './jobs/generate-application.js';
+import { getPublicBaseUrl, publicUrl } from './lib/public-base-url.js';
 
 const repoRoot = process.env['REPO_ROOT'] ?? process.cwd();
-const appBaseUrl =
-  process.env['APP_BASE_URL'] ?? process.env['WEB_BASE_URL'] ?? 'http://localhost:5173';
+const appBaseUrl = getPublicBaseUrl();
 const sessionSecret = process.env['SESSION_JWT_SECRET'] ?? 'dev-only-32-bytes-of-entropy-pad!';
 const verificationSecret =
   process.env['SIGNUP_VERIFICATION_SECRET'] ??
@@ -44,7 +44,7 @@ const cookieSecure = process.env['NODE_ENV'] === 'production';
 const ttlSeconds = Number(process.env['SESSION_TTL_SECONDS'] ?? 24 * 60 * 60);
 
 async function sendSignupVerificationEmail(to: string, token: string): Promise<void> {
-  const verifyUrl = `${appBaseUrl.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(token)}`;
+  const verifyUrl = publicUrl(`/verify-email?token=${encodeURIComponent(token)}`);
   const { createResendClient, createEmailSender } = await import('@cpa/email');
   const resendApiKey = process.env['RESEND_API_KEY'];
   if (!resendApiKey) {

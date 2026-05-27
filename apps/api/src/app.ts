@@ -90,6 +90,7 @@ import { registerEvidenceRoutes } from './routes/evidence.js';
 import { registerConsultantChain } from './routes/consultant/chain.js';
 import { registerConsultantKpis } from './routes/consultant/kpis.js';
 import { registerConsultantSignals } from './routes/consultant/signals.js';
+import { publicUrl } from './lib/public-base-url.js';
 
 const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
 const DEFAULT_SESSION_COOKIE_NAME = 'cpa_session';
@@ -492,8 +493,7 @@ export function buildApp(options: BuildAppOptions = {}): App {
         clientId: msClientId,
         clientSecret: msClientSecret,
         redirectUri:
-          process.env['MICROSOFT_OIDC_REDIRECT_URI'] ??
-          'http://localhost:3000/v1/auth/microsoft/callback',
+          process.env['MICROSOFT_OIDC_REDIRECT_URI'] ?? publicUrl('/v1/auth/microsoft/callback'),
         sessionSecret,
         cookieName,
         cookieSecure,
@@ -511,8 +511,7 @@ export function buildApp(options: BuildAppOptions = {}): App {
         clientId: gClientId,
         clientSecret: gClientSecret,
         redirectUri:
-          process.env['GOOGLE_OIDC_REDIRECT_URI'] ??
-          'http://localhost:3000/v1/auth/google/callback',
+          process.env['GOOGLE_OIDC_REDIRECT_URI'] ?? publicUrl('/v1/auth/google/callback'),
         sessionSecret,
         cookieName,
         cookieSecure,
@@ -537,8 +536,7 @@ export function buildApp(options: BuildAppOptions = {}): App {
         domain: auth0Domain,
         clientId: auth0ClientId,
         clientSecret: auth0ClientSecret,
-        redirectUri:
-          process.env['AUTH0_REDIRECT_URI'] ?? 'http://localhost:3000/v1/auth/auth0/callback',
+        redirectUri: process.env['AUTH0_REDIRECT_URI'] ?? publicUrl('/v1/auth/auth0/callback'),
         sessionSecret,
         cookieName,
         cookieSecure,
