@@ -31,6 +31,30 @@ export const ClaimStage = z.enum(CLAIM_STAGES_LITERAL);
 export type ClaimStage = z.infer<typeof ClaimStage>;
 
 /**
+ * Grouping of `ClaimStage` values into higher-level workflow statuses
+ * used by consultant-facing aggregations (KPI strip, pipeline filters,
+ * dashboard counters).
+ *
+ * - `active`: pre-submission stages — claim is still being worked on by
+ *   the consultant. Drives the "Active claims" KPI on the consultant
+ *   dashboard. Excludes `submitted` (lodged with regulator) and
+ *   `audit_defence` (post-regulator-review, distinct workflow).
+ *
+ * Keep aligned with `CLAIM_STAGES_LITERAL`: every stage should appear
+ * in exactly one bucket if/when more buckets are added.
+ */
+export const STATUS_TO_STAGES = {
+  active: [
+    'engagement',
+    'activity_capture',
+    'narrative_drafting',
+    'expenditure_schedule',
+    'review',
+  ],
+} as const satisfies Record<string, readonly ClaimStage[]>;
+export type ClaimWorkflowStatus = keyof typeof STATUS_TO_STAGES;
+
+/**
  * Public shape of a `claim` row over the API.
  *
  * `fiscal_year` follows Australian convention: `2025` = FY ending June
