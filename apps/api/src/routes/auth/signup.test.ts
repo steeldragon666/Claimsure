@@ -2,22 +2,74 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { sql, privilegedSql } from '@cpa/db/client';
 import { buildApp } from '../../app.js';
+import type { SignupEvaluator, SignupEvaluatorOutput } from '@cpa/agents/signup-evaluator';
 
 // ---------------------------------------------------------------------------
-// Test constants — P9.1.6.3 namespace (prefix 000000094xxx)
+// Test constants — fixed per-firm so cleanup is targeted.
 // ---------------------------------------------------------------------------
 
 const TEST_SESSION_SECRET = 'test-signup-session-secret-p9163!!';
 const TEST_VERIFICATION_SECRET = 'test-signup-verification-secret-p9163!!';
 const TEST_EMAIL = 'signup-test-p9163@example.com';
+const TEST_EMAIL_DENY = 'signup-test-deny-p9163@example.com';
+const TEST_EMAIL_OVERRIDE = 'override-test-p9163@example.com';
 const TEST_FIRM = 'P9 Test Firm (signup)';
+const TEST_FIRM_DENY = 'P9 Test Firm (deny)';
+const TEST_FIRM_OVERRIDE = 'P9 Test Firm (override)';
+
+// ---------------------------------------------------------------------------
+// Mock evaluators
+// ---------------------------------------------------------------------------
+
+function approveEvaluator(): SignupEvaluator {
+  return {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async evaluate(): Promise<SignupEvaluatorOutput> {
+      return {
+        decision: 'approve',
+        confidence: 0.9,
+        rationale: 'test-approve',
+        red_flags: [],
+        model: 'test-evaluator',
+        prompt_version: 'evaluate-signup@1.0.0',
+        tokens_in: 100,
+        tokens_out: 30,
+      };
+    },
+  };
+}
+
+function denyEvaluator(): SignupEvaluator {
+  return {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async evaluate(): Promise<SignupEvaluatorOutput> {
+      return {
+        decision: 'deny',
+        confidence: 0.95,
+        rationale: 'test-deny',
+        red_flags: ['test red flag'],
+        model: 'test-evaluator',
+        prompt_version: 'evaluate-signup@1.0.0',
+        tokens_in: 100,
+        tokens_out: 30,
+      };
+    },
+  };
+}
+
+function throwingEvaluator(): SignupEvaluator {
+  return {
+    evaluate(): Promise<SignupEvaluatorOutput> {
+      throw new Error('test: evaluator must not be called');
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function buildSignupApp() {
-  const capturedEmails: { to: string; token: string }[] = [];
+function buildSignupApp(evaluator: SignupEvaluator) {
   const app = buildApp({
     signup: {
       sessionSecret: TEST_SESSION_SECRET,
@@ -25,41 +77,36 @@ function buildSignupApp() {
       cookieName: 'cpa_session',
       cookieSecure: false,
       ttlSeconds: 3600,
-      sendVerificationEmail: (to, token) => {
-        capturedEmails.push({ to, token });
-        return Promise.resolve();
-      },
+      signupEvaluator: evaluator,
     },
   });
-  return { app, capturedEmails };
+  return { app };
 }
 
 // ---------------------------------------------------------------------------
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-before(async () => {
+async function cleanup() {
+  const firms = [TEST_FIRM, TEST_FIRM_DENY, TEST_FIRM_OVERRIDE];
+  const emails = [TEST_EMAIL, TEST_EMAIL_DENY, TEST_EMAIL_OVERRIDE];
   await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (
-    SELECT id FROM tenant WHERE name = ${TEST_FIRM}
+    SELECT id FROM tenant WHERE name = ANY(${firms}::text[])
   )`;
-  await privilegedSql`DELETE FROM tenant WHERE name = ${TEST_FIRM}`;
-  await sql`DELETE FROM "user" WHERE email = ${TEST_EMAIL}`;
-});
+  await privilegedSql`DELETE FROM tenant WHERE name = ANY(${firms}::text[])`;
+  await sql`DELETE FROM "user" WHERE email = ANY(${emails}::text[])`;
+  await privilegedSql`DELETE FROM signup_decision WHERE email = ANY(${emails}::text[])`;
+}
 
-after(async () => {
-  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (
-    SELECT id FROM tenant WHERE name = ${TEST_FIRM}
-  )`;
-  await privilegedSql`DELETE FROM tenant WHERE name = ${TEST_FIRM}`;
-  await sql`DELETE FROM "user" WHERE email = ${TEST_EMAIL}`;
-});
+before(cleanup);
+after(cleanup);
 
 // ---------------------------------------------------------------------------
-// Tests — POST /v1/auth/signup
+// Body validation
 // ---------------------------------------------------------------------------
 
 test('POST /v1/auth/signup: 422 with missing email', async () => {
-  const { app } = buildSignupApp();
+  const { app } = buildSignupApp(throwingEvaluator());
   const res = await app.inject({
     method: 'POST',
     url: '/v1/auth/signup',
@@ -70,7 +117,7 @@ test('POST /v1/auth/signup: 422 with missing email', async () => {
 });
 
 test('POST /v1/auth/signup: 422 with missing firmName', async () => {
-  const { app } = buildSignupApp();
+  const { app } = buildSignupApp(throwingEvaluator());
   const res = await app.inject({
     method: 'POST',
     url: '/v1/auth/signup',
@@ -80,97 +127,30 @@ test('POST /v1/auth/signup: 422 with missing firmName', async () => {
   await app.close();
 });
 
-test('POST /v1/auth/signup: 202 and sends verification email', async () => {
-  const { app, capturedEmails } = buildSignupApp();
+// ---------------------------------------------------------------------------
+// APPROVE path
+// ---------------------------------------------------------------------------
+
+test('POST /v1/auth/signup: 200 on approve — creates tenant + sets session cookie + redirectTo', async () => {
+  await cleanup();
+  const { app } = buildSignupApp(approveEvaluator());
   const res = await app.inject({
     method: 'POST',
     url: '/v1/auth/signup',
-    payload: { email: TEST_EMAIL, firmName: TEST_FIRM },
+    payload: { email: TEST_EMAIL, firmName: TEST_FIRM, displayName: 'Test User' },
   });
-  assert.equal(res.statusCode, 202);
-  assert.equal(capturedEmails.length, 1);
-  assert.equal(capturedEmails[0]!.to, TEST_EMAIL);
-  assert.ok(capturedEmails[0]!.token.length > 10, 'verification token must be non-trivial');
-  await app.close();
-});
-
-// ---------------------------------------------------------------------------
-// Tests — POST /v1/auth/verify-email
-// ---------------------------------------------------------------------------
-
-test('POST /v1/auth/verify-email: 400 with missing token', async () => {
-  const { app } = buildSignupApp();
-  const res = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/verify-email',
-    payload: {},
-  });
-  assert.equal(res.statusCode, 422);
-  await app.close();
-});
-
-test('POST /v1/auth/verify-email: 401 with invalid token', async () => {
-  const { app } = buildSignupApp();
-  const res = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/verify-email',
-    payload: { token: 'not.a.valid.jwt' },
-  });
-  assert.equal(res.statusCode, 401);
-  await app.close();
-});
-
-test('POST /v1/auth/verify-email: 200 creates user+tenant and sets session cookie', async () => {
-  const { app, capturedEmails } = buildSignupApp();
-
-  // First, trigger the signup to get a real token
-  const signupRes = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/signup',
-    payload: { email: TEST_EMAIL, firmName: TEST_FIRM },
-  });
-  assert.equal(signupRes.statusCode, 202);
-  const token = capturedEmails[0]!.token;
-
-  // Verify the email
-  const verifyRes = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/verify-email',
-    payload: { token },
-  });
-  assert.equal(verifyRes.statusCode, 200);
+  assert.equal(res.statusCode, 200);
+  const body: { ok: boolean; decision: string; redirectTo: string } = res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.decision, 'approved');
+  assert.equal(body.redirectTo, '/subject-tenants');
 
   // Session cookie must be set
-  const setCookie = verifyRes.headers['set-cookie'] as string | string[];
+  const setCookie = res.headers['set-cookie'] as string | string[];
   const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie;
   assert.ok(cookieStr?.includes('cpa_session'), 'session cookie must be set');
 
-  await app.close();
-});
-
-test('POST /v1/auth/verify-email: creates tenant with trial_status=active and trial_ends_at ~30d', async () => {
-  // Reset user/tenant first
-  await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (
-    SELECT id FROM tenant WHERE name = ${TEST_FIRM}
-  )`;
-  await privilegedSql`DELETE FROM tenant WHERE name = ${TEST_FIRM}`;
-  await sql`DELETE FROM "user" WHERE email = ${TEST_EMAIL}`;
-
-  const { app, capturedEmails } = buildSignupApp();
-
-  await app.inject({
-    method: 'POST',
-    url: '/v1/auth/signup',
-    payload: { email: TEST_EMAIL, firmName: TEST_FIRM },
-  });
-  const token = capturedEmails[0]!.token;
-
-  await app.inject({
-    method: 'POST',
-    url: '/v1/auth/verify-email',
-    payload: { token },
-  });
-
+  // Tenant row should exist with trial settings
   const rows = await sql<{ trial_status: string; billing_mode: string; trial_ends_at: Date }[]>`
     SELECT trial_status, billing_mode, trial_ends_at
       FROM tenant
@@ -179,45 +159,120 @@ test('POST /v1/auth/verify-email: creates tenant with trial_status=active and tr
   assert.equal(rows[0]?.trial_status, 'active');
   assert.equal(rows[0]?.billing_mode, 'trial');
 
-  // trial_ends_at should be approximately 30 days from now
-  const endsAt = rows[0].trial_ends_at;
-  const daysRemaining = (new Date(endsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-  assert.ok(daysRemaining > 28, 'trial_ends_at must be at least 28 days from now');
-  assert.ok(daysRemaining < 32, 'trial_ends_at must be at most 32 days from now');
-
-  await app.close();
-});
-
-test('POST /v1/auth/verify-email: creates tenant_user with role=admin', async () => {
-  const rows = await privilegedSql<{ role: string }[]>`
+  // tenant_user row should exist with admin role
+  const tuRows = await privilegedSql<{ role: string }[]>`
     SELECT tu.role
       FROM tenant_user tu
       JOIN tenant t ON t.id = tu.tenant_id
      WHERE t.name = ${TEST_FIRM}
   `;
-  assert.ok(rows.length > 0, 'tenant_user row should exist');
-  assert.equal(rows[0]?.role, 'admin');
+  assert.equal(tuRows[0]?.role, 'admin');
+
+  // signup_decision audit row should exist
+  const auditRows = await privilegedSql<
+    {
+      decision: string;
+      reason: string;
+      resulting_tenant_id: string | null;
+      resulting_user_id: string | null;
+    }[]
+  >`
+    SELECT decision, reason, resulting_tenant_id, resulting_user_id
+      FROM signup_decision
+     WHERE email = ${TEST_EMAIL}
+  `;
+  assert.equal(auditRows[0]?.decision, 'approve');
+  assert.equal(auditRows[0]?.reason, 'claude_approve');
+  assert.ok(auditRows[0]?.resulting_tenant_id);
+  assert.ok(auditRows[0]?.resulting_user_id);
+
+  await app.close();
 });
 
-test('POST /v1/auth/verify-email: 409 if token already used (user already exists)', async () => {
-  const { app, capturedEmails } = buildSignupApp();
+// ---------------------------------------------------------------------------
+// DENY path
+// ---------------------------------------------------------------------------
 
-  // Trigger a new signup with the same email — user was created in previous test
-  const signupRes = await app.inject({
+test('POST /v1/auth/signup: 403 on deny — no tenant created + generic message', async () => {
+  await cleanup();
+  const { app } = buildSignupApp(denyEvaluator());
+  const res = await app.inject({
     method: 'POST',
     url: '/v1/auth/signup',
-    payload: { email: TEST_EMAIL, firmName: TEST_FIRM },
+    payload: { email: TEST_EMAIL_DENY, firmName: TEST_FIRM_DENY },
   });
-  assert.equal(signupRes.statusCode, 202);
-  const token = capturedEmails[0]!.token;
+  assert.equal(res.statusCode, 403);
+  const body: { ok: boolean; decision: string; message: string } = res.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.decision, 'denied');
+  // Generic message — no probing for reason.
+  assert.ok(body.message.includes('aaron@carbonproject.com.au'));
+  // Reason MUST NOT be exposed
+  assert.ok(!('reason' in body));
 
-  // Verify again — should conflict because user already exists
-  const verifyRes = await app.inject({
+  // No tenant created
+  const rows = await sql<{ id: string }[]>`SELECT id FROM tenant WHERE name = ${TEST_FIRM_DENY}`;
+  assert.equal(rows.length, 0);
+
+  // No user created
+  const userRows = await sql<
+    { id: string }[]
+  >`SELECT id FROM "user" WHERE email = ${TEST_EMAIL_DENY}`;
+  assert.equal(userRows.length, 0);
+
+  // Audit row should exist with decision=deny
+  const auditRows = await privilegedSql<{ decision: string; reason: string }[]>`
+    SELECT decision, reason FROM signup_decision WHERE email = ${TEST_EMAIL_DENY}
+  `;
+  assert.equal(auditRows[0]?.decision, 'deny');
+
+  await app.close();
+});
+
+// ---------------------------------------------------------------------------
+// Admin override path
+// ---------------------------------------------------------------------------
+
+test('POST /v1/auth/signup: admin override approves without calling evaluator', async () => {
+  await cleanup();
+  process.env['SIGNUP_AUTO_APPROVE_OVERRIDE_EMAILS'] = TEST_EMAIL_OVERRIDE;
+  try {
+    const { app } = buildSignupApp(throwingEvaluator()); // would throw if called
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/signup',
+      payload: { email: TEST_EMAIL_OVERRIDE, firmName: TEST_FIRM_OVERRIDE },
+    });
+    assert.equal(res.statusCode, 200);
+    const body: { decision: string } = res.json();
+    assert.equal(body.decision, 'approved');
+
+    const auditRows = await privilegedSql<{ reason: string; admin_override_hit: boolean }[]>`
+      SELECT reason, admin_override_hit FROM signup_decision WHERE email = ${TEST_EMAIL_OVERRIDE}
+    `;
+    assert.equal(auditRows[0]?.reason, 'admin_override');
+    assert.equal(auditRows[0]?.admin_override_hit, true);
+
+    await app.close();
+  } finally {
+    delete process.env['SIGNUP_AUTO_APPROVE_OVERRIDE_EMAILS'];
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Legacy /v1/auth/verify-email — returns 410 Gone
+// ---------------------------------------------------------------------------
+
+test('POST /v1/auth/verify-email: legacy endpoint returns 410 with explanation', async () => {
+  const { app } = buildSignupApp(approveEvaluator());
+  const res = await app.inject({
     method: 'POST',
     url: '/v1/auth/verify-email',
-    payload: { token },
+    payload: { token: 'anything' },
   });
-  assert.equal(verifyRes.statusCode, 409);
-
+  assert.equal(res.statusCode, 410);
+  const body: { error: string; message: string } = res.json();
+  assert.equal(body.error, 'verification_flow_retired');
+  assert.ok(body.message.includes('/signup'));
   await app.close();
 });

@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 
-type SubmitState = 'idle' | 'submitting' | 'sent' | 'error';
-type SignupDelivery = 'email_sent' | 'manual_verification' | null;
+type SubmitState = 'idle' | 'submitting' | 'denied' | 'error';
 
 function Diamond({ className = '' }: { className?: string }) {
   return <span className={`inline-block rotate-45 bg-[#e1a23a] ${className}`} aria-hidden="true" />;
@@ -27,13 +26,13 @@ export default function SignupPage() {
   const [displayName, setDisplayName] = useState('');
   const [state, setState] = useState<SubmitState>('idle');
   const [error, setError] = useState('');
-  const [verificationUrl, setVerificationUrl] = useState('');
-  const [delivery, setDelivery] = useState<SignupDelivery>(null);
+  const [denialMessage, setDenialMessage] = useState('');
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setState('submitting');
     setError('');
+    setDenialMessage('');
 
     try {
       const res = await fetch('/v1/auth/signup', {
@@ -46,23 +45,38 @@ export default function SignupPage() {
         }),
       });
 
-      const body = (await res.json().catch(() => ({}))) as {
-        delivery?: SignupDelivery;
-        message?: string;
-        verificationUrl?: string;
-      };
-
-      if (!res.ok) {
-        let message = 'Signup could not be started. Please check the details and try again.';
-        if (body.message) message = body.message;
-        throw new Error(message);
+      // 200 + redirectTo → autonomous approval, navigate now.
+      if (res.status === 200) {
+        const body = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          decision?: string;
+          redirectTo?: string;
+        };
+        const redirect = body.redirectTo ?? '/subject-tenants';
+        window.location.href = redirect;
+        return;
       }
 
-      setVerificationUrl(body.verificationUrl ?? '');
-      setDelivery(body.delivery ?? null);
-      setState('sent');
+      // 403 → polite denial. Message is generic by design (no probing).
+      if (res.status === 403) {
+        const body = (await res.json().catch(() => ({}))) as {
+          message?: string;
+        };
+        setDenialMessage(
+          body.message ??
+            'We could not auto-approve your request. Please contact aaron@carbonproject.com.au if you believe this is in error.',
+        );
+        setState('denied');
+        return;
+      }
+
+      // 422 / 4xx / 5xx → surface the error message from the API if provided.
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      const message =
+        body.message ?? 'Signup could not be completed. Please check the details and try again.';
+      throw new Error(message);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Signup could not be started.');
+      setError(err instanceof Error ? err.message : 'Signup could not be completed.');
       setState('error');
     }
   }
@@ -82,7 +96,7 @@ export default function SignupPage() {
             <span className="font-display text-xl font-semibold">ArchiveOne</span>
           </Link>
           <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#8a857c]">
-            Approved signup only
+            Instant approval
           </span>
         </nav>
 
@@ -96,14 +110,14 @@ export default function SignupPage() {
               Create the first claim chain.
             </h1>
             <p className="mt-6 max-w-xl font-body text-base leading-8 text-[#cdc7bd]">
-              Request an approved firm admin account for evidence capture, accounting-source
+              Spin up an approved firm admin workspace for evidence capture, accounting-source
               connection, narrative drafting, and claim-pack review.
             </p>
             <div className="mt-10 divide-y divide-[#f0ebe2]/10 border-y border-[#f0ebe2]/10">
               {[
-                'Access is issued through the approved signup path only.',
-                'Verification links expire after 24 hours.',
-                'Pilot slots are reserved for qualified R&DTI firms.',
+                'Approval runs automatically — no email round-trip.',
+                'Most decisions take under two seconds.',
+                'Trial workspaces are provisioned instantly with a 30-day window.',
               ].map((item, index) => (
                 <div key={item} className="flex gap-4 py-4">
                   <span className="font-mono text-sm text-[#e1a23a]">
@@ -116,36 +130,14 @@ export default function SignupPage() {
           </section>
 
           <section className="border border-[#f0ebe2]/20 bg-[#131316]/95 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.55)]">
-            {state === 'sent' ? (
+            {state === 'denied' ? (
               <div className="space-y-6 py-6">
-                <div className="flex h-12 w-12 items-center justify-center border border-[#e1a23a]/60">
-                  <Diamond className="h-3 w-3" />
+                <div className="flex h-12 w-12 items-center justify-center border border-[#c46a48]/60">
+                  <Diamond className="h-3 w-3 bg-[#c46a48]" />
                 </div>
                 <div>
-                  <h2 className="font-display text-3xl font-light">
-                    {delivery === 'manual_verification'
-                      ? 'Verification link ready.'
-                      : 'Verification link sent.'}
-                  </h2>
-                  {delivery === 'manual_verification' ? (
-                    <p className="mt-4 font-body text-sm leading-7 text-[#cdc7bd]">
-                      ArchiveOne email delivery needs operator configuration. Use the secure
-                      verification link below to finish creating your trial tenant.
-                    </p>
-                  ) : (
-                    <p className="mt-4 font-body text-sm leading-7 text-[#cdc7bd]">
-                      We sent a verification link to {email.trim().toLowerCase()}. Open it to finish
-                      creating your ArchiveOne trial tenant.
-                    </p>
-                  )}
-                  {verificationUrl && (
-                    <p className="mt-4 break-all border border-[#e1a23a]/40 bg-[#e1a23a]/10 p-3 font-body text-sm leading-6 text-[#f0ebe2]">
-                      Continue here:{' '}
-                      <Link href={verificationUrl} className="text-[#e1a23a] underline">
-                        verify signup
-                      </Link>
-                    </p>
-                  )}
+                  <h2 className="font-display text-3xl font-light">Signup not approved.</h2>
+                  <p className="mt-4 font-body text-sm leading-7 text-[#cdc7bd]">{denialMessage}</p>
                 </div>
                 <Link
                   href="/"
@@ -183,6 +175,7 @@ export default function SignupPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     className={inputClass}
                     placeholder="you@firm.com.au"
+                    disabled={state === 'submitting'}
                   />
                 </Field>
 
@@ -195,6 +188,7 @@ export default function SignupPage() {
                     onChange={(e) => setFirmName(e.target.value)}
                     className={inputClass}
                     placeholder="Acme R&D Advisory"
+                    disabled={state === 'submitting'}
                   />
                 </Field>
 
@@ -206,6 +200,7 @@ export default function SignupPage() {
                     onChange={(e) => setDisplayName(e.target.value)}
                     className={inputClass}
                     placeholder="Jordan Blake"
+                    disabled={state === 'submitting'}
                   />
                 </Field>
 
@@ -214,7 +209,7 @@ export default function SignupPage() {
                   disabled={state === 'submitting'}
                   className="inline-flex h-12 w-full items-center justify-center bg-[#e1a23a] px-4 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0b0b0d] transition hover:bg-[#efb657] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {state === 'submitting' ? 'Sending verification' : 'Send verification link'}
+                  {state === 'submitting' ? 'Approving your signup…' : 'Create workspace'}
                 </button>
               </form>
             )}

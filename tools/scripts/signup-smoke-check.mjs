@@ -112,9 +112,13 @@ const probes = [
     },
   },
   {
-    name: 'verify-email endpoint rejects junk token',
+    // The legacy verify-email endpoint now returns 410 Gone since the
+    // autonomous AI-gated signup pipeline (feat/auto-approve-signup) issues
+    // session cookies directly on POST /v1/auth/signup. The probe is kept so
+    // we can detect a regression if someone re-enables verification.
+    name: 'verify-email endpoint reports legacy/gone',
     path: '/v1/auth/verify-email',
-    expectedStatus: 401,
+    expectedStatus: 410,
     options: {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
