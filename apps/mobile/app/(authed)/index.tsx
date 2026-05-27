@@ -39,7 +39,7 @@ function MonoLabel({ children, muted = false }: { children: React.ReactNode; mut
 /**
  * Claimant Today screen.
  *
- * This implements the first screen from the ClaimSure claimant-mobile UI kit:
+ * This implements the first screen from the ArchiveOne claimant-mobile UI kit:
  * active project, advisor nudge, today's sealed captures, and quick capture
  * actions. The links route into the existing capture primitives so the screen
  * upgrades the product surface without bypassing the working queue/sync paths.
@@ -47,7 +47,7 @@ function MonoLabel({ children, muted = false }: { children: React.ReactNode; mut
 export default function HomeScreen() {
   const session = useSessionStore((s) => s.session);
   const displayName = session?.employee.name?.split(' ')[0] ?? 'Priya';
-  const firmName = session?.brand_config.display_name ?? 'ClaimSure';
+  const firmName = session?.brand_config.display_name ?? 'ArchiveOne';
 
   return (
     <View style={styles.container}>

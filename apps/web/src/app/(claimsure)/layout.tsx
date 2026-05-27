@@ -3,8 +3,8 @@ import { ClaimsureShell } from '@/components/claimsure/shell';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Claimsure',
-    template: '%s · Claimsure',
+    default: 'ArchiveOne',
+    template: '%s · ArchiveOne',
   },
 };
 

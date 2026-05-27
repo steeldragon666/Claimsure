@@ -1,4 +1,4 @@
-// Tokens for the ClaimSure broadcast consultant workspace.
+// Tokens for the ArchiveOne broadcast consultant workspace.
 // Mirror of ui_kits/consultant-app/consultant-shared.jsx (the v6 design export).
 // Inline style values rather than CSS custom properties so the workspace is
 // self-contained — the rest of the web app uses the cream/patina + dark-glass

@@ -169,7 +169,7 @@ export async function registerAuth0Auth(
     if (emailVerified !== true) {
       return reply.status(401).send({
         error: 'email_not_verified',
-        message: 'Auth0 must return a verified email before Claimsure can create a session',
+        message: 'Auth0 must return a verified email before ArchiveOne can create a session',
         requestId: req.id,
       });
     }

@@ -7,7 +7,7 @@ import { DensityToggle } from '@/components/density-toggle';
 /**
  * Design system style guide.
  *
- * Single-page visual reference for the Claimsure design system.
+ * Single-page visual reference for the ArchiveOne design system.
  * Renders every signature component with all states/variants,
  * documents color tokens and the type scale, and includes the
  * chain-verify-pulse signature animation in action.

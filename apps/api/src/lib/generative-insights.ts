@@ -247,7 +247,7 @@ async function runInsightSonnet(
   evidenceSummary: string,
 ): Promise<{ insights: GenerativeInsight[]; tokens_in: number; tokens_out: number }> {
   const system = [
-    'You are a senior R&D Tax Incentive consultant generating insights for a Claimsure user.',
+    'You are a senior R&D Tax Incentive consultant generating insights for an ArchiveOne user.',
     'Produce 1–2 sharp, specific insights about the current state of their claim evidence.',
     'Anchor every insight in Australian Div 355 statute, ISA review precedent, or AusIndustry portal guidance.',
     'Avoid generic platitudes; reference SPECIFIC numbers, kinds, or activities from the evidence summary below.',

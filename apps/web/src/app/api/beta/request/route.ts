@@ -58,7 +58,7 @@ async function sendMagicLinkEmail(toEmail: string, link: string): Promise<void> 
   if (testSend) {
     await testSend({
       to: toEmail,
-      subject: 'Your Claimsure beta access link',
+      subject: 'Your ArchiveOne beta access link',
       html: link,
       text: link,
     });
@@ -75,9 +75,9 @@ async function realSend(toEmail: string, link: string): Promise<void> {
   });
   await sender.send({
     to: toEmail,
-    subject: 'Your Claimsure beta access link',
-    text: `Click to access the Claimsure beta:\n\n${link}\n\nThis link expires in 15 minutes.`,
-    html: `<p>Click to access the Claimsure beta:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`,
+    subject: 'Your ArchiveOne beta access link',
+    text: `Click to access the ArchiveOne beta:\n\n${link}\n\nThis link expires in 15 minutes.`,
+    html: `<p>Click to access the ArchiveOne beta:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`,
   });
 }
 

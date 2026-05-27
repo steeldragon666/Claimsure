@@ -2,7 +2,7 @@
  * MYOB AccountRight accounting integration scaffolding.
  *
  * The marketing material names MYOB beside Xero as a supported accounting
- * source. This module establishes the provider contract Claimsure needs before
+ * source. This module establishes the provider contract ArchiveOne needs before
  * resource-specific expenditure sync helpers are layered on top: OAuth 2.0,
  * company-file selection, and authenticated AccountRight API calls.
  */
