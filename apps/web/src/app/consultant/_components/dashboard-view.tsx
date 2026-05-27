@@ -210,9 +210,7 @@ function KPISkeleton() {
           borderRadius: 2,
         }}
       />
-      <div
-        style={{ marginTop: 8, height: 14, width: 140, background: rule, borderRadius: 2 }}
-      />
+      <div style={{ marginTop: 8, height: 14, width: 140, background: rule, borderRadius: 2 }} />
       <div
         style={{
           marginTop: 10,
@@ -632,13 +630,6 @@ function WatchPanel() {
       ))}
     </div>
   );
-}
-
-interface ChainBlock {
-  id: string;
-  kind: string;
-  when: string;
-  claim: string;
 }
 
 /**

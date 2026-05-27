@@ -16,6 +16,7 @@
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter @cpa/db migrate",
+    "smoke:signup": "node tools/scripts/signup-smoke-check.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

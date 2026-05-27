@@ -41,20 +41,12 @@ export default function BlogIndexPage() {
             <Mark className="shadow-[0_0_22px_rgba(216,177,95,0.55)]" />
             <span className="font-display text-2xl font-semibold tracking-tight">ArchiveOne</span>
           </Link>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/login"
-              className="hidden border border-[#f7f1e4]/16 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[#cfc5b3] hover:border-[#f7f1e4]/35 hover:text-[#f7f1e4] sm:inline-flex"
-            >
-              Sign in
-            </Link>
-            <Link
-              href="/signup"
-              className="bg-[#d8b15f] px-4 py-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[#10130f] transition hover:bg-[#f0c96f]"
-            >
-              Request access
-            </Link>
-          </div>
+          <Link
+            href="/signup"
+            className="bg-[#d8b15f] px-4 py-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[#10130f] transition hover:bg-[#f0c96f]"
+          >
+            Request access
+          </Link>
         </nav>
 
         <div className="relative z-10 mx-auto grid max-w-[1420px] gap-12 px-5 pb-20 pt-14 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:px-12">

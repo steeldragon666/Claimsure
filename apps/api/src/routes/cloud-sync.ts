@@ -53,6 +53,7 @@ import {
   pkceChallengeFromVerifier,
   generateOAuthState,
 } from '@cpa/integrations/runtime';
+import { publicUrl } from '../lib/public-base-url.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -89,7 +90,7 @@ function getDriveOAuthConfig(): { client_id: string; client_secret: string; redi
   const client_secret = process.env['GOOGLE_DRIVE_OAUTH_CLIENT_SECRET'];
   const redirect_uri =
     process.env['GOOGLE_DRIVE_OAUTH_REDIRECT_URI'] ??
-    'http://localhost:3000/v1/cloud-sync/google-drive/callback';
+    publicUrl('/v1/cloud-sync/google-drive/callback');
   if (!client_id || !client_secret) {
     throw Object.assign(
       new Error(

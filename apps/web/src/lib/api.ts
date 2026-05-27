@@ -49,12 +49,12 @@ interface ApiErrorBody {
  * - Always sends credentials so the cpa_session cookie travels along.
  * - On non-2xx, parses the error envelope and throws a typed error.
  * - On 401, the caller (typically a query hook or AuthGuard) decides
- *   whether to redirect to /login.
+ *   whether to redirect to /signup.
  * - On 204, returns undefined (no body to parse).
  *
  * Error class hierarchy lets call sites distinguish:
  *   try { ... } catch (err) {
- *     if (err instanceof UnauthenticatedError) router.push('/login');
+ *     if (err instanceof UnauthenticatedError) router.push('/signup');
  *     else if (err instanceof ConflictError) toast(err.message);
  *     else throw err;
  *   }

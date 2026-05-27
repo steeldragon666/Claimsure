@@ -51,7 +51,7 @@ export function AddUserForm() {
         if (err instanceof NotFoundError) {
           toast({
             title: 'User not found',
-            description: 'Ask them to sign in once via Microsoft or Google, then retry.',
+            description: 'Ask them to complete approved signup first, then retry.',
             variant: 'destructive',
           });
         } else if (err instanceof ConflictError) {

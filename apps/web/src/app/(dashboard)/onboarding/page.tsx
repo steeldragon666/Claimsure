@@ -112,7 +112,9 @@ function OnboardingContent() {
         <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           Onboarding
         </p>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Welcome to Claimsure</h1>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">
+          Welcome to ArchiveOne
+        </h1>
         <p className="text-muted-foreground">
           Complete these steps to get your firm up and running.
         </p>

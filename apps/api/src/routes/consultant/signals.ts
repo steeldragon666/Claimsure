@@ -12,37 +12,33 @@ const WINDOW_TO_INTERVAL: Record<WindowParam, string> = {
 };
 
 export function registerConsultantSignals(app: FastifyInstance): void {
-  app.get(
-    '/v1/consultant/signals',
-    { preHandler: requireSession },
-    async (req, reply) => {
-      const window = ((req.query as Record<string, string>).window ??
-        '24h') as string;
+  app.get('/v1/consultant/signals', { preHandler: requireSession }, async (req, reply) => {
+    const window = (req.query as Record<string, string>).window ?? '24h';
 
-      if (!VALID_WINDOWS.includes(window as WindowParam)) {
-        return reply.status(400).send({
-          error: 'invalid_query',
-          message: `Query param "window" must be one of: ${VALID_WINDOWS.join(', ')}`,
-          requestId: req.id,
-        });
-      }
+    if (!VALID_WINDOWS.includes(window as WindowParam)) {
+      return reply.status(400).send({
+        error: 'invalid_query',
+        message: `Query param "window" must be one of: ${VALID_WINDOWS.join(', ')}`,
+        requestId: req.id,
+      });
+    }
 
-      const interval = WINDOW_TO_INTERVAL[window as WindowParam];
-      const tenantId = req.user!.tenantId!;
+    const interval = WINDOW_TO_INTERVAL[window as WindowParam];
+    const tenantId = req.user!.tenantId!;
 
-      return await sql.begin(async (tx) => {
-        await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
+    return await sql.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
 
-        const rows = await tx<
-          {
-            src: string;
-            tag: string;
-            code: string;
-            title: string;
-            exposure: number;
-            when: string;
-          }[]
-        >`
+      const rows = await tx<
+        {
+          src: string;
+          tag: string;
+          code: string;
+          title: string;
+          exposure: number;
+          when: string;
+        }[]
+      >`
           SELECT
             CASE s.source_name
               WHEN 'ATO Legal Database' THEN 'ATO'
@@ -92,8 +88,7 @@ export function registerConsultantSignals(app: FastifyInstance): void {
           ORDER BY e.published_at DESC
         `;
 
-        return { signals: rows };
-      });
-    },
-  );
+      return { signals: rows };
+    });
+  });
 }

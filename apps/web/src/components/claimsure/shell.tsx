@@ -48,7 +48,7 @@ export function SideNav({ onAtlasToggle, atlasOpen }: SideNavProps) {
             className="font-jakarta font-extrabold text-[15px] tracking-tight"
             style={{ color: 'var(--cs-on-surface)' }}
           >
-            Claimsure
+            ArchiveOne
           </div>
           <div
             className="text-[10px] uppercase tracking-widest opacity-40"

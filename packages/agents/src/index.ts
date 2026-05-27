@@ -10,3 +10,6 @@ export * from './auto-allocator/index.js';
 export * from './document-analyzer/index.js';
 export * from './narrative-summarizer/index.js';
 export * from './application-drafter/index.js';
+export * from './ip-search-query/index.js';
+export * from './ip-search-verdict/index.js';
+export * from './signup-evaluator/index.js';

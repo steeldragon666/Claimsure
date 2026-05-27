@@ -5,6 +5,13 @@ import { buildAuthUrl, exchangeCode, refreshAccessToken } from './oauth.js';
 
 const MYOB_SECURE_HOST = 'https://secure.myob.com';
 
+function requestBodyToString(body: unknown): string {
+  if (typeof body === 'string') return body;
+  if (body instanceof Buffer) return body.toString('utf8');
+  if (body instanceof URLSearchParams) return body.toString();
+  return JSON.stringify(body);
+}
+
 beforeEach(() => {
   nock.cleanAll();
 });
@@ -26,7 +33,10 @@ test('buildAuthUrl: builds MYOB authorization URL with scope and state', () => {
   assert.equal(authUrl.origin, MYOB_SECURE_HOST);
   assert.equal(authUrl.pathname, '/oauth2/account/authorize');
   assert.equal(authUrl.searchParams.get('client_id'), 'client-id');
-  assert.equal(authUrl.searchParams.get('redirect_uri'), 'https://claimsure.test/oauth/myob/callback');
+  assert.equal(
+    authUrl.searchParams.get('redirect_uri'),
+    'https://claimsure.test/oauth/myob/callback',
+  );
   assert.equal(authUrl.searchParams.get('response_type'), 'code');
   assert.equal(authUrl.searchParams.get('scope'), 'CompanyFile');
   assert.equal(authUrl.searchParams.get('state'), 'opaque-state');
@@ -37,7 +47,7 @@ test('exchangeCode: exchanges authorization code for OAuth tokens', async () => 
   nock(MYOB_SECURE_HOST)
     .post('/oauth2/v1/authorize')
     .reply(200, function (_uri, body) {
-      capturedBody = body.toString();
+      capturedBody = requestBodyToString(body);
       return {
         access_token: 'access-token',
         refresh_token: 'refresh-token',
@@ -71,7 +81,7 @@ test('refreshAccessToken: refreshes MYOB OAuth tokens', async () => {
   nock(MYOB_SECURE_HOST)
     .post('/oauth2/v1/authorize')
     .reply(200, function (_uri, body) {
-      capturedBody = body.toString();
+      capturedBody = requestBodyToString(body);
       return {
         access_token: 'new-access-token',
         refresh_token: 'new-refresh-token',
@@ -93,4 +103,3 @@ test('refreshAccessToken: refreshes MYOB OAuth tokens', async () => {
   assert.equal(tokens.access_token, 'new-access-token');
   assert.equal(tokens.refresh_token, 'new-refresh-token');
 });
-

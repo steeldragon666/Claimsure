@@ -273,7 +273,7 @@ function ApportionmentStep() {
           How does the ledger map to the activities?
         </div>
         <div style={{ fontFamily: fSans, fontSize: 13.5, color: bone3, marginTop: 8 }}>
-          ClaimSure has matched 6 of 7 lines automatically. Review and confirm the last one.
+          ArchiveOne has matched 6 of 7 lines automatically. Review and confirm the last one.
         </div>
       </div>
 

@@ -6,7 +6,7 @@ import { useWhoami } from '@/hooks/use-whoami';
 
 /**
  * Wraps an authenticated page. Renders nothing while the whoami query
- * is loading; redirects to /login on 401 (UnauthenticatedError); shows
+ * is loading; redirects to /signup on 401 (UnauthenticatedError); shows
  * a fallback for any other error.
  *
  * Usage:
@@ -23,7 +23,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (error instanceof UnauthenticatedError) {
-      router.push('/login');
+      router.push('/signup');
     }
   }, [error, router]);
 
@@ -38,7 +38,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   if (error instanceof UnauthenticatedError) {
     return (
       <main className="min-h-screen flex items-center justify-center">
-        <p className="text-slate-500">Redirecting to sign-in…</p>
+        <p className="text-slate-500">Redirecting to approved signup...</p>
       </main>
     );
   }

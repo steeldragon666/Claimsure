@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { requireSession } from '@cpa/auth';
 import { sql, privilegedSql } from '@cpa/db/client';
 import { createResendClient, createEmailSender, federationInvitationEmail } from '@cpa/email';
+import { publicUrl } from '../../lib/public-base-url.js';
 
 /**
  * P9 Phase 3 — Federation invitation endpoints.
@@ -85,8 +86,7 @@ export function registerFederationInvitations(app: FastifyInstance): void {
       const invitation = invRows[0]!;
 
       // Build accept URL and send email
-      const baseUrl = process.env['APP_BASE_URL'] ?? 'http://localhost:3000';
-      const acceptUrl = `${baseUrl}/federation/accept?token=${tokenHex}`;
+      const acceptUrl = publicUrl(`/federation/accept?token=${tokenHex}`);
 
       try {
         const client = createResendClient();
