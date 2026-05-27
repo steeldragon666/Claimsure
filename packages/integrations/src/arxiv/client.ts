@@ -1,6 +1,10 @@
 import { XMLParser } from 'fast-xml-parser';
 import { ArxivError, type ArxivResult, type SearchArxivOptions } from './types.js';
 
+interface TypedXmlParser {
+  parse: (xmlData: string) => unknown;
+}
+
 /**
  * arXiv API export endpoint. Documented at:
  *   https://info.arxiv.org/help/api/user-manual.html
@@ -55,6 +59,7 @@ const BACKOFFS_MS = [500, 1000];
  *   - Default `isArray` returns a singleton for elements that appear
  *     once; we normalise `<entry>` to always-array via `toArray()`.
  */
+// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- fast-xml-parser v4 exposes parse as any in its bundled declarations.
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -62,7 +67,7 @@ const xmlParser = new XMLParser({
   // results came back so the call site does not branch on
   // typeof entry === 'object' vs Array.
   isArray: (name) => name === 'entry' || name === 'link' || name === 'author',
-});
+}) as TypedXmlParser;
 
 /**
  * Search arXiv via the Atom-feed API.
