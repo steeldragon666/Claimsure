@@ -4,6 +4,7 @@ export * from './apportionment-report.js';
 export * from './claim-summary.js';
 export * from './compliance-notes.js';
 export * from './content-hash.js';
+export * from './engagement-letter.js';
 export * from './executive-summary.js';
 export * from './evidence-index.js';
 export * from './expenditure-schedule.js';
