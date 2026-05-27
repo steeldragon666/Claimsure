@@ -1,4 +1,5 @@
 import cookie from '@fastify/cookie';
+import * as Sentry from '@sentry/node';
 import Fastify from 'fastify';
 import type {
   FastifyBaseLogger,
@@ -574,7 +575,11 @@ export function buildApp(options: BuildAppOptions = {}): App {
     // which produce Error instances, so .name/.message are present.
     const e = err as Error & { statusCode?: number };
     const status = e.statusCode ?? 500;
+    // Forward server-side errors (5xx) to Sentry. 4xx are client mistakes
+    // (validation, auth) and would only flood the inbox. Sentry.init is a
+    // no-op when SENTRY_DSN is unset, so this is safe to call unconditionally.
     if (status >= 500) {
+      Sentry.captureException(e, { tags: { reqId: String(req.id) } });
       app.log.error({ err: e, reqId: req.id }, 'request failed');
     } else {
       app.log.warn({ err: e, reqId: req.id }, 'request failed');
