@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ClaimSure broadcast consultant workspace — port of
+ * ArchiveOne broadcast consultant workspace — port of
  * `claimsure-design-export-6/ui_kits/consultant-app/index.html`.
  *
  * The original is a self-contained React-on-Babel-standalone SPA composed

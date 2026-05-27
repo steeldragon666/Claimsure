@@ -24,7 +24,7 @@ test.describe('Consultant broadcast workspace (/consultant)', () => {
     page,
   }) => {
     // Brand header
-    await expect(page.getByText('ClaimSure').first()).toBeVisible();
+    await expect(page.getByText('ArchiveOne').first()).toBeVisible();
     await expect(page.getByText('Good morning, Anna.')).toBeVisible();
     // KPI tiles
     await expect(page.getByText('ACTIVE CLAIMS')).toBeVisible();
