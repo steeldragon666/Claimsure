@@ -100,7 +100,7 @@ async function loadKpisForFy(tx: typeof sql, fy: number): Promise<RawRow> {
           JOIN activity a ON a.id::text = e.payload->>'activity_id'
           JOIN claim c    ON c.id       = a.claim_id
          WHERE c.fiscal_year = ${fy}
-           AND e.kind = ANY(${EVIDENCE_KINDS_FOR_COUNT as unknown as string[]})
+           AND e.kind = ANY(${EVIDENCE_KINDS_FOR_COUNT})
       ) AS evidence_indexed,
       (
         SELECT COUNT(DISTINCT c.id)::int
@@ -119,7 +119,7 @@ async function loadKpisForFy(tx: typeof sql, fy: number): Promise<RawRow> {
                FROM event e
                JOIN activity a ON a.id::text = e.payload->>'activity_id'
               WHERE a.claim_id = c.id
-                AND e.kind = ANY(${EVIDENCE_KINDS_FOR_COUNT as unknown as string[]})
+                 AND e.kind = ANY(${EVIDENCE_KINDS_FOR_COUNT})
            )
       ) AS claims_with_block
   `;
@@ -177,8 +177,7 @@ export function registerConsultantKpis(app: FastifyInstance): void {
             prior.evidence_indexed,
           ),
           atRiskVsYesterday: null,
-          chainCoveragePtsYoY:
-            prior.active_claims === 0 ? null : coverageCurrent - coveragePrior,
+          chainCoveragePtsYoY: prior.active_claims === 0 ? null : coverageCurrent - coveragePrior,
         },
       };
       return reply.send(body);

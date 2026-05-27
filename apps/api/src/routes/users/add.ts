@@ -51,7 +51,7 @@ export function registerAddUser(app: FastifyInstance): void {
     if (!userRows[0]) {
       return reply.status(404).send({
         error: 'user_not_found',
-        message: 'User not found — ask them to sign in once via Microsoft or Google, then retry',
+        message: 'User not found — ask them to complete approved signup first, then retry',
         requestId: req.id,
       });
     }

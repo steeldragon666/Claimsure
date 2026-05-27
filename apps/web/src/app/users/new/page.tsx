@@ -25,7 +25,7 @@ function Inner() {
         <h1 className="font-display text-3xl font-semibold tracking-tight">Add firm member</h1>
         <p className="text-muted-foreground max-w-2xl">
           The user must have signed in via Microsoft or Google at least once before being added. New
-          users won&apos;t be invited by email — please tell them to sign in first.
+          users won&apos;t be invited by email — please tell them to complete approved signup first.
         </p>
       </header>
       <AddUserForm />

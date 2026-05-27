@@ -1,0 +1,23 @@
+# Defensive gitignore for tools/security — keep any generated keypair material
+# out of the repo, in case an operator runs rotate-ssh-key.sh from inside this
+# directory or accidentally drops a key file here.
+
+# SSH keypairs (private + public)
+id_*
+*.pem
+*.pub
+*.key
+
+# Common archiveone admin key names
+archiveone_admin
+archiveone_admin.*
+outside-magic
+outside-magic.*
+
+# Generic key dumps
+authorized_keys
+known_hosts
+
+# Local override / scratch
+*.local
+scratch/

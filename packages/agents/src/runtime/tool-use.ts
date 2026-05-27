@@ -185,25 +185,42 @@ function zodToJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
  */
 export async function callWithToolUse<O>(
   client: Anthropic,
-  args: { model: string; system: string; user: string; tool: ToolDef<O>; max_tokens?: number },
+  args: {
+    model: string;
+    system: string;
+    user: string;
+    tool: ToolDef<O>;
+    max_tokens?: number;
+    /**
+     * Optional per-call abort signal — passed through to the Anthropic SDK as
+     * a request-level cancellation. Use this when the caller has a tighter
+     * latency budget than the SDK's default 30s (e.g. the signup pipeline,
+     * which has a 2s budget). If the signal fires the SDK rejects with an
+     * AbortError; callers should catch and route to a permissive fallback.
+     */
+    signal?: AbortSignal;
+  },
 ): Promise<{ output: O; tokens_in: number; tokens_out: number }> {
-  const res = await client.messages.create({
-    model: args.model,
-    max_tokens: args.max_tokens ?? 1024,
-    system: args.system,
-    messages: [{ role: 'user', content: args.user }],
-    tools: [
-      {
-        name: args.tool.name,
-        description: args.tool.description,
-        // The Anthropic SDK's `Tool['input_schema']` is structurally a JSON
-        // schema with `type: 'object'`; our minimal converter satisfies that
-        // contract but TS can't verify it through the generic plumbing. Cast.
-        input_schema: zodToJsonSchema(args.tool.input_schema) as Anthropic.Tool['input_schema'],
-      },
-    ],
-    tool_choice: { type: 'tool', name: args.tool.name },
-  });
+  const res = await client.messages.create(
+    {
+      model: args.model,
+      max_tokens: args.max_tokens ?? 1024,
+      system: args.system,
+      messages: [{ role: 'user', content: args.user }],
+      tools: [
+        {
+          name: args.tool.name,
+          description: args.tool.description,
+          // The Anthropic SDK's `Tool['input_schema']` is structurally a JSON
+          // schema with `type: 'object'`; our minimal converter satisfies that
+          // contract but TS can't verify it through the generic plumbing. Cast.
+          input_schema: zodToJsonSchema(args.tool.input_schema) as Anthropic.Tool['input_schema'],
+        },
+      ],
+      tool_choice: { type: 'tool', name: args.tool.name },
+    },
+    args.signal ? { signal: args.signal } : undefined,
+  );
   const block = res.content.find((c) => c.type === 'tool_use');
   if (!block) throw new Error('classifier did not invoke the structured-output tool');
   const parsed = args.tool.input_schema.parse(block.input);

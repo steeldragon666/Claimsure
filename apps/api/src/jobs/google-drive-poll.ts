@@ -24,6 +24,7 @@ import { insertEventWithChain } from '@cpa/db';
 import { listDriveFiles, downloadDriveFile } from '@cpa/integrations/google-drive';
 import type { DriveClientOptions } from '@cpa/integrations/google-drive';
 import type { EvidenceUploadedPayload } from '@cpa/schemas';
+import { publicUrl } from '../lib/public-base-url.js';
 
 export const GOOGLE_DRIVE_POLL_JOB_NAME = 'google-drive-poll';
 /** Every 15 minutes. */
@@ -70,7 +71,7 @@ function getDriveOAuthConfig(): {
     client_secret,
     redirect_uri:
       process.env['GOOGLE_DRIVE_OAUTH_REDIRECT_URI'] ??
-      'http://localhost:3000/v1/cloud-sync/google-drive/callback',
+      publicUrl('/v1/cloud-sync/google-drive/callback'),
   };
 }
 

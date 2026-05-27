@@ -1,4 +1,5 @@
 import cookie from '@fastify/cookie';
+import * as Sentry from '@sentry/node';
 import Fastify from 'fastify';
 import type {
   FastifyBaseLogger,
@@ -87,10 +88,13 @@ import { registerWhoami } from './routes/whoami.js';
 import { registerFederation } from './routes/federation/index.js';
 import { registerCloudSync } from './routes/cloud-sync.js';
 import { registerEvidenceRoutes } from './routes/evidence.js';
+import { registerIpSearchReportRoute } from './routes/ip-search/report.js';
 import { registerConsultantChain } from './routes/consultant/chain.js';
 import { registerConsultantKpis } from './routes/consultant/kpis.js';
 import { registerConsultantSignals } from './routes/consultant/signals.js';
 import { registerEngagementRoutes } from './routes/engagement/index.js';
+import { publicUrl } from './lib/public-base-url.js';
+import { readSecretEnv } from './lib/production-secrets.js';
 
 const DEFAULT_DEV_SESSION_SECRET = 'dev-only-32-bytes-of-entropy-pad!';
 const DEFAULT_SESSION_COOKIE_NAME = 'cpa_session';
@@ -188,7 +192,9 @@ export function buildApp(options: BuildAppOptions = {}): App {
   // sets app.current_tenant_id GUC for RLS-scoped queries.
   // Production must set SESSION_JWT_SECRET (the dev default is a constant
   // string and is NOT secure for any non-local environment).
-  const sessionSecret = process.env['SESSION_JWT_SECRET'] ?? DEFAULT_DEV_SESSION_SECRET;
+  const sessionSecret = readSecretEnv('SESSION_JWT_SECRET', {
+    devFallback: DEFAULT_DEV_SESSION_SECRET,
+  });
   const cookieName = process.env['SESSION_COOKIE_NAME'] ?? DEFAULT_SESSION_COOKIE_NAME;
   app.register(sessionPlugin, { secret: sessionSecret, cookieName });
 
@@ -291,6 +297,10 @@ export function buildApp(options: BuildAppOptions = {}): App {
   });
   app.register((instance, _opts, done) => {
     registerClaimPdf(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerIpSearchReportRoute(instance);
     done();
   });
   app.register((instance, _opts, done) => {
@@ -483,25 +493,22 @@ export function buildApp(options: BuildAppOptions = {}): App {
     done();
   });
 
-  // OIDC routes only register when both clientId AND clientSecret are
-  // present. In tests + bare-bones dev, env vars are unset and the
-  // routes simply don't exist; the rest of the API still works. This
-  // avoids a network call to Issuer.discover during cold start when
-  // we don't even have credentials configured.
   const cookieSecure = process.env['NODE_ENV'] === 'production';
   const ttlSeconds = Number(process.env['SESSION_TTL_SECONDS'] ?? DEFAULT_SESSION_TTL_SECONDS);
+  // External login providers are disabled while ArchiveOne uses approved
+  // signup as the only public account path.
+  const publicLoginRoutesEnabled = false;
 
   const msClientId = process.env['MICROSOFT_OIDC_CLIENT_ID'];
   const msClientSecret = process.env['MICROSOFT_OIDC_CLIENT_SECRET'];
-  if (msClientId && msClientSecret) {
+  if (publicLoginRoutesEnabled && msClientId && msClientSecret) {
     app.register(async (instance) => {
       await registerMicrosoftAuth(instance, {
         tenantId: process.env['MICROSOFT_OIDC_TENANT'] ?? 'common',
         clientId: msClientId,
         clientSecret: msClientSecret,
         redirectUri:
-          process.env['MICROSOFT_OIDC_REDIRECT_URI'] ??
-          'http://localhost:3000/v1/auth/microsoft/callback',
+          process.env['MICROSOFT_OIDC_REDIRECT_URI'] ?? publicUrl('/v1/auth/microsoft/callback'),
         sessionSecret,
         cookieName,
         cookieSecure,
@@ -513,14 +520,13 @@ export function buildApp(options: BuildAppOptions = {}): App {
 
   const gClientId = process.env['GOOGLE_OIDC_CLIENT_ID'];
   const gClientSecret = process.env['GOOGLE_OIDC_CLIENT_SECRET'];
-  if (gClientId && gClientSecret) {
+  if (publicLoginRoutesEnabled && gClientId && gClientSecret) {
     app.register(async (instance) => {
       await registerGoogleAuth(instance, {
         clientId: gClientId,
         clientSecret: gClientSecret,
         redirectUri:
-          process.env['GOOGLE_OIDC_REDIRECT_URI'] ??
-          'http://localhost:3000/v1/auth/google/callback',
+          process.env['GOOGLE_OIDC_REDIRECT_URI'] ?? publicUrl('/v1/auth/google/callback'),
         sessionSecret,
         cookieName,
         cookieSecure,
@@ -539,14 +545,13 @@ export function buildApp(options: BuildAppOptions = {}): App {
   const auth0Domain = process.env['AUTH0_DOMAIN'];
   const auth0ClientId = process.env['AUTH0_CLIENT_ID'];
   const auth0ClientSecret = process.env['AUTH0_CLIENT_SECRET'];
-  if (auth0Domain && auth0ClientId && auth0ClientSecret) {
+  if (publicLoginRoutesEnabled && auth0Domain && auth0ClientId && auth0ClientSecret) {
     app.register(async (instance) => {
       await registerAuth0Auth(instance, {
         domain: auth0Domain,
         clientId: auth0ClientId,
         clientSecret: auth0ClientSecret,
-        redirectUri:
-          process.env['AUTH0_REDIRECT_URI'] ?? 'http://localhost:3000/v1/auth/auth0/callback',
+        redirectUri: process.env['AUTH0_REDIRECT_URI'] ?? publicUrl('/v1/auth/auth0/callback'),
         sessionSecret,
         cookieName,
         cookieSecure,
@@ -557,7 +562,7 @@ export function buildApp(options: BuildAppOptions = {}): App {
   }
 
   const devLoginToken = process.env['DEV_LOGIN_TOKEN'];
-  if (devLoginToken) {
+  if (publicLoginRoutesEnabled && devLoginToken) {
     app.register((instance, _opts, done) => {
       registerDevLogin(instance, {
         bypassToken: devLoginToken,
@@ -581,7 +586,11 @@ export function buildApp(options: BuildAppOptions = {}): App {
     // which produce Error instances, so .name/.message are present.
     const e = err as Error & { statusCode?: number };
     const status = e.statusCode ?? 500;
+    // Forward server-side errors (5xx) to Sentry. 4xx are client mistakes
+    // (validation, auth) and would only flood the inbox. Sentry.init is a
+    // no-op when SENTRY_DSN is unset, so this is safe to call unconditionally.
     if (status >= 500) {
+      Sentry.captureException(e, { tags: { reqId: String(req.id) } });
       app.log.error({ err: e, reqId: req.id }, 'request failed');
     } else {
       app.log.warn({ err: e, reqId: req.id }, 'request failed');

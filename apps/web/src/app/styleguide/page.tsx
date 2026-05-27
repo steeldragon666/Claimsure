@@ -33,7 +33,7 @@ export default function StyleguidePage() {
           Design System
         </h1>
         <p className="mt-2 max-w-2xl font-body text-lg text-[hsl(var(--brand-ink-muted))]">
-          Living reference for Claimsure&apos;s visual primitives. Source of truth lives in{' '}
+          Living reference for ArchiveOne&apos;s visual primitives. Source of truth lives in{' '}
           <code className="font-mono text-sm">docs/design/system.md</code>; this page renders the
           tokens and components in action.
         </p>

@@ -27,7 +27,7 @@ export interface WhoamiResponse {
  *
  * 401 errors are typed as UnauthenticatedError; the AuthGuard component
  * (which wraps every authenticated page) catches that and redirects to
- * /login. Components that consume this hook directly should also handle
+ * /signup. Components that consume this hook directly should also handle
  * the loading/error states.
  */
 export function useWhoami() {
