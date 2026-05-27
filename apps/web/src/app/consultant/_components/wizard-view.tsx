@@ -17,6 +17,19 @@ import {
   ruleStrong,
 } from './tokens';
 import { Check, Diamond, MonoLabel, StatusPill } from './atoms';
+import { EngagementPanel, isEngagementUnblocked } from './engagement-panel';
+import { useClaimEngagement } from '@/lib/hooks/use-claim-engagement';
+
+/**
+ * Demo claim id used while the wizard is wired to fixtures rather than
+ * to a real route param. Matches the VANT-7 example throughout the
+ * design export — the API will treat unknown ids as 404 and the
+ * engagement hook handles that as `pending_send`. Once the wizard gets
+ * a real `/claims/[id]` route this constant goes away.
+ */
+const DEMO_CLAIM_ID = 'vant-7';
+const DEMO_CLAIMANT_NAME = 'Vantage Industries';
+const DEMO_FY_LABEL = 'FY26';
 
 interface WizardStep {
   k: string;
@@ -41,6 +54,13 @@ const STEPS: WizardStep[] = [
 
 export function WizardView() {
   const [step, setStep] = useState(3);
+  // Engagement gate: until the claim is signed or countersigned, the
+  // downstream wizard steps render dimmed with an "Engagement required"
+  // overlay. The panel itself handles its own loading/error UI, so a
+  // momentary undefined here just shows the gate; the overlay vanishes
+  // once the engagement query resolves into one of the allowed states.
+  const { data: engagement } = useClaimEngagement(DEMO_CLAIM_ID);
+  const downstreamUnlocked = isEngagementUnblocked(engagement?.status);
 
   return (
     <div style={{ height: '100%', overflow: 'auto', padding: 28 }}>
@@ -112,6 +132,16 @@ export function WizardView() {
         </div>
       </div>
 
+      {/* Step 1 — Engagement Letter panel sits above the legacy step rail.
+          The rail still lists steps 1–6 for navigation context, but the
+          authoritative source of truth for engagement state is the panel
+          below; the rail is purely a progress indicator. */}
+      <EngagementPanel
+        claimId={DEMO_CLAIM_ID}
+        claimantName={DEMO_CLAIMANT_NAME}
+        fiscalYearLabel={DEMO_FY_LABEL}
+      />
+
       {/* Step rail */}
       <div
         style={{
@@ -178,9 +208,80 @@ export function WizardView() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
-        <ApportionmentStep />
-        <EvidenceStreamPanel />
+      <div style={{ position: 'relative' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '2fr 1fr',
+            gap: 14,
+            // Dim downstream content until engagement is signed/countersigned.
+            // pointerEvents is killed so the dimmed UI can't be interacted
+            // with — the overlay above carries the explanation.
+            opacity: downstreamUnlocked ? 1 : 0.35,
+            pointerEvents: downstreamUnlocked ? 'auto' : 'none',
+            filter: downstreamUnlocked ? 'none' : 'grayscale(0.4)',
+            transition: 'opacity 120ms ease, filter 120ms ease',
+          }}
+          aria-hidden={!downstreamUnlocked}
+        >
+          <ApportionmentStep />
+          <EvidenceStreamPanel />
+        </div>
+        {!downstreamUnlocked && <EngagementRequiredOverlay />}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Overlay rendered over the downstream wizard steps while the
+ * engagement letter is still pending/sent/declined/expired. Anchored to
+ * the dimmed grid via `position: absolute` + the relative parent above.
+ * No CTA inside the overlay — the only useful action is in the
+ * EngagementPanel above, so we point users back to it.
+ */
+function EngagementRequiredOverlay() {
+  return (
+    <div
+      role="status"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        style={{
+          padding: '14px 22px',
+          background: ink2,
+          border: `1px solid ${ruleStrong}`,
+          borderRadius: 4,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          boxShadow: '0 6px 24px rgba(0,0,0,0.35)',
+          pointerEvents: 'auto',
+        }}
+      >
+        <Diamond size={7} />
+        <div>
+          <MonoLabel size={10} color={amber} tracking="0.18em">
+            ENGAGEMENT REQUIRED
+          </MonoLabel>
+          <div
+            style={{
+              marginTop: 4,
+              fontFamily: fSans,
+              fontSize: 12.5,
+              color: bone3,
+            }}
+          >
+            Send and countersign the engagement letter to unlock the rest of the wizard.
+          </div>
+        </div>
       </div>
     </div>
   );
