@@ -23,6 +23,7 @@ import { useState } from 'react';
 import { TopBar, type ConsultantUser } from './_components/topbar';
 import { Sidebar, type ConsultantView } from './_components/sidebar';
 import { DashboardView } from './_components/dashboard-view';
+import { ClientsView } from './_components/clients-view';
 import { WizardView } from './_components/wizard-view';
 import { WatchView } from './_components/watch-view';
 import { FinancingView } from './_components/financing-view';
@@ -56,8 +57,12 @@ export default function ConsultantWorkspace() {
         <Sidebar view={view} setView={setView} />
         <main style={{ flex: 1, background: ink, overflow: 'hidden' }}>
           {view === 'dashboard' && <DashboardView />}
-          {view === 'claims' && <DashboardView />}
-          {view === 'wizard' && <WizardView />}
+          {/* Clients → Client → Claims → Claim (6-step approve-wizard).
+              The real claim workflow lives here (clients-view.tsx). */}
+          {view === 'clients' && <ClientsView />}
+          {/* Evidence vault + Chain reuse the legacy wizard demo surface
+              until their own per-claim views land — they're out of scope
+              for this change (consultant claim-workflow IA only). */}
           {view === 'evidence' && <WizardView />}
           {view === 'chain' && <WizardView />}
           {view === 'watch' && <WatchView />}

@@ -19,8 +19,7 @@ import { Diamond, MonoLabel, NavIcon, type NavIconKind } from './atoms';
 
 export type ConsultantView =
   | 'dashboard'
-  | 'claims'
-  | 'wizard'
+  | 'clients'
   | 'evidence'
   | 'chain'
   | 'watch'
@@ -35,10 +34,13 @@ interface NavItem {
   primary?: boolean;
 }
 
+// IA per docs/product/workflow.md: Clients → Client → that client's CLAIMS
+// list → Claim (the 6-step approve-wizard). The "Clients" nav item owns
+// that whole drill-down (clients-view.tsx); there's no standalone "Active
+// claim" entry — you reach a claim's wizard through its client.
 const NAV: NavItem[] = [
   { k: 'dashboard', label: 'Dashboard', icon: 'grid' },
-  { k: 'claims', label: 'Claims', icon: 'folder', badge: '14' },
-  { k: 'wizard', label: 'Active claim', icon: 'wand', primary: true },
+  { k: 'clients', label: 'Clients', icon: 'folder', primary: true },
   { k: 'evidence', label: 'Evidence vault', icon: 'lock' },
   { k: 'chain', label: 'Chain', icon: 'chain' },
   { k: 'watch', label: 'Watch', icon: 'eye', badge: '3' },
