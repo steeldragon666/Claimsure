@@ -21,6 +21,11 @@
  *               GET  /v1/claims/:id/workflow             (state + canAdvance)
  *               POST /v1/claims/:id/workflow/step/:n/agree
  *               POST /v1/claims/:id/workflow/step/:n/reopen
+ *
+ * The two FINALIZE actions (seal + finance) below mirror endpoints being
+ * built in PARALLEL — they may not exist at runtime yet. The fetchers wire
+ * to the exact agreed contract; callers detect a 404 (NotFoundError) and
+ * render a graceful "not available yet" state rather than crashing.
  */
 
 import type { Claim } from '@cpa/schemas';
@@ -82,6 +87,15 @@ export interface WorkflowStepEntry {
   agreed_by: string;
 }
 
+/**
+ * Financing marker written by POST /v1/claims/:id/finance. `status` is
+ * currently always 'requested'; `requested_at` is the handoff stamp.
+ */
+export interface WorkflowFinancing {
+  status: string;
+  requested_at: string;
+}
+
 export interface WorkflowState {
   initialized_at: string;
   steps: {
@@ -91,6 +105,15 @@ export interface WorkflowState {
     '4': WorkflowStepEntry | null;
     '5': WorkflowStepEntry | null;
   };
+  /**
+   * Finalize markers written by the seal/finance routes (claim-finalize.ts).
+   * Present once the claim is sealed / financed — these make the lifecycle
+   * READ-BACK across sessions, not just in-session. Optional because a claim
+   * mid-approval carries none of them.
+   */
+  sealed_at?: string;
+  seal_block_id?: string;
+  financing?: WorkflowFinancing;
 }
 
 export type WorkflowStepKey = '1' | '2' | '3' | '4' | '5';
@@ -177,4 +200,73 @@ export async function reopenStep(claimId: string, step: WorkflowStepKey): Promis
     { method: 'POST', body: JSON.stringify({}) },
   );
   return res.workflow_state;
+}
+
+/* ───────────────────────────── Finalize ────────────────────────────── */
+
+/**
+ * Result of POST /v1/claims/:id/seal. The claim, once all six wizard steps
+ * are approved, is sealed as an append-only block on the evidence chain
+ * (immutable, audit-ready — see workflow.md step 4). `block_id` is the
+ * chain block the seal wrote; `sealed_at` is the stamp.
+ *
+ * Per CLAUDE.md the seal writes the chain block transactionally; this is a
+ * web-side contract mirror only — NO backend was added here.
+ */
+export interface SealResult {
+  ok: true;
+  sealed_at: string;
+  block_id: string;
+}
+
+/**
+ * Seal the claim onto the evidence chain. Enabled only once ALL six wizard
+ * steps are approved (the caller gates the affordance; the server gates
+ * authoritatively).
+ *
+ * Empty body, credentials included (apiFetch always sends the cookie).
+ *
+ * Errors surfaced to the caller:
+ *   - 409 `not_approved`  → steps still pending; show inline message.
+ *   - 404                 → endpoint not deployed yet (NotFoundError);
+ *                           caller renders an honest "not available yet".
+ */
+export async function sealClaim(claimId: string): Promise<SealResult> {
+  return apiFetch<SealResult>(`/v1/claims/${encodeURIComponent(claimId)}/seal`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+/**
+ * Result of POST /v1/claims/:id/finance. A sealed claim is submitted to the
+ * financing rail so the client finances this period's R&D refund
+ * (workflow.md step 5). `financing.status` is the rail's accepted state;
+ * `financing.requested_at` is the submission stamp.
+ */
+export interface FinanceResult {
+  ok: true;
+  financing: {
+    status: string;
+    requested_at: string;
+  };
+}
+
+/**
+ * Submit a SEALED claim's refund to financing. Enabled only once the claim
+ * is sealed (the caller gates the affordance; the server gates
+ * authoritatively).
+ *
+ * Empty body, credentials included.
+ *
+ * Errors surfaced to the caller:
+ *   - 409 `not_sealed`  → claim isn't sealed yet; show inline message.
+ *   - 404               → endpoint not deployed yet (NotFoundError);
+ *                         caller renders an honest "not available yet".
+ */
+export async function financeClaim(claimId: string): Promise<FinanceResult> {
+  return apiFetch<FinanceResult>(`/v1/claims/${encodeURIComponent(claimId)}/finance`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
 }

@@ -37,9 +37,10 @@ import {
   rust,
   sage,
 } from './tokens';
-import { Diamond, MonoLabel } from './atoms';
+import { Diamond, MonoLabel, StatusPill, type StatusKind } from './atoms';
 import { listClients } from './onboarding-api';
 import { useClientClaims, usePrepareClaim } from '@/lib/hooks/use-claims';
+import { useClaimWorkflow } from '@/lib/hooks/use-claim-workflow';
 import { ClaimReviewView } from './claim-review-view';
 
 type Level =
@@ -298,7 +299,7 @@ function ClientClaimsList({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '120px 1fr 160px 120px',
+              gridTemplateColumns: '100px 1fr 150px 140px 100px',
               padding: '8px 18px',
               gap: 16,
               fontFamily: fMono,
@@ -309,6 +310,7 @@ function ClientClaimsList({
           >
             <span>PERIOD</span>
             <span>STAGE</span>
+            <span>STATUS</span>
             <span>TYPE</span>
             <span style={{ textAlign: 'right' }} />
           </div>
@@ -330,7 +332,7 @@ function ClaimRow({ claim, onOpen }: { claim: Claim; onOpen: () => void }) {
       onClick={onOpen}
       style={{
         display: 'grid',
-        gridTemplateColumns: '120px 1fr 160px 120px',
+        gridTemplateColumns: '100px 1fr 150px 140px 100px',
         alignItems: 'center',
         gap: 16,
         padding: '16px 18px',
@@ -359,6 +361,7 @@ function ClaimRow({ claim, onOpen }: { claim: Claim; onOpen: () => void }) {
           {stageLabel}
         </MonoLabel>
       </span>
+      <ClaimStatusBadge claim={claim} />
       <MonoLabel size={9} color={isWizard ? amber : bone4} tracking="0.14em">
         {isWizard ? 'APPROVE-WIZARD' : 'LEGACY CLAIM'}
       </MonoLabel>
@@ -368,6 +371,35 @@ function ClaimRow({ claim, onOpen }: { claim: Claim; onOpen: () => void }) {
         </MonoLabel>
       </span>
     </button>
+  );
+}
+
+/**
+ * Lightweight per-row lifecycle badge derived from the claim's workflow
+ * state: DRAFTING while the six wizard steps are still being approved,
+ * APPROVED once all are. Seal/financing are NOT persisted on the claim row
+ * (nor exposed by any GET today), so they intentionally don't appear here —
+ * the badge stays honest to what the API exposes. The seal/financing states
+ * are surfaced live inside <ClaimReviewView> once those actions run.
+ *
+ * Reuses the existing workflow query (shared cache key) and the StatusPill
+ * atom. Non-wizard / not-yet-prepared claims show nothing.
+ */
+function ClaimStatusBadge({ claim }: { claim: Claim }) {
+  const { data: workflow, notInitialized } = useClaimWorkflow(
+    claim.is_wizard_claim ? claim.id : null,
+  );
+
+  if (!claim.is_wizard_claim || notInitialized || !workflow) return <span />;
+
+  const steps = workflow.workflow_state.steps;
+  const allApproved = (['1', '2', '3', '4', '5'] as const).every((k) => steps[k] !== null);
+  const kind: StatusKind = allApproved ? 'approved' : 'drafting';
+
+  return (
+    <span>
+      <StatusPill kind={kind} />
+    </span>
   );
 }
 

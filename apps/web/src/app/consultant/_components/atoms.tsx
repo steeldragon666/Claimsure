@@ -79,13 +79,22 @@ export function Check({ color = amber, size = 14 }: CheckProps) {
   );
 }
 
-export type StatusKind = 'drafting' | 'review' | 'sealed' | 'chain-lock' | 'flagged';
+export type StatusKind =
+  | 'drafting'
+  | 'approved'
+  | 'review'
+  | 'sealed'
+  | 'chain-lock'
+  | 'financing'
+  | 'flagged';
 
 const STATUS_MAP: Record<StatusKind, { c: string; bg: string; t: string }> = {
   drafting: { c: bone2, bg: ink3, t: 'DRAFTING' },
+  approved: { c: sage, bg: 'rgba(122,150,133,0.12)', t: 'APPROVED' },
   review: { c: amber, bg: 'rgba(225,162,58,0.1)', t: 'UNDER REVIEW' },
   sealed: { c: amber, bg: 'rgba(225,162,58,0.18)', t: 'SEALED' },
   'chain-lock': { c: sage, bg: 'rgba(122,150,133,0.18)', t: 'CHAIN-LOCKED' },
+  financing: { c: sage, bg: 'rgba(122,150,133,0.18)', t: 'FINANCING' },
   flagged: { c: rust, bg: 'rgba(196,106,72,0.15)', t: 'FLAGGED' },
 };
 

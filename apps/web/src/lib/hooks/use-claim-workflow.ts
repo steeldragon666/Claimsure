@@ -3,9 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ConflictError } from '@/lib/api';
 import {
   agreeStep,
+  financeClaim,
   getWorkflow,
   initializeWorkflow,
   reopenStep,
+  sealClaim,
+  type FinanceResult,
+  type SealResult,
   type WorkflowResponse,
   type WorkflowState,
   type WorkflowStepKey,
@@ -124,6 +128,56 @@ export function useReopenStep(claimId: string | null | undefined) {
   });
 }
 
+/**
+ * Seal the claim onto the evidence chain (POST /v1/claims/:id/seal). The
+ * terminal Review step gates the affordance: enabled only once all six
+ * wizard steps are approved. On success the workflow query is invalidated
+ * so any state derived from it refreshes, and the SealResult (block_id +
+ * sealed_at) is returned to the view to render the sealed state.
+ *
+ * Error handling is left to the view:
+ *   - ConflictError (409 not_approved) → inline "approve all steps first".
+ *   - NotFoundError (404)              → endpoint not deployed yet; the view
+ *                                        shows an honest "not available yet".
+ * Both bubble up as the mutation error — neither crashes the wizard.
+ */
+export function useSealClaim(claimId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation<SealResult, Error, void>({
+    mutationFn: () => {
+      if (!claimId) throw new Error('claimId required to seal the claim.');
+      return sealClaim(claimId);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['claim-workflow', claimId] });
+      void qc.invalidateQueries({ queryKey: ['client-claims'] });
+    },
+  });
+}
+
+/**
+ * Submit a sealed claim's refund to financing (POST /v1/claims/:id/finance).
+ * Enabled only once the claim is sealed. Returns the FinanceResult
+ * (financing.status + requested_at) so the view can render the
+ * "financing requested" state.
+ *
+ * Error handling mirrors useSealClaim:
+ *   - ConflictError (409 not_sealed) → inline "seal the claim first".
+ *   - NotFoundError (404)            → endpoint not deployed yet.
+ */
+export function useFinanceClaim(claimId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation<FinanceResult, Error, void>({
+    mutationFn: () => {
+      if (!claimId) throw new Error('claimId required to finance the claim.');
+      return financeClaim(claimId);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['client-claims'] });
+    },
+  });
+}
+
 // Re-export the workflow types for view consumers that only import from
 // the hook module.
-export type { WorkflowResponse, WorkflowState, WorkflowStepKey };
+export type { FinanceResult, SealResult, WorkflowResponse, WorkflowState, WorkflowStepKey };
