@@ -568,6 +568,24 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
           requestId: req.id,
         });
       }
+      // Postgres unique-violation on `user_email_unique`: this email already
+      // backs a `user` row (e.g. an approved user re-running signup whose
+      // email collides under a different idp/external_id, where
+      // findOrCreateUser's recovery branch re-throws the raw 23505). Without
+      // this catch the raw Postgres error message would leak to the browser
+      // via the global error handler. Map it to a friendly 409 pointing the
+      // user at the login flow instead.
+      if (isUniqueViolation(err, 'user_email_unique')) {
+        req.log.warn(
+          { email: normalizedEmail },
+          'signup: user_email_unique violation — email already has a workspace',
+        );
+        return reply.status(409).send({
+          error: 'workspace_exists',
+          message: 'This email already has a workspace. Use Log in instead.',
+          requestId: req.id,
+        });
+      }
       req.log.error(
         { err: err instanceof Error ? err.message : String(err) },
         'signup: tenant creation failed',

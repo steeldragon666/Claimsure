@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 
-type SubmitState = 'idle' | 'submitting' | 'denied' | 'error';
+type SubmitState = 'idle' | 'submitting' | 'denied' | 'exists' | 'error';
 
 function Diamond({ className = '' }: { className?: string }) {
   return <span className={`inline-block rotate-45 bg-[#e1a23a] ${className}`} aria-hidden="true" />;
@@ -67,6 +67,14 @@ export default function SignupPage() {
             'We could not auto-approve your request. Please contact aaron@carbonproject.com.au if you believe this is in error.',
         );
         setState('denied');
+        return;
+      }
+
+      // 409 workspace_exists → this email already has a workspace. Show a
+      // friendly message linking to the login flow instead of leaking the
+      // raw duplicate-key error.
+      if (res.status === 409) {
+        setState('exists');
         return;
       }
 
@@ -144,6 +152,24 @@ export default function SignupPage() {
                   className="inline-flex border border-[#f0ebe2]/25 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[#f0ebe2] hover:border-[#e1a23a] hover:text-[#e1a23a]"
                 >
                   Back to site
+                </Link>
+              </div>
+            ) : state === 'exists' ? (
+              <div className="space-y-6 py-6">
+                <div className="flex h-12 w-12 items-center justify-center border border-[#e1a23a]/60">
+                  <Diamond className="h-3 w-3" />
+                </div>
+                <div>
+                  <h2 className="font-display text-3xl font-light">You already have a workspace.</h2>
+                  <p className="mt-4 font-body text-sm leading-7 text-[#cdc7bd]">
+                    This email already has a workspace. Use Log in instead.
+                  </p>
+                </div>
+                <Link
+                  href="/login"
+                  className="inline-flex h-12 items-center justify-center bg-[#e1a23a] px-5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0b0b0d] transition hover:bg-[#efb657]"
+                >
+                  Log in
                 </Link>
               </div>
             ) : (
