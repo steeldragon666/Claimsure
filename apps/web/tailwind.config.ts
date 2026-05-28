@@ -22,14 +22,14 @@ const config: Config = {
     },
     extend: {
       fontFamily: {
-        // Wired to next/font CSS variables in apps/web/src/app/layout.tsx
-        display: ['var(--font-display)', 'Georgia', 'serif'],
-        body: ['var(--font-body)', 'system-ui', 'sans-serif'],
-        sans: ['var(--font-body)', 'system-ui', 'sans-serif'],
-        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'monospace'],
-        // ArchiveOne dark-UI fonts
-        inter: ['var(--font-inter)', 'system-ui', 'sans-serif'],
-        jakarta: ['var(--font-jakarta)', 'system-ui', 'sans-serif'],
+        // System A — wired to next/font CSS variables in apps/web/src/app/layout.tsx
+        display: ['var(--font-display)', 'Fraunces', 'Georgia', 'serif'], // Fraunces
+        body: ['var(--font-geist)', 'Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'], // Geist
+        sans: ['var(--font-geist)', 'Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'], // Geist
+        mono: ['var(--font-mono)', 'JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        // Legacy aliases — retained so unmigrated surfaces don't break; resolve to Geist.
+        inter: ['var(--font-geist)', 'system-ui', 'sans-serif'],
+        jakarta: ['var(--font-geist)', 'system-ui', 'sans-serif'],
       },
       colors: {
         // shadcn semantic tokens — populated from CSS variables in globals.css
@@ -81,6 +81,30 @@ const config: Config = {
           warning: 'hsl(var(--brand-warning))',
           error: 'hsl(var(--brand-error))',
           info: 'hsl(var(--brand-info))',
+        },
+        // System A named palette — the canonical broadcast tokens, mirrors
+        // apps/web/src/app/consultant/_components/tokens.ts. Use these for
+        // new work: bg-ink, text-bone, border-rule, etc. NOTE: the amber
+        // accent is intentionally NOT added here (it would clobber Tailwind's
+        // built-in amber-50..950 scale used across ~20 files) — use the
+        // `primary` / `brand-accent` tokens for the #e1a23a accent instead.
+        ink: {
+          DEFAULT: '#0b0b0d',
+          2: '#131316',
+          3: '#1c1c20',
+          4: '#252529',
+        },
+        bone: {
+          DEFAULT: '#f0ebe2',
+          2: '#cdc7bd',
+          3: '#8a857c',
+          4: '#5d594f',
+        },
+        sage: '#7a9685',
+        rust: '#c46a48',
+        rule: {
+          DEFAULT: 'rgba(240,235,226,0.10)',
+          strong: 'rgba(240,235,226,0.22)',
         },
       },
       borderRadius: {

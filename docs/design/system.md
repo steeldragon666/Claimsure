@@ -1,23 +1,22 @@
-# CPA Platform — Design System
+# ArchiveOne — Design System (System A, locked)
 
-**Status:** Approved direction. Tokens specified; not yet applied to `apps/web`.
-**Date:** 2026-05-04
+**Status:** LOCKED 2026-05-27 — System A is the single platform theme. The "cream paper + patina green" light system described in the prose below (System B) is **RETIRED**. Where the body still says cream/green, read it as historical context; this TL;DR + `apps/web/src/app/globals.css` are authoritative.
+**Date:** 2026-05-04 (original) · 2026-05-27 (System A lockdown)
 **Pairs with:** `docs/design/brief.md` (the WHY)
-**For:** designers (Figma source of truth) + engineers (Tailwind/CSS implementation)
-
-This document is the canonical spec. If something here conflicts with what's currently in `apps/web/src/app/globals.css`, this document wins. Engineers implementing this should treat the JSON tokens at `docs/design/tokens.json` as the binding values.
+**Runtime source of truth:** `apps/web/src/app/globals.css` (CSS variables) + `apps/web/tailwind.config.ts`. `docs/design/tokens.json` mirrors System A; if it conflicts with globals.css, globals.css wins.
 
 ---
 
-## TL;DR
+## TL;DR — System A (the broadcast theme)
 
-A forensic working document, rendered with editorial taste. Three signature decisions make the platform feel like nothing else in its category:
+A forensic working document, rendered with editorial taste — in a dark "broadcast" register. Signature decisions:
 
 1. **Fraunces serif** for display heads (most B2B is sans-only)
-2. **Warm cream paper base** `#FAF8F3` (most SaaS is pure white)
-3. **Patina green accent** `#5C7A6B` (oxidized copper, deliberately not corporate blue)
+2. **Dark ink base** `#0b0b0d` with **bone** text `#f0ebe2` (most SaaS is pure white; this reads as a sealed archive)
+3. **Amber accent** `#e1a23a` (deliberately not corporate blue); **sage** `#7a9685` + **rust** `#c46a48` secondary semantics
+4. **Geist** body/UI, **JetBrains Mono** forensic/metadata
 
-These three are independent decisions. Drop one and the system still holds. Drop two and it becomes generic. The spec below assumes all three.
+Drop one and the system still holds. Drop two and it becomes generic. The spec below assumes all of these.
 
 ---
 

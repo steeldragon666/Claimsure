@@ -14,13 +14,25 @@ CPA Platform — an Australian R&D Tax Incentive (R&DTI) consulting tool. Phased
 - Agents: Anthropic SDK; Claude Sonnet 4.5 + Haiku 4.5
 - Test runner: `node:test` via `tsx --test`
 
-## Design system
+## Design system — System A (locked, single source of truth)
 
-**Always read `docs/design/system.md` and `docs/design/brief.md` before making any visual or UI decisions.** All font choices, colors, spacing, and aesthetic direction are defined there. The token spec at `docs/design/tokens.json` is the binding source of truth.
+**There is ONE design system: System A (the "broadcast" / Claude-design theme).** As of the 2026-05-27 lockdown, the legacy "warm cream paper + patina green" (System B) is **retired**. Do not reintroduce it.
 
-Do not deviate without explicit user approval. In QA mode, flag any code that doesn't match `system.md`. The three signature decisions (Fraunces serif, warm cream paper base `#FAF8F3`, patina green accent `#5C7A6B`) must be preserved unless explicitly revised.
+System A signature decisions (preserve unless the user explicitly revises):
 
-If you're about to write a new shadcn/Radix component variant, check `system.md` Component variant overrides first.
+- **Dark ink base** `#0b0b0d` (ink), elevated surfaces `#131316` / `#1c1c20` / `#252529`
+- **Bone text** `#f0ebe2` (primary), `#cdc7bd` / `#8a857c` / `#5d594f` (muted scale)
+- **Amber accent** `#e1a23a` (primary/CTA/focus), `#b88a3d` (soft); secondary semantics **sage** `#7a9685` (info/success), **rust** `#c46a48` (error/destructive)
+- **Type:** Fraunces (display/serif), Geist (body/sans), JetBrains Mono (mono)
+- Hairlines: `rgba(240,235,226,.10)` (rule) / `.22` (rule-strong); radius 4px buttons/inputs
+
+**Canonical token locations:**
+- `apps/web/src/app/globals.css` — shadcn `--*` + `--brand-*` CSS variables (the runtime source)
+- `apps/web/tailwind.config.ts` — semantic utilities + named `ink`/`bone`/`sage`/`rust`/`rule` colors. The amber accent is `primary` / `brand-accent` (NOT a named `amber` utility — that would clobber Tailwind's built-in amber scale)
+- `apps/web/src/app/consultant/_components/tokens.ts` — inline hex mirror used by the consultant workspace + onboarding
+- `docs/design/system.md` + `docs/design/tokens.json` — the written spec
+
+When building new UI: use `bg-background text-foreground`, `bg-card`, `text-muted-foreground`, `bg-primary text-primary-foreground`, `border-border`, or the named `bg-ink* / text-bone* / text-sage / text-rust / border-rule*` utilities. Don't hardcode hex unless mirroring an exact design export.
 
 ## Architecture rules (immutable)
 

@@ -3,132 +3,144 @@
 @tailwind utilities;
 
 /*
- * Claimsure — design system tokens.
+ * ArchiveOne — design system tokens (System A, the canonical theme).
  * Source of truth: docs/design/system.md + docs/design/tokens.json
  *
- * shadcn semantic tokens (--background, --primary, etc.) are populated
- * with design system values so every existing component picks up the
- * new visual identity automatically. Brand-specific tokens are exposed
- * separately as --brand-* for direct access.
+ * ONE design system: dark ink base (#0b0b0d) + bone text (#f0ebe2) +
+ * amber accent (#e1a23a), Fraunces / Geist / JetBrains Mono. Mirrors the
+ * Claude design export tokens in
+ * apps/web/src/app/consultant/_components/tokens.ts — the consultant
+ * workspace + landing already use these; this file makes them global so
+ * every shadcn/brand-token consumer picks them up automatically.
+ *
+ * The legacy "cream paper + patina green" (light) and "navy glass" (dark)
+ * systems have been retired. System A is a single dark theme, so :root
+ * and .dark carry identical values.
  */
 
 @layer base {
   :root {
-    /* shadcn semantic mapping
-       --primary  = brand accent (patina green) — primary buttons, links, CTAs
-       --accent   = shadcn hover-state surface (NOT brand accent) — uses surface-muted
+    color-scheme: dark;
+
+    /* shadcn semantic mapping (System A)
+       --primary  = amber accent #e1a23a — primary buttons, links, CTAs
+       --accent   = shadcn hover-state surface (NOT brand accent) — ink-elevated
        Don't be fooled by the name overlap. */
 
-    /* Surfaces */
-    --background: 43 36% 97%; /* base — warm cream paper #FAF8F3 */
-    --foreground: 36 9% 9%; /* ink — near-black warm #1A1814 */
-    --card: 0 0% 100%; /* surface — pure white card */
-    --card-foreground: 36 9% 9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 36 9% 9%;
+    /* Surfaces — ink scale */
+    --background: 240 8% 5%; /* ink #0b0b0d */
+    --foreground: 39 32% 91%; /* bone #f0ebe2 */
+    --card: 240 7% 8%; /* ink2 #131316 */
+    --card-foreground: 39 32% 91%;
+    --popover: 240 7% 8%;
+    --popover-foreground: 39 32% 91%;
 
-    /* Primary = brand accent (patina green #5C7A6B) */
-    --primary: 141 14% 42%;
-    --primary-foreground: 0 0% 100%;
+    /* Primary = amber accent #e1a23a (dark ink text sits on it) */
+    --primary: 37 74% 55%;
+    --primary-foreground: 240 8% 5%;
 
-    /* Secondary = surface-muted (warm cream tint #F5F1E8) */
-    --secondary: 43 30% 93%;
-    --secondary-foreground: 36 9% 9%;
+    /* Secondary = ink3 surface #1c1c20 */
+    --secondary: 240 7% 12%;
+    --secondary-foreground: 39 32% 91%;
 
-    /* Muted = surface-muted with ink-muted text */
-    --muted: 43 30% 93%;
-    --muted-foreground: 33 10% 38%; /* #6B6258 */
+    /* Muted = ink3 surface with bone3 text */
+    --muted: 240 7% 12%;
+    --muted-foreground: 39 6% 51%; /* bone3 #8a857c */
 
-    /* Accent (shadcn hover surface, NOT brand) = surface-muted */
-    --accent: 43 30% 93%;
-    --accent-foreground: 36 9% 9%;
+    /* Accent (shadcn hover surface, NOT brand) = ink3 */
+    --accent: 240 7% 12%;
+    --accent-foreground: 39 32% 91%;
 
-    /* Destructive = clay red #9E3838 */
-    --destructive: 0 49% 42%;
-    --destructive-foreground: 0 0% 100%;
+    /* Destructive = rust #c46a48 */
+    --destructive: 16 51% 53%;
+    --destructive-foreground: 39 32% 91%;
 
-    /* Borders + focus */
-    --border: 40 28% 87%; /* hairline #E8E2D5 */
-    --input: 40 28% 87%;
-    --ring: 141 14% 42%; /* patina focus ring */
+    /* Borders + focus — bone hairlines on ink */
+    --border: 240 6% 16%; /* ≈ rgba(bone,.10) on ink */
+    --input: 240 6% 16%;
+    --ring: 37 74% 55%; /* amber focus ring */
 
-    /* Radius — sharper than shadcn 8px default; matches design system spec */
+    /* Radius — sharp; matches the broadcast design */
     --radius: 0.25rem; /* 4px — buttons, inputs */
 
-    /* Claimsure brand-specific tokens (not part of shadcn surface) */
-    --brand-base: 43 36% 97%;
-    --brand-ink: 36 9% 9%;
-    --brand-ink-muted: 33 10% 38%;
-    --brand-ink-subtle: 33 9% 57%;
-    --brand-hairline: 40 28% 87%;
-    --brand-hairline-strong: 40 22% 77%;
-    --brand-accent: 141 14% 42%;
-    --brand-accent-strong: 143 16% 28%;
-    --brand-accent-subtle: 140 16% 87%;
-    --brand-warning: 28 63% 45%; /* terracotta #B8732B */
-    --brand-error: 0 49% 42%; /* clay red #9E3838 */
-    --brand-info: 220 14% 41%; /* slate #5A6478 */
+    /* ArchiveOne brand-specific tokens (System A) */
+    --brand-base: 240 8% 5%; /* ink */
+    --brand-ink: 39 32% 91%; /* bone (primary text) */
+    --brand-ink-muted: 38 14% 77%; /* bone2 */
+    --brand-ink-subtle: 39 6% 51%; /* bone3 */
+    --brand-hairline: 240 6% 16%; /* rule */
+    --brand-hairline-strong: 240 6% 22%; /* ruleStrong */
+    --brand-accent: 37 74% 55%; /* amber */
+    --brand-accent-strong: 38 50% 48%; /* amberSoft */
+    --brand-accent-subtle: 37 40% 18%; /* dark amber tint */
+    --brand-warning: 37 74% 55%; /* amber */
+    --brand-error: 16 51% 53%; /* rust */
+    --brand-info: 144 12% 53%; /* sage #7a9685 */
   }
 
   .dark {
-    /* Claimsure dark mode — deep navy-black glass aesthetic */
-    --background: 220 30% 6%;
-    --foreground: 230 60% 95%;
-    --card: 225 28% 10%;
-    --card-foreground: 230 60% 95%;
-    --popover: 225 28% 10%;
-    --popover-foreground: 230 60% 95%;
-    --primary: 238 68% 56%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 225 22% 18%;
-    --secondary-foreground: 230 60% 95%;
-    --muted: 225 22% 18%;
-    --muted-foreground: 215 16% 57%;
-    --accent: 225 22% 18%;
-    --accent-foreground: 230 60% 95%;
-    --destructive: 0 72% 71%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 225 20% 15%;
-    --input: 225 20% 15%;
-    --ring: 238 68% 56%;
+    color-scheme: dark;
+    /* System A is already dark — identical to :root so a dark-class
+       toggle is a no-op rather than a second theme. */
+    --background: 240 8% 5%;
+    --foreground: 39 32% 91%;
+    --card: 240 7% 8%;
+    --card-foreground: 39 32% 91%;
+    --popover: 240 7% 8%;
+    --popover-foreground: 39 32% 91%;
+    --primary: 37 74% 55%;
+    --primary-foreground: 240 8% 5%;
+    --secondary: 240 7% 12%;
+    --secondary-foreground: 39 32% 91%;
+    --muted: 240 7% 12%;
+    --muted-foreground: 39 6% 51%;
+    --accent: 240 7% 12%;
+    --accent-foreground: 39 32% 91%;
+    --destructive: 16 51% 53%;
+    --destructive-foreground: 39 32% 91%;
+    --border: 240 6% 16%;
+    --input: 240 6% 16%;
+    --ring: 37 74% 55%;
 
-    /* Claimsure-specific dark tokens */
-    --cs-surface:                   #0a0d14;
-    --cs-surface-dim:               #0a0d14;
-    --cs-surface-container-lowest:  #070910;
-    --cs-surface-container-low:     #0f131e;
-    --cs-surface-container:         #161b29;
-    --cs-surface-container-high:    #1c2233;
-    --cs-surface-container-highest: #242b40;
-    --cs-surface-variant:           rgba(255,255,255,0.05);
-    --cs-on-surface:                #eef0ff;
-    --cs-on-surface-variant:        #94a3b8;
-    --cs-outline-variant:           rgba(255,255,255,0.10);
-    --cs-outline:                   #475569;
+    /* Legacy dark-glass tokens — retained ONLY so the not-yet-migrated
+       (claimsure)/* routes don't error before their surface migration.
+       Remapped onto System A (amber/ink) rather than the old indigo. */
+    --cs-surface:                   #0b0b0d; /* ink */
+    --cs-surface-dim:               #0a0a0b;
+    --cs-surface-container-lowest:  #070708;
+    --cs-surface-container-low:     #131316; /* ink2 */
+    --cs-surface-container:         #1c1c20; /* ink3 */
+    --cs-surface-container-high:    #252529; /* ink4 */
+    --cs-surface-container-highest: #2d2d31;
+    --cs-surface-variant:           rgba(240,235,226,0.05);
+    --cs-on-surface:                #f0ebe2; /* bone */
+    --cs-on-surface-variant:        #8a857c; /* bone3 */
+    --cs-outline-variant:           rgba(240,235,226,0.10); /* rule */
+    --cs-outline:                   #5d594f; /* bone4 */
 
-    --cs-primary:                   #4648d4;
-    --cs-primary-container:         #6063ee;
-    --cs-primary-fixed:             #e1e0ff;
-    --cs-primary-fixed-dim:         #c0c1ff;
-    --cs-on-primary:                #ffffff;
+    --cs-primary:                   #e1a23a; /* amber */
+    --cs-primary-container:         #b88a3d; /* amberSoft */
+    --cs-primary-fixed:             #f5d9a8;
+    --cs-primary-fixed-dim:         #e1a23a;
+    --cs-on-primary:                #0b0b0d; /* ink text on amber */
 
-    --cs-secondary-fixed:           #71f8e4;
-    --cs-secondary-fixed-dim:       #4fdbc8;
+    --cs-secondary-fixed:           #a9c2b5;
+    --cs-secondary-fixed-dim:       #7a9685; /* sage */
 
-    --cs-tertiary-fixed:            #ffdcc5;
-    --cs-tertiary-fixed-dim:        #ffb783;
+    --cs-tertiary-fixed:            #e0a98f;
+    --cs-tertiary-fixed-dim:        #c46a48; /* rust */
 
-    --cs-error:                     #ff6b6b;
-    --cs-warn:                      #ffb783;
-    --cs-success:                   #4fdbc8;
+    --cs-error:                     #c46a48; /* rust */
+    --cs-warn:                      #e1a23a; /* amber */
+    --cs-success:                   #7a9685; /* sage */
 
-    --cs-glass-bg:                  rgba(255,255,255,0.03);
-    --cs-glass-border:              rgba(255,255,255,0.10);
+    --cs-glass-bg:                  rgba(240,235,226,0.03);
+    --cs-glass-border:              rgba(240,235,226,0.10);
     --cs-glass-blur:                12px;
 
-    --cs-ai-grad: radial-gradient(circle at top right, rgba(70,72,212,0.28), transparent 60%);
-    --cs-ai-glow: 0 0 40px rgba(70,72,212,0.22);
-    --cs-primary-glow: 0 0 24px rgba(70,72,212,0.40);
+    --cs-ai-grad: radial-gradient(circle at top right, rgba(225,162,58,0.20), transparent 60%);
+    --cs-ai-glow: 0 0 40px rgba(225,162,58,0.16);
+    --cs-primary-glow: 0 0 24px rgba(225,162,58,0.34);
 
     --cs-ease-out: cubic-bezier(.16,1,.3,1);
     --cs-ease-spring: cubic-bezier(.34,1.56,.64,1);
@@ -195,7 +207,7 @@
   }
 
   .cs-timeline-line {
-    background: linear-gradient(to bottom, var(--cs-primary) 0%, rgba(70,72,212,0.1) 100%);
+    background: linear-gradient(to bottom, var(--cs-primary) 0%, rgba(225,162,58,0.1) 100%);
   }
 }
 
@@ -214,9 +226,9 @@
   }
   .cs-shimmer {
     background-image: linear-gradient(90deg,
-      rgba(70,72,212,0.10) 0%,
-      rgba(70,72,212,0.30) 50%,
-      rgba(70,72,212,0.10) 100%);
+      rgba(225,162,58,0.10) 0%,
+      rgba(225,162,58,0.30) 50%,
+      rgba(225,162,58,0.10) 100%);
     background-size: 200% 100%;
     animation: cs-shimmer 2.5s linear infinite;
   }
