@@ -83,6 +83,7 @@ import type { PgBoss } from 'pg-boss';
 import { createHash } from 'node:crypto';
 import { privilegedSql } from '@cpa/db/client';
 import { renderEngagementLetterPdf } from '@cpa/documents';
+import { putObject } from '../lib/storage.js';
 
 export const ENGAGEMENT_LETTER_RENDER_PDF_QUEUE = 'engagement-letter-render-pdf';
 
@@ -262,6 +263,13 @@ export async function runEngagementLetterRenderPdfJob(
   const contentHash = createHash('sha256').update(pdfBytes).digest('hex');
   const sizeBytes = pdfBytes.byteLength;
   const s3Key = `engagement-letters/${letter.tenant_id}/${letter.id}.pdf`;
+
+  // 5b. Persist the bytes to object storage BEFORE inserting the
+  //     media_artefact row, so the row never points at a missing
+  //     object. The key is deterministic and the bytes are stable, so
+  //     a retry simply overwrites with identical content (idempotent).
+  //     In dev/test without S3 config this is a no-op (see lib/storage).
+  await putObject({ s3Key, body: pdfBytes, contentType: 'application/pdf' });
 
   // 6. Insert media_artefact + back-link in a single tx so a partial
   //    write doesn't leave the engagement letter pointing at an
