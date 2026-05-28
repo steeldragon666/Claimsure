@@ -45,6 +45,7 @@ import { registerClaimantStatus } from './routes/claimant-status.js';
 import { registerClaimants } from './routes/claimants.js';
 import { registerClaimPdf } from './routes/claim-pdf.js';
 import { registerClaimWorkflow } from './routes/claim-workflow.js';
+import { registerClaimFinalize } from './routes/claim-finalize.js';
 import { registerClaims } from './routes/claims.js';
 import { registerEmployees } from './routes/employees.js';
 import { registerMagicLinkRedeem } from './routes/magic-link.js';
@@ -341,6 +342,10 @@ export function buildApp(options: BuildAppOptions = {}): App {
   });
   app.register((instance, _opts, done) => {
     registerClaimWorkflow(instance);
+    done();
+  });
+  app.register((instance, _opts, done) => {
+    registerClaimFinalize(instance);
     done();
   });
   app.register((instance, _opts, done) => {

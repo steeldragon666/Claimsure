@@ -23,6 +23,30 @@ export const WorkflowStepEntry = z.object({
 });
 export type WorkflowStepEntry = z.infer<typeof WorkflowStepEntry>;
 
+/**
+ * Financing-handoff marker written by `POST /v1/claims/:id/finance`
+ * (claim-finalize route). Records that the sealed claim has been handed
+ * off to the internal financing rail. No external financier integration —
+ * this is a status marker only. `requested_at` is the ISO timestamp of
+ * the handoff; `status` is currently always `'requested'` (the union is
+ * left open-ended as a single literal so a future "approved"/"disbursed"
+ * lifecycle can extend it without a schema break).
+ */
+export const WorkflowFinancing = z.object({
+  status: z.literal('requested'),
+  requested_at: Iso8601,
+});
+export type WorkflowFinancing = z.infer<typeof WorkflowFinancing>;
+
+/**
+ * `sealed_at` / `seal_block_id` / `financing` are the claim-finalize
+ * markers (claim-finalize route, no migration — they ride on the existing
+ * `workflow_state` jsonb). All optional so a wizard claim that has not yet
+ * been sealed parses cleanly. `sealed_at` (ISO) + `seal_block_id` (the
+ * chain `event.id` of the sealing block) are written together by
+ * `POST /v1/claims/:id/seal`; their presence is the "claim is sealed"
+ * predicate the finance route gates on.
+ */
 export const WorkflowState = z.object({
   initialized_at: Iso8601,
   steps: z
@@ -34,5 +58,8 @@ export const WorkflowState = z.object({
       '5': WorkflowStepEntry.nullable(),
     })
     .strict(),
+  sealed_at: Iso8601.optional(),
+  seal_block_id: Uuid.optional(),
+  financing: WorkflowFinancing.optional(),
 });
 export type WorkflowState = z.infer<typeof WorkflowState>;
