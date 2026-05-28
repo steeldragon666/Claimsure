@@ -83,7 +83,7 @@ import {
   registerFounderSignin,
   type FounderSigninRouteDeps,
 } from './routes/auth/founder-signin.js';
-import { registerLoginRoutes } from './routes/auth/login.js';
+import { registerLoginRoute } from './routes/auth/login.js';
 import { registerTenantActivationGate } from './middleware/auth.js';
 import { registerCompliance } from './routes/compliance.js';
 import { registerIntelligence } from './routes/intelligence.js';
@@ -497,6 +497,15 @@ export function buildApp(options: BuildAppOptions = {}): App {
   if (options.signup) {
     app.register((instance, _opts, done) => {
       registerSignupRoutes(instance, options.signup!);
+      // Passwordless login for already-approved users — the login
+      // counterpart to signup, registered in the same plugin block so it
+      // shares signup's session config (secret, cookie name/flags, TTL).
+      registerLoginRoute(instance, {
+        sessionSecret: options.signup!.sessionSecret,
+        cookieName: options.signup!.cookieName,
+        cookieSecure: options.signup!.cookieSecure,
+        ttlSeconds: options.signup!.ttlSeconds,
+      });
       done();
     });
   }
@@ -529,21 +538,6 @@ export function buildApp(options: BuildAppOptions = {}): App {
 
   const cookieSecure = process.env['NODE_ENV'] === 'production';
   const ttlSeconds = Number(process.env['SESSION_TTL_SECONDS'] ?? DEFAULT_SESSION_TTL_SECONDS);
-
-  // Magic-link login for existing users — the only public sign-in path
-  // while `publicLoginRoutesEnabled = false` keeps OIDC + dev-login
-  // gated off. Registered UNCONDITIONALLY: the endpoint internally gates
-  // on RESEND_API_KEY (503 + warn log if unset) so dev-without-email
-  // boots fine and the route surface is consistent across deployments.
-  app.register((instance, _opts, done) => {
-    registerLoginRoutes(instance, {
-      sessionSecret,
-      cookieName,
-      cookieSecure,
-      ttlSeconds,
-    });
-    done();
-  });
 
   // External login providers are disabled while ArchiveOne uses approved
   // signup as the only public account path.

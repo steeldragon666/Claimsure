@@ -435,6 +435,13 @@
       "when": 1779606000000,
       "tag": "0091_auth_magic_link",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1779692400000,
+      "tag": "0092_auth_login_attempt",
+      "breakpoints": true
     }
   ]
 }
