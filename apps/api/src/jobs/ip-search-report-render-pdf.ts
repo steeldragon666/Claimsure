@@ -11,6 +11,7 @@ import {
   type IpSearchVerdictReportSection,
   type IpSearchVerdictReportVerdict,
 } from '@cpa/documents';
+import { putObject } from '../lib/storage.js';
 
 /**
  * ip-search-report-render-pdf — Wizard Step 2 / Task 07.
@@ -339,6 +340,12 @@ export async function runIpSearchReportRenderPdfJob(
   // hex chars; crypto.createHash('sha256').digest('hex') matches.
   const fileHash = crypto.createHash('sha256').update(pdfBytes).digest('hex');
   const s3Key = `tenants/${claim.tenant_id}/subjects/${claim.subject_tenant_id}/ip-search-reports/${fileHash}.pdf`;
+
+  // Step 8b: persist the bytes to object storage before the DB write,
+  // so the media_artefact row never points at a missing object. Key is
+  // content-addressed (stable bytes → same key), so retries overwrite
+  // idempotently. No-op in dev/test without S3 config (see lib/storage).
+  await putObject({ s3Key, body: pdfBytes, contentType: 'application/pdf' });
 
   // Step 9: persist. One transaction so the tenant GUC + INSERT +
   // verdict UPDATE share the same RLS-scoped session.

@@ -10,6 +10,7 @@ import {
   updateBrandConfigBody,
   type BrandConfig,
 } from '@cpa/schemas';
+import { presignUploadUrl } from '../lib/storage.js';
 
 /**
  * Whitelist of mime types accepted by the logo uploader. Mirrors the
@@ -256,12 +257,10 @@ export function registerBrandConfig(app: FastifyInstance): void {
    * logo blob directly. After the PUT succeeds, the client PATCHes
    * /v1/brand-config with `logo_s3_key` to "publish" the new logo.
    *
-   * STUB: this task only wires the contract — the real S3 client lands
-   * with the storage-infra task. We return a placeholder URL so the
-   * client component can flow end-to-end against a known shape, and
-   * the s3_key it ships back through PATCH is already the production
-   * format (`brand-config/{tenantId}/logo-{uuid}.{ext}`) so DB rows
-   * written today don't need re-keying when real S3 lights up.
+   * The URL comes from the storage adapter (`lib/storage`): a real
+   * presigned PUT in production, or a `placeholder.s3.amazonaws.com`
+   * fallback in dev/test when no S3 env is configured. The s3_key is
+   * the production format (`brand-config/{tenantId}/logo-{uuid}.{ext}`).
    */
   app.post(
     '/v1/brand-config/logo-upload-url',
@@ -287,7 +286,7 @@ export function registerBrandConfig(app: FastifyInstance): void {
       // content_type is image/... — split('/')[1] is always defined.
       const ext = parsed.data.content_type.split('/')[1]!.replace('+xml', '');
       const s3Key = `brand-config/${tenantId}/logo-${crypto.randomUUID()}.${ext}`;
-      const upload_url = `https://placeholder.s3.amazonaws.com/${s3Key}?X-Amz-Signature=stub`;
+      const upload_url = await presignUploadUrl(s3Key);
       return { upload_url, s3_key: s3Key };
     },
   );

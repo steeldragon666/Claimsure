@@ -10,6 +10,7 @@ import {
   type MediaArtefact,
 } from '@cpa/schemas';
 import { requireMobileSession } from '../middleware/mobile-jwt-verifier.js';
+import { presignUploadUrl, presignDownloadUrl } from '../lib/storage.js';
 
 /**
  * Media upload + CRUD routes (T-A6, T-A8).
@@ -20,13 +21,11 @@ import { requireMobileSession } from '../middleware/mobile-jwt-verifier.js';
  *   - Consultant CRUD (list / detail / delete), authed via consultant
  *     OIDC session. Lands in A8 alongside this file.
  *
- * S3 stub: the v1 pre-signed URL is a placeholder
- * `https://placeholder.s3.amazonaws.com/<key>`. The mobile client's
- * PUT to it will fail at the network layer; the upload helper swallows
- * that error so the rest of the pipeline (finalize → media_artefact
- * row → OCR queue) still exercises the contract end-to-end. Once the
- * real S3 client lands, only this route changes — the mobile flow is
- * already shaped for a real PUT.
+ * Pre-signed URLs come from the object-storage adapter (`lib/storage`).
+ * In production that is the real MinIO/S3 bucket; in dev/test, when no
+ * S3 env is configured, the adapter returns a `placeholder.s3.amazonaws.com`
+ * URL so the finalize → media_artefact → OCR pipeline still exercises the
+ * contract end-to-end without a live bucket.
  */
 
 const errEnvelope = (
@@ -98,17 +97,6 @@ function buildS3Key(args: { tenantId: string; subjectTenantId: string; sha256: s
   return `tenants/${args.tenantId}/subjects/${args.subjectTenantId}/${args.sha256}`;
 }
 
-/**
- * Stub presigned URL. v1 returns a placeholder under the
- * `placeholder.s3.amazonaws.com` host; the mobile client's PUT to it
- * will fail (DNS / network) but the upload helper swallows that so
- * the finalize step still runs. Once the real S3 client lands this
- * helper switches to `getSignedUrl(...)`.
- */
-function stubPresignedUrl(s3Key: string): string {
-  return `https://placeholder.s3.amazonaws.com/${s3Key}`;
-}
-
 export function registerMedia(app: FastifyInstance): void {
   /**
    * POST /v1/media/presigned-upload — mobile auth.
@@ -142,8 +130,9 @@ export function registerMedia(app: FastifyInstance): void {
         sha256,
       });
 
+      const uploadUrl = await presignUploadUrl(s3Key);
       return reply.status(200).send({
-        upload_url: stubPresignedUrl(s3Key),
+        upload_url: uploadUrl,
         s3_key: s3Key,
         content_hash_required: sha256,
       });
@@ -321,10 +310,9 @@ export function registerMedia(app: FastifyInstance): void {
   /**
    * GET /v1/media/:id — consultant session.
    *
-   * Returns the row + a stub download URL. The download URL is
-   * conventional `https://placeholder.s3.amazonaws.com/<s3_key>` —
-   * once the real S3 client lands, this becomes a 5-minute
-   * pre-signed GET. The contract shape stays the same.
+   * Returns the row + a short-lived (5-minute) pre-signed GET URL from
+   * the storage adapter. In dev/test without S3 config it falls back to
+   * a `placeholder.s3.amazonaws.com` URL; the contract shape is identical.
    *
    * 404 covers both "doesn't exist" and "exists in another firm";
    * RLS filters silently and we don't distinguish (no claimant-
@@ -356,9 +344,10 @@ export function registerMedia(app: FastifyInstance): void {
           .status(404)
           .send(errEnvelope('NOT_FOUND', 'No media with that id in this firm', req.id));
       }
+      const downloadUrl = await presignDownloadUrl(row.s3_key);
       return reply.status(200).send({
         media: rowToArtefact(row),
-        download_url: stubPresignedUrl(row.s3_key),
+        download_url: downloadUrl,
       });
     },
   );
