@@ -24,7 +24,8 @@ export type ConsultantView =
   | 'evidence'
   | 'chain'
   | 'watch'
-  | 'financing';
+  | 'financing'
+  | 'setup';
 
 interface NavItem {
   k: ConsultantView;
@@ -42,6 +43,7 @@ const NAV: NavItem[] = [
   { k: 'chain', label: 'Chain', icon: 'chain' },
   { k: 'watch', label: 'Watch', icon: 'eye', badge: '3' },
   { k: 'financing', label: 'Financing', icon: 'coin', badge: 'BETA' },
+  { k: 'setup', label: 'Setup', icon: 'cog', badge: 'NEW' },
 ];
 
 interface SidebarProps {

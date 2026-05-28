@@ -26,6 +26,7 @@ import { DashboardView } from './_components/dashboard-view';
 import { WizardView } from './_components/wizard-view';
 import { WatchView } from './_components/watch-view';
 import { FinancingView } from './_components/financing-view';
+import { OnboardingView } from './_components/onboarding-view';
 import { bone, fSans, ink } from './_components/tokens';
 
 const DEMO_USER: ConsultantUser = {
@@ -61,6 +62,7 @@ export default function ConsultantWorkspace() {
           {view === 'chain' && <WizardView />}
           {view === 'watch' && <WatchView />}
           {view === 'financing' && <FinancingView />}
+          {view === 'setup' && <OnboardingView />}
         </main>
       </div>
     </div>
