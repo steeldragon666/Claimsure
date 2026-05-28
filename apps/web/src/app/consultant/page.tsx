@@ -29,15 +29,64 @@ import { WatchView } from './_components/watch-view';
 import { FinancingView } from './_components/financing-view';
 import { OnboardingView } from './_components/onboarding-view';
 import { bone, fSans, ink } from './_components/tokens';
+import { useWhoami, type WhoamiResponse } from '@/hooks/use-whoami';
 
-const DEMO_USER: ConsultantUser = {
-  name: 'Anna Pemberton',
-  initials: 'AP',
-  firm: 'PEMBERTON & COLE',
-};
+/**
+ * Derive the displayed name + initials from the session. The user table's
+ * display_name is often null (magic-link signups don't set it), so we fall
+ * back to the email. Initials prefer two name words, else the first two
+ * characters of the name basis.
+ */
+function deriveIdentity(
+  displayName: string | null,
+  email: string,
+): {
+  name: string;
+  initials: string;
+} {
+  const name = displayName?.trim() || email;
+  const basis = displayName?.trim() || email.split('@')[0] || email;
+  const parts = basis.split(/[\s._-]+/).filter(Boolean);
+  const initials = (
+    parts.length >= 2 ? `${parts[0]![0]}${parts[1]![0]}` : basis.slice(0, 2)
+  ).toUpperCase();
+  return { name, initials };
+}
+
+/** Resolve the caller's active firm name from their tenant memberships. */
+function resolveFirmName(data: WhoamiResponse | undefined): string {
+  if (!data) return '';
+  const tenants = data.availableTenants;
+  const active =
+    tenants.find((t) => t.tenantId === data.user.tenantId) ??
+    tenants.find((t) => t.isDefault) ??
+    tenants[0];
+  return active?.name ?? '';
+}
+
+/**
+ * Australian financial-year label (e.g. "FY26"). The AU FY runs 1 Jul –
+ * 30 Jun, so from July onward we're in the year ending next June.
+ */
+function currentFyLabel(now = new Date()): string {
+  const endYear = now.getMonth() >= 6 ? now.getFullYear() + 1 : now.getFullYear();
+  return `FY${String(endYear).slice(-2)}`;
+}
 
 export default function ConsultantWorkspace() {
   const [view, setView] = useState<ConsultantView>('dashboard');
+  const { data } = useWhoami();
+
+  const firmName = resolveFirmName(data);
+  const { name, initials } = data
+    ? deriveIdentity(data.user.displayName, data.user.email)
+    : { name: '…', initials: '' };
+
+  const sessionUser: ConsultantUser = {
+    name,
+    initials,
+    firm: firmName.toUpperCase(),
+  };
 
   return (
     <div
@@ -52,9 +101,9 @@ export default function ConsultantWorkspace() {
         fontFamily: fSans,
       }}
     >
-      <TopBar user={DEMO_USER} />
+      <TopBar user={sessionUser} />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <Sidebar view={view} setView={setView} />
+        <Sidebar view={view} setView={setView} firm={firmName} fyLabel={currentFyLabel()} />
         <main style={{ flex: 1, background: ink, overflow: 'hidden' }}>
           {view === 'dashboard' && <DashboardView />}
           {/* Clients → Client → Claims → Claim (6-step approve-wizard).

@@ -34,8 +34,8 @@ test('GET /v1/whoami: 200 with user + tenant info when authenticated', async () 
   // Seed: a tenant + user + tenant_user membership (privileged path)
   await sql`INSERT INTO tenant (id, name, slug, primary_idp)
             VALUES (${TENANT_ID}, 'Whoami Firm', 'whoami-firm', 'mixed')`;
-  await sql`INSERT INTO "user" (id, email, primary_idp, external_id)
-            VALUES (${USER_ID}, 'whoami@example.com', 'microsoft', 'microsoft:test-whoami')`;
+  await sql`INSERT INTO "user" (id, email, display_name, primary_idp, external_id)
+            VALUES (${USER_ID}, 'whoami@example.com', 'Whoami Tester', 'microsoft', 'microsoft:test-whoami')`;
   await privilegedSql`INSERT INTO tenant_user (id, tenant_id, user_id, role, is_default)
                        VALUES (gen_random_uuid(), ${TENANT_ID}, ${USER_ID}, 'consultant', true)`;
 
@@ -63,7 +63,13 @@ test('GET /v1/whoami: 200 with user + tenant info when authenticated', async () 
     });
     assert.equal(res.statusCode, 200);
     const body = res.json<{
-      user: { id: string; email: string; tenantId: string; role: string };
+      user: {
+        id: string;
+        email: string;
+        displayName: string | null;
+        tenantId: string;
+        role: string;
+      };
       availableTenants: Array<{
         tenantId: string;
         name: string;
@@ -74,6 +80,7 @@ test('GET /v1/whoami: 200 with user + tenant info when authenticated', async () 
     }>();
     assert.equal(body.user.id, USER_ID);
     assert.equal(body.user.email, 'whoami@example.com');
+    assert.equal(body.user.displayName, 'Whoami Tester');
     assert.equal(body.user.tenantId, TENANT_ID);
     assert.equal(body.user.role, 'consultant');
     assert.equal(body.availableTenants.length, 1);

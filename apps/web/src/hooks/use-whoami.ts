@@ -6,6 +6,7 @@ export interface WhoamiResponse {
   user: {
     id: string;
     email: string;
+    displayName: string | null;
     tenantId: string | null;
     role: 'admin' | 'consultant' | 'viewer' | null;
   };

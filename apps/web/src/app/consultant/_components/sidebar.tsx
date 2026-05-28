@@ -51,9 +51,13 @@ const NAV: NavItem[] = [
 interface SidebarProps {
   view: ConsultantView;
   setView: (v: ConsultantView) => void;
+  /** Active firm name from the session (empty while loading). */
+  firm?: string;
+  /** Current financial-year label, e.g. "FY26". */
+  fyLabel?: string;
 }
 
-export function Sidebar({ view, setView }: SidebarProps) {
+export function Sidebar({ view, setView, firm, fyLabel }: SidebarProps) {
   return (
     <div
       style={{
@@ -79,7 +83,7 @@ export function Sidebar({ view, setView }: SidebarProps) {
           }}
         >
           <span style={{ fontFamily: fSans, fontSize: 13, color: bone, fontWeight: 500 }}>
-            Pemberton &amp; Cole
+            {firm || '—'}
           </span>
           <Diamond size={6} />
         </div>
@@ -92,7 +96,7 @@ export function Sidebar({ view, setView }: SidebarProps) {
             marginTop: 4,
           }}
         >
-          14 CLAIMS · FY26
+          {fyLabel ?? ''}
         </div>
       </div>
 
