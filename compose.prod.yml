@@ -37,6 +37,29 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_started
+
+  # S3-compatible object storage for the evidence vault, brand logos and
+  # server-rendered PDFs. Private bucket — every object is reached through a
+  # short-lived presigned URL, so MinIO is never exposed for anonymous reads.
+  # Caddy terminates TLS at s3.archiveone.com.au and proxies here; the API
+  # signs presigned URLs for that same public host so signatures validate.
+  # No healthcheck: the minio server image ships no curl/mc to probe with,
+  # and the API only needs MinIO lazily (presign is offline; putObject runs
+  # in jobs), so start-order ordering is sufficient.
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # Browser PUTs originate from the app origin (cross-origin to the s3
+      # subdomain), so MinIO must echo CORS headers for those origins.
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_CORS_ALLOW_ORIGIN}
+    volumes:
+      - minio-data:/data
 
   migrate:
     build:
@@ -72,3 +95,4 @@ volumes:
   postgres-data:
   caddy-data:
   caddy-config:
+  minio-data:

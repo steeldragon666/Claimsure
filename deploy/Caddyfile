@@ -6,3 +6,11 @@ archiveone.com.au, www.archiveone.com.au {
 
 	reverse_proxy web:5173
 }
+
+# S3 object storage (MinIO). Caddy terminates TLS and forwards the original
+# Host header (default in v2) so the SigV4 signature the API computed for
+# this host validates at MinIO. No `encode` — bodies are already-compressed
+# binaries / PDFs, and large uploads stream straight through.
+s3.archiveone.com.au {
+	reverse_proxy minio:9000
+}
