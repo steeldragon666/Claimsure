@@ -577,9 +577,48 @@ export function registerSignupRoutes(app: FastifyInstance, deps: SignupRouteDeps
       // user at the login flow instead.
       if (isUniqueViolation(err, 'user_email_unique')) {
         req.log.warn(
-          { email: normalizedEmail },
+          { clientIp },
           'signup: user_email_unique violation — email already has a workspace',
         );
+        // Preserve the audit trail on this terminal path, exactly like the
+        // AlreadyRegisteredError branch above — an operator must still see the
+        // duplicate attempt. Same semantic (email already has an account), so
+        // reuse the `already_registered` reason rather than introduce a new
+        // CHECK-constrained enum value. Best-effort: an audit failure must not
+        // mask the friendly 409.
+        let dupDecisionId: string | null = null;
+        try {
+          const written = await writeSignupDecisionAudit(privilegedSql, {
+            email: normalizedEmail,
+            firmName,
+            displayName: displayName ?? null,
+            clientIp,
+            userAgent,
+            resultingTenantId: null,
+            resultingUserId: null,
+            outcome: { decision: 'deny', reason: 'already_registered' } as const,
+            audit: result.audit,
+          });
+          dupDecisionId = written.id;
+        } catch (auditErr) {
+          req.log.error(
+            { err: auditErr instanceof Error ? auditErr.message : String(auditErr) },
+            'signup: workspace_exists-path audit write failed',
+          );
+        }
+        await notifyFounderSafely({
+          decisionId: dupDecisionId,
+          email: normalizedEmail,
+          firmName,
+          displayName: displayName ?? null,
+          clientIp,
+          userAgent,
+          result: {
+            outcome: { decision: 'deny', reason: 'already_registered' },
+            audit: result.audit,
+          },
+          logger: req.log,
+        });
         return reply.status(409).send({
           error: 'workspace_exists',
           message: 'This email already has a workspace. Use Log in instead.',

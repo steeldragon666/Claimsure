@@ -82,6 +82,41 @@ export function registerLoginRoute(app: FastifyInstance, cfg: LoginRouteConfig):
   const sessionCookieAttrs = `Path=/; HttpOnly; SameSite=Lax; Max-Age=${cfg.ttlSeconds}${cfg.cookieSecure ? '; Secure' : ''}`;
 
   app.post('/v1/auth/login', async (req, reply) => {
+    // CSRF / forced-login defense. This endpoint mints a session cookie from
+    // an unauthenticated POST, so a cross-site page must not be able to drive
+    // it. Browsers stamp `Sec-Fetch-Site` on fetch/form requests and send an
+    // `Origin` on cross-origin POSTs; reject anything that is demonstrably
+    // cross-site. Non-browser callers (mobile app, curl) send neither header
+    // and are allowed through — they cannot be a browser CSRF vector.
+    const secFetchSite = req.headers['sec-fetch-site'];
+    if (
+      typeof secFetchSite === 'string' &&
+      secFetchSite !== 'same-origin' &&
+      secFetchSite !== 'none'
+    ) {
+      return reply.status(403).send({
+        error: 'cross_site_blocked',
+        message: 'Cross-site login requests are not allowed.',
+        requestId: req.id,
+      });
+    }
+    const originHeader = req.headers.origin;
+    if (typeof originHeader === 'string' && originHeader.length > 0) {
+      let originHost: string | null = null;
+      try {
+        originHost = new URL(originHeader).host;
+      } catch {
+        originHost = null;
+      }
+      if (originHost === null || originHost !== req.headers.host) {
+        return reply.status(403).send({
+          error: 'cross_site_blocked',
+          message: 'Cross-site login requests are not allowed.',
+          requestId: req.id,
+        });
+      }
+    }
+
     const parseResult = loginBody.safeParse(req.body);
     if (!parseResult.success) {
       return reply.status(422).send({
@@ -130,6 +165,7 @@ export function registerLoginRoute(app: FastifyInstance, cfg: LoginRouteConfig):
         SELECT id::text, email, primary_idp
           FROM "user"
          WHERE email = ${normalizedEmail}
+           AND deleted_at IS NULL
          LIMIT 1
       `;
       const user = userRows[0] ?? null;
@@ -171,7 +207,9 @@ export function registerLoginRoute(app: FastifyInstance, cfg: LoginRouteConfig):
     });
 
     if (result.kind === 'rate_limited') {
-      req.log.warn({ email: normalizedEmail, clientIp }, 'login rate-limited');
+      // Log the IP only — never the raw email (PII on an internet-facing
+      // auth path). The IP is sufficient to diagnose the rate limiter.
+      req.log.warn({ clientIp }, 'login rate-limited');
       return reply.status(429).send({
         error: 'rate_limited',
         message: 'Too many login attempts. Please wait a few minutes and try again.',
