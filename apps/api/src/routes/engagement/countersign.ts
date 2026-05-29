@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from '@cpa/auth';
 import { sql } from '@cpa/db/client';
+import { toIsoRequired } from '../../lib/iso.js';
 
 /**
  * POST /v1/engagement/:id/countersign
@@ -52,7 +53,7 @@ export function registerEngagementCountersign(app: FastifyInstance): void {
         //   - signed by claimant (precondition)
         //   - not already countersigned (no double-sign)
         //   - not declined / expired (terminal-status guard)
-        const updated = await tx<{ countersigned_at: Date }[]>`
+        const updated = await tx<{ countersigned_at: Date | string }[]>`
           UPDATE engagement_letter
              SET countersigned_by_user_id = ${userId},
                  countersigned_at = NOW()
@@ -91,7 +92,7 @@ export function registerEngagementCountersign(app: FastifyInstance): void {
       }
 
       return reply.status(200).send({
-        countersignedAt: result.countersignedAt.toISOString(),
+        countersignedAt: toIsoRequired(result.countersignedAt),
       } satisfies CountersignResponse);
     },
   );
