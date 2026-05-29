@@ -106,56 +106,66 @@ export function registerSubjectTenants(app: FastifyInstance): void {
     const tenantId = req.user!.tenantId!;
     const userId = req.user!.id;
 
-    return await sql.begin(async (tx) => {
-      await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
+    type CreatedRow = {
+      id: string;
+      tenant_id: string;
+      name: string;
+      kind: 'claimant' | 'financier';
+      created_at: Date | string;
+      updated_at: Date | string;
+    };
+    // Capture the result inside the tx but send the reply AFTER sql.begin
+    // resolves. Sending from inside the transaction flushes the response
+    // before COMMIT, so a caller that immediately reads back the new row or
+    // its ACL row (subject_tenant_user) races the commit and sees nothing.
+    const result = await sql.begin<{ kind: 'dup' } | { kind: 'ok'; row: CreatedRow }>(
+      async (tx) => {
+        await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
 
-      // Duplicate-name check within firm (the schema doesn't enforce a
-      // (tenant_id, name) unique index — see subject_tenant.ts — so we
-      // enforce in app code under transaction). RLS already restricts the
-      // SELECT to the active firm, so the check is implicitly per-firm.
-      const dupes = await tx<{ id: string }[]>`
-        SELECT id FROM subject_tenant
-         WHERE name = ${name} AND deleted_at IS NULL
-      `;
-      if (dupes[0]) {
-        return reply.status(409).send({
-          error: 'duplicate_name',
-          message: `A subject_tenant with name "${name}" already exists in this firm`,
-          requestId: req.id,
-        });
-      }
+        // Duplicate-name check within firm (the schema doesn't enforce a
+        // (tenant_id, name) unique index — see subject_tenant.ts — so we
+        // enforce in app code under transaction). RLS already restricts the
+        // SELECT to the active firm, so the check is implicitly per-firm.
+        const dupes = await tx<{ id: string }[]>`
+          SELECT id FROM subject_tenant
+           WHERE name = ${name} AND deleted_at IS NULL
+        `;
+        if (dupes[0]) {
+          return { kind: 'dup' as const };
+        }
 
-      const newId = crypto.randomUUID();
-      const inserted = await tx<
-        {
-          id: string;
-          tenant_id: string;
-          name: string;
-          kind: 'claimant' | 'financier';
-          created_at: Date | string;
-          updated_at: Date | string;
-        }[]
-      >`
-        INSERT INTO subject_tenant (id, tenant_id, name, kind)
-        VALUES (${newId}, ${tenantId}, ${name}, ${kind})
-        RETURNING id, tenant_id, name, kind, created_at, updated_at
-      `;
-      if (!inserted[0]) {
-        throw new Error('POST /v1/subject-tenants: INSERT returned no row');
-      }
+        const newId = crypto.randomUUID();
+        const inserted = await tx<CreatedRow[]>`
+          INSERT INTO subject_tenant (id, tenant_id, name, kind)
+          VALUES (${newId}, ${tenantId}, ${name}, ${kind})
+          RETURNING id, tenant_id, name, kind, created_at, updated_at
+        `;
+        if (!inserted[0]) {
+          throw new Error('POST /v1/subject-tenants: INSERT returned no row');
+        }
 
-      // ACL row: the creator gets 'lead' role on this claimant. The
-      // subject_tenant_user.role enum is ('lead' | 'observer') — the plan-
-      // spec mentions 'owner' but the schema (T7, db/schema/subject_tenant_user.ts)
-      // doesn't include that value, so 'lead' is the schema-correct
-      // equivalent (primary consultant on the claimant, full access).
-      await tx`
-        INSERT INTO subject_tenant_user (id, subject_tenant_id, user_id, role)
-        VALUES (${crypto.randomUUID()}, ${newId}, ${userId}, 'lead')
-      `;
+        // ACL row: the creator gets 'lead' role on this claimant. The
+        // subject_tenant_user.role enum is ('lead' | 'observer') — the plan-
+        // spec mentions 'owner' but the schema (T7, db/schema/subject_tenant_user.ts)
+        // doesn't include that value, so 'lead' is the schema-correct
+        // equivalent (primary consultant on the claimant, full access).
+        await tx`
+          INSERT INTO subject_tenant_user (id, subject_tenant_id, user_id, role)
+          VALUES (${crypto.randomUUID()}, ${newId}, ${userId}, 'lead')
+        `;
 
-      return reply.status(201).send({ subject_tenant: toApi(inserted[0]) });
-    });
+        return { kind: 'ok' as const, row: inserted[0] };
+      },
+    );
+
+    if (result.kind === 'dup') {
+      return reply.status(409).send({
+        error: 'duplicate_name',
+        message: `A subject_tenant with name "${name}" already exists in this firm`,
+        requestId: req.id,
+      });
+    }
+    return reply.status(201).send({ subject_tenant: toApi(result.row) });
   });
 
   app.get<{ Params: { id: string } }>(

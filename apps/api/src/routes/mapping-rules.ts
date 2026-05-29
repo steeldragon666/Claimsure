@@ -599,7 +599,12 @@ export function registerMappingRules(app: FastifyInstance): void {
       const { id } = req.params;
       const tenantId = req.user!.tenantId!;
 
-      return await sql.begin(async (tx) => {
+      // Capture the outcome inside the tx but DON'T send the reply from
+      // within sql.begin — doing so flushes the HTTP response before the
+      // COMMIT lands, so a caller that immediately re-reads the row (or the
+      // audit_log) races the commit and sees the pre-archive state. Send the
+      // reply only after the transaction resolves.
+      const archivedOk = await sql.begin(async (tx) => {
         await tx`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`;
         // P5 Task 2.4: also set app.current_firm_id inside this tx so
         // the audit_log RLS WITH CHECK passes when insertAuditLog runs
@@ -616,11 +621,7 @@ export function registerMappingRules(app: FastifyInstance): void {
         `;
         const archived = rows[0];
         if (!archived) {
-          return reply.status(404).send({
-            error: 'mapping_rule_not_found',
-            message: 'No mapping rule with that id in this firm',
-            requestId: req.id,
-          });
+          return false;
         }
         // P5 Task 2.4: emit MAPPING_RULE_ARCHIVED to audit_log. Same
         // tx as the UPDATE so a downstream failure rolls both back.
@@ -637,8 +638,16 @@ export function registerMappingRules(app: FastifyInstance): void {
           },
           actorUserId: req.user!.id,
         });
-        return reply.status(204).send();
+        return true;
       });
+      if (!archivedOk) {
+        return reply.status(404).send({
+          error: 'mapping_rule_not_found',
+          message: 'No mapping rule with that id in this firm',
+          requestId: req.id,
+        });
+      }
+      return reply.status(204).send();
     },
   );
 }
