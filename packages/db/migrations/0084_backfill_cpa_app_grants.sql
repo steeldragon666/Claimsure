@@ -39,5 +39,15 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON subscription_item            TO cpa_app;
 -- 2. Make sure FUTURE tables created by `postgres` auto-grant to cpa_app.
 --    (The original 0002 rule for `cpa` stays in place; this just adds
 --    a second rule for the role that's actually creating tables.)
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO cpa_app;
+--    Only applies where a `postgres` migration-runner role exists (e.g.
+--    Supabase). In deployments where migrations run as `cpa` (our Docker /
+--    Binary Lane VPS), the 0002 FOR ROLE cpa default already covers future
+--    tables and the `postgres` role is absent — so guard on its existence
+--    to keep this migration portable across both setups.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
+    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO cpa_app;
+  END IF;
+END $$;

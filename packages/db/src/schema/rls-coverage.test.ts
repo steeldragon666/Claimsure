@@ -35,6 +35,9 @@ const RLS_EXEMPT_TABLES = new Set([
   'founding_partner_slots', // global allocation table; no tenant scope; claimed by FK to tenant.id (0041)
   'processed_webhook_events', // system deduplication table; stripe_event_id PK; tenant_id indexed for ops but not tenant-scoped (0041)
   'cloud_sync_synced_file', // internal de-duplication ledger written only by the privileged polling job; transitively tenant-scoped via connection_id FK (0075)
+  'signup_decision', // forensic signup-approval ledger; row predates the tenant (approve) or has none (deny); written only via privilegedSql, REVOKE ALL on cpa_app (0088)
+  'auth_magic_link', // passwordless-login tokens looked up by token_hash before a session/tenant exists; privilegedSql-only, REVOKE ALL on cpa_app — sibling of magic_link_token (0091)
+  'auth_login_attempt', // per-IP login rate-limit ledger; no tenant scope, written by the pre-session login route via privilegedSql, REVOKE ALL on cpa_app (0092)
   // NOTE: drizzle-kit's __drizzle_migrations table lives in the `drizzle` schema by default,
   // NOT `public`. This audit only inspects public-schema tables, so __drizzle_migrations is
   // correctly invisible here and does not need an exempt-list entry.

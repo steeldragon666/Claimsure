@@ -78,6 +78,13 @@ test('onboardTenant: returns user_not_found when admin email matches no user', a
 });
 
 test('onboardTenant: returns slug_conflict when slug already exists', async () => {
+  // The happy-path test (run earlier in this file) leaves a default
+  // tenant_user for TEST_USER_ID. `tenant_user_one_default_per_user_uniq`
+  // permits only ONE is_default row per user, so the first onboardTenant
+  // below would collide on that constraint (a 23505 on a DIFFERENT index
+  // than slug) unless we clear the prior membership first. Cleanup is
+  // idempotent and safe — onboardTenant re-creates the membership it needs.
+  await privilegedSql`DELETE FROM tenant_user WHERE user_id = ${TEST_USER_ID}`;
   // Idempotent re-seed — earlier tests may have run in isolation.
   await sql`INSERT INTO "user" (id, email, primary_idp, external_id)
             VALUES (${TEST_USER_ID}, ${TEST_USER_EMAIL}, 'microsoft', 'microsoft:onboard-cli-test')
