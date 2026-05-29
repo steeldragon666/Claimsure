@@ -46,7 +46,7 @@ const PROVIDERS: ProviderDef[] = [
   { key: 'myob_accounting', label: 'MYOB', icon: () => <MyobIcon />, matches: ['myob_accounting'] },
 ];
 
-export function AccountingSection() {
+export function AccountingSection({ subjectTenantId }: { subjectTenantId: string }) {
   const [connections, setConnections] = useState<IntegrationConnection[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +61,8 @@ export function AccountingSection() {
     setLoading(true);
     setError(null);
     try {
-      const rows = await listIntegrations();
+      // Scope to the selected client — accounting connects per client.
+      const rows = await listIntegrations(subjectTenantId);
       setConnections(rows);
     } catch (err) {
       if (err instanceof UnauthenticatedError) setError('Session expired — sign in again.');
@@ -71,21 +72,25 @@ export function AccountingSection() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [subjectTenantId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   function connectionFor(def: ProviderDef): IntegrationConnection | undefined {
-    return connections?.find((c) => def.matches.includes(c.provider));
+    // Match provider AND this client (the list is already client-scoped, but
+    // guard in case the API returns broader rows).
+    return connections?.find(
+      (c) => def.matches.includes(c.provider) && c.subject_tenant_id === subjectTenantId,
+    );
   }
 
   async function handleConnect(def: ProviderDef) {
     setConnecting(def.key);
     setFeedback((f) => ({ ...f, [def.key]: { tone: 'muted', msg: 'Starting connection…' } }));
     try {
-      const { redirect_url } = await connectIntegration(def.key);
+      const { redirect_url } = await connectIntegration(def.key, subjectTenantId);
       // Real authorize URL — send the browser there to complete OAuth.
       window.location.assign(redirect_url);
     } catch (err) {

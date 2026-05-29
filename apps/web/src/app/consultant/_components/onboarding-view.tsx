@@ -231,7 +231,7 @@ function ActionsStep({ client }: { client: SubjectTenant }) {
       </div>
 
       <EvidenceSection client={client} />
-      <AccountingSection />
+      <AccountingSection subjectTenantId={client.id} />
     </div>
   );
 }

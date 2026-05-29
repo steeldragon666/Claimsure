@@ -442,6 +442,13 @@
       "when": 1779692400000,
       "tag": "0092_auth_login_attempt",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1779778800000,
+      "tag": "0093_integration_connection_per_client",
+      "breakpoints": true
     }
   ]
 }

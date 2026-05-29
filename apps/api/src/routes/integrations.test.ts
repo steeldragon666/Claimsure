@@ -14,6 +14,8 @@ const TENANT_B = '00000000-0000-4000-8000-0000000b3002';
 const ADMIN_USER = '00000000-0000-4000-8000-0000000b3010';
 const VIEWER_USER = '00000000-0000-4000-8000-0000000b3011';
 const CONSULTANT_USER = '00000000-0000-4000-8000-0000000b3012';
+// A client (claimant) under Firm A — accounting connections are per-client.
+const CLIENT_A = '00000000-0000-4000-8000-0000000b3020';
 
 // 32-byte hex (64 chars) — pinned for the test run so cookies + DB reads
 // reproduce. process.env mutation is restored in `after`.
@@ -21,6 +23,7 @@ const TEST_ENC_KEY = crypto.randomBytes(32).toString('hex');
 
 const cleanup = async (): Promise<void> => {
   await privilegedSql`DELETE FROM integration_connection WHERE tenant_id IN (${TENANT_A}, ${TENANT_B})`;
+  await privilegedSql`DELETE FROM subject_tenant WHERE tenant_id IN (${TENANT_A}, ${TENANT_B})`;
   await privilegedSql`DELETE FROM tenant_user WHERE tenant_id IN (${TENANT_A}, ${TENANT_B})`;
   await sql`DELETE FROM "user" WHERE id IN (${ADMIN_USER}, ${VIEWER_USER}, ${CONSULTANT_USER})`;
   await sql`DELETE FROM tenant WHERE id IN (${TENANT_A}, ${TENANT_B})`;
@@ -53,6 +56,9 @@ before(async () => {
                        VALUES (gen_random_uuid(), ${TENANT_A}, ${ADMIN_USER}, 'admin', true),
                               (gen_random_uuid(), ${TENANT_A}, ${VIEWER_USER}, 'viewer', true),
                               (gen_random_uuid(), ${TENANT_A}, ${CONSULTANT_USER}, 'consultant', true)`;
+  // A claimant client under Firm A — accounting connections bind to it.
+  await privilegedSql`INSERT INTO subject_tenant (id, tenant_id, name, kind)
+                       VALUES (${CLIENT_A}, ${TENANT_A}, 'Client A', 'claimant')`;
 });
 
 after(async () => {
@@ -173,6 +179,7 @@ test('POST /v1/integrations/xero_accounting/connect: returns Xero authorize URL'
     method: 'POST',
     url: '/v1/integrations/xero_accounting/connect',
     cookies: { cpa_session: await consultantJwt() },
+    payload: { subject_tenant_id: CLIENT_A },
   });
   assert.equal(res.statusCode, 200);
   const body = res.json<{ redirect_url: string }>();
@@ -198,6 +205,7 @@ test('POST /v1/integrations/myob_accounting/connect: returns MYOB authorize URL'
     method: 'POST',
     url: '/v1/integrations/myob_accounting/connect',
     cookies: { cpa_session: await consultantJwt() },
+    payload: { subject_tenant_id: CLIENT_A },
   });
   assert.equal(res.statusCode, 200);
   const body = res.json<{ redirect_url: string }>();
@@ -206,6 +214,32 @@ test('POST /v1/integrations/myob_accounting/connect: returns MYOB authorize URL'
   assert.equal(url.searchParams.get('client_id'), 'test-myob-client-id');
   assert.equal(url.searchParams.get('scope'), 'CompanyFile');
   assert.ok(url.searchParams.get('state'));
+  await app.close();
+});
+
+test('POST /v1/integrations/xero_accounting/connect: 400 without subject_tenant_id (per-client)', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/integrations/xero_accounting/connect',
+    cookies: { cpa_session: await consultantJwt() },
+    // no payload — per-client providers require a subject_tenant_id
+  });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json<{ error: string }>().error, 'subject_tenant_required');
+  await app.close();
+});
+
+test('POST /v1/integrations/xero_accounting/connect: 404 for a client outside the firm', async () => {
+  const app = buildApp();
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/integrations/xero_accounting/connect',
+    cookies: { cpa_session: await consultantJwt() },
+    payload: { subject_tenant_id: '00000000-0000-4000-8000-0000000bffff' },
+  });
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.json<{ error: string }>().error, 'client_not_found');
   await app.close();
 });
 

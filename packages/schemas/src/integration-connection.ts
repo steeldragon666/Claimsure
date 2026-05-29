@@ -36,6 +36,9 @@ export type IntegrationSyncState = z.infer<typeof integrationSyncState>;
 export const integrationConnection = z.object({
   id: Uuid,
   tenant_id: Uuid,
+  // The client (claimant) this connection belongs to. null for firm-level
+  // providers (e.g. DocuSign); set for per-client ones (Xero/MYOB accounting).
+  subject_tenant_id: Uuid.nullable(),
   provider: integrationProvider,
   expires_at: Iso8601,
   scopes: z.array(z.string()).nullable(),

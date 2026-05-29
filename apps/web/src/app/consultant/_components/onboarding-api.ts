@@ -142,8 +142,11 @@ interface IntegrationsEnvelope {
   integrations: IntegrationConnection[];
 }
 
-export async function listIntegrations(): Promise<IntegrationConnection[]> {
-  const res = await apiFetch<IntegrationsEnvelope>('/v1/integrations');
+export async function listIntegrations(subjectTenantId?: string): Promise<IntegrationConnection[]> {
+  // When a client id is given, scope to that client's connections (accounting
+  // is per-client). Otherwise return all the firm's connections.
+  const qs = subjectTenantId ? `?subject_tenant_id=${encodeURIComponent(subjectTenantId)}` : '';
+  const res = await apiFetch<IntegrationsEnvelope>(`/v1/integrations${qs}`);
   return res.integrations;
 }
 
@@ -162,9 +165,15 @@ export async function listIntegrations(): Promise<IntegrationConnection[]> {
  */
 export async function connectIntegration(
   provider: string,
+  subjectTenantId?: string,
 ): Promise<{ redirect_url: string }> {
+  // Accounting/payroll providers bind to a client; pass subject_tenant_id so
+  // the server stores the token against that client.
   return apiFetch<{ redirect_url: string }>(
     `/v1/integrations/${encodeURIComponent(provider)}/connect`,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      ...(subjectTenantId ? { body: JSON.stringify({ subject_tenant_id: subjectTenantId }) } : {}),
+    },
   );
 }

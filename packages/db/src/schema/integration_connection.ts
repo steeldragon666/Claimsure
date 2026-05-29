@@ -1,5 +1,7 @@
-import { pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { index, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { tenant } from './tenant.js';
+import { subjectTenant } from './subject_tenant.js';
 
 /**
  * Encrypted OAuth state per (tenant, provider) — one row per consultant
@@ -47,6 +49,10 @@ export const integrationConnection = pgTable(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.id),
+    // The client (claimant) this connection belongs to. NULL for firm-level
+    // integrations (e.g. DocuSign); set for per-client ones (Xero/MYOB
+    // accounting, payroll) — every client company has its own org.
+    subjectTenantId: uuid('subject_tenant_id').references(() => subjectTenant.id),
     provider: text('provider', { enum: INTEGRATION_PROVIDERS }).notNull(),
     accessTokenEncrypted: text('access_token_encrypted').notNull(),
     refreshTokenEncrypted: text('refresh_token_encrypted'),
@@ -63,9 +69,16 @@ export const integrationConnection = pgTable(
       .$onUpdate(() => new Date()),
   },
   (t) => ({
-    tenantProviderUnique: uniqueIndex('integration_connection_tenant_provider_unique').on(
-      t.tenantId,
-      t.provider,
-    ),
+    // Firm-level connections (subject_tenant_id IS NULL): one per (tenant, provider).
+    firmProviderUnique: uniqueIndex('integration_connection_firm_provider_unique')
+      .on(t.tenantId, t.provider)
+      .where(sql`${t.subjectTenantId} IS NULL`),
+    // Per-client connections (subject_tenant_id NOT NULL): one per (tenant, client, provider).
+    clientProviderUnique: uniqueIndex('integration_connection_client_provider_unique')
+      .on(t.tenantId, t.subjectTenantId, t.provider)
+      .where(sql`${t.subjectTenantId} IS NOT NULL`),
+    subjectTenantIdx: index('integration_connection_subject_tenant_idx')
+      .on(t.tenantId, t.subjectTenantId)
+      .where(sql`${t.subjectTenantId} IS NOT NULL`),
   }),
 );
