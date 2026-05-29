@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from '@cpa/auth';
 import { sql } from '@cpa/db/client';
+import { toIso, toIsoRequired } from '../../lib/iso.js';
 
 /**
  * GET /v1/engagement/:id
@@ -77,7 +78,10 @@ function deriveCurrentStep(row: Row): CurrentStep {
   if (row.countersigned_at !== null) return 'countersigned';
   if (row.signed_by_claimant_at !== null) return 'signed';
   if (row.expired_at !== null) return 'expired';
-  if (row.send_token_expires_at !== null && row.send_token_expires_at.getTime() <= Date.now()) {
+  if (
+    row.send_token_expires_at !== null &&
+    new Date(row.send_token_expires_at).getTime() <= Date.now()
+  ) {
     return 'expired';
   }
   if (row.sent_to_claimant_at !== null) return 'sent';
@@ -132,19 +136,19 @@ export function registerEngagementGet(app: FastifyInstance): void {
         claimId: row.claim_id,
         renderedMarkdown: row.rendered_markdown,
         templateVersion: row.template_version,
-        sendTokenExpiresAt: row.send_token_expires_at?.toISOString() ?? null,
-        createdAt: row.created_at.toISOString(),
-        sentToClaimantAt: row.sent_to_claimant_at?.toISOString() ?? null,
-        signedByClaimantAt: row.signed_by_claimant_at?.toISOString() ?? null,
+        sendTokenExpiresAt: toIso(row.send_token_expires_at),
+        createdAt: toIsoRequired(row.created_at),
+        sentToClaimantAt: toIso(row.sent_to_claimant_at),
+        signedByClaimantAt: toIso(row.signed_by_claimant_at),
         signedByClaimantName: row.signed_by_claimant_name,
         signedByClaimantIp: row.signed_by_claimant_ip,
         signedByClaimantUa: row.signed_by_claimant_ua,
         countersignedByUserId: row.countersigned_by_user_id,
-        countersignedAt: row.countersigned_at?.toISOString() ?? null,
+        countersignedAt: toIso(row.countersigned_at),
         pdfEvidenceId: row.pdf_evidence_id,
-        declinedAt: row.declined_at?.toISOString() ?? null,
+        declinedAt: toIso(row.declined_at),
         declinedReason: row.declined_reason,
-        expiredAt: row.expired_at?.toISOString() ?? null,
+        expiredAt: toIso(row.expired_at),
         currentStep: deriveCurrentStep(row),
       } satisfies GetResponse);
     },

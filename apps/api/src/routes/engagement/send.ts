@@ -130,7 +130,7 @@ export function registerEngagementSend(app: FastifyInstance): void {
                send_token, send_token_expires_at, sent_to_claimant_at)
             VALUES
               (${tenantId}, ${claimId}, ${rendered}, ${templateVersion},
-               ${sendToken}, ${expiresAt}, NOW())
+               ${sendToken}, ${expiresAt.toISOString()}, NOW())
             ON CONFLICT (claim_id) DO UPDATE SET
               rendered_markdown      = EXCLUDED.rendered_markdown,
               template_version       = EXCLUDED.template_version,

@@ -16,6 +16,7 @@ import {
   type TimeEntrySource,
 } from '@cpa/schemas';
 import { requireMobileSession } from '../middleware/mobile-jwt-verifier.js';
+import { toIsoRequired } from '../lib/iso.js';
 
 /**
  * /v1/time-entries route surface (T-B22).
@@ -434,7 +435,11 @@ export function registerTimeEntries(app: FastifyInstance): void {
     const createdPayload = TimeEntryCreatedPayload.parse({
       time_entry_id: inserted.id,
       employee_id: inserted.employee_id,
-      started_at: isoOf(inserted.started_at),
+      // toIsoRequired (new Date(..).toISOString()) NORMALISES the pg
+      // string timestamp to strict ISO-8601; the local isoOf passes pg's
+      // space-separated format through unchanged, which the payload's
+      // z.string().datetime() validator rejects → 500.
+      started_at: toIsoRequired(inserted.started_at),
       duration_minutes: inserted.duration_minutes,
     });
     await insertEventWithChain({
