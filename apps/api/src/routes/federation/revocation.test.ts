@@ -82,13 +82,13 @@ before(async () => {
            (${TARGET_USER}, 'revoke-tgt@example.com', 'microsoft', 'microsoft:revoke-tgt', 'Revoke Target')
   `;
   await privilegedSql`
-    INSERT INTO tenant_user (tenant_id, user_id, role)
-    VALUES (${SOURCE_TENANT}, ${SOURCE_USER}, 'admin'),
-           (${TARGET_TENANT}, ${TARGET_USER}, 'admin')
+    INSERT INTO tenant_user (id, tenant_id, user_id, role)
+    VALUES (gen_random_uuid(), ${SOURCE_TENANT}, ${SOURCE_USER}, 'admin'),
+           (gen_random_uuid(), ${TARGET_TENANT}, ${TARGET_USER}, 'admin')
   `;
   await privilegedSql`
-    INSERT INTO subject_tenant (id, tenant_id, name, abn)
-    VALUES (${SUBJECT_TENANT}, ${SOURCE_TENANT}, 'Revoke Entity', '44444444444')
+    INSERT INTO subject_tenant (id, tenant_id, name)
+    VALUES (${SUBJECT_TENANT}, ${SOURCE_TENANT}, 'Revoke Entity')
   `;
   await privilegedSql`
     INSERT INTO federation_share (id, subject_tenant_id, source_tenant_id, target_tenant_id, granted_by_user_id)
