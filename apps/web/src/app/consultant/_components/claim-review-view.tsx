@@ -39,9 +39,14 @@
  *   gating is still REAL — it reads canAdvance/steps from the API — but the
  *   underlying advance condition for a given label is whatever the backend
  *   computes. See the README note in the PR; a backend re-label to 6 steps
- *   would tighten this. We never fabricate step content: where the
- *   AI-prepared artefact for a step isn't yet exposed by an API, the step
- *   renders an honest "awaiting AI preparation" panel.
+ *   would tighten this.
+ *
+ * Prepared content (the REAL AI-authored artefact per step) now comes from
+ * GET /v1/claims/:id/prepared (via useClaimPrepared). Each step renders the
+ * actual hypotheses / activities / apportionment / evidence / narrative the
+ * pipeline produced. We never fabricate: where a step's `prepared` flag is
+ * false, the step renders an honest "still preparing" state with the live
+ * canAdvance reason — not invented content.
  */
 
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
@@ -76,7 +81,18 @@ import {
   useReopenStep,
   useSealClaim,
 } from '@/lib/hooks/use-claim-workflow';
-import type { FinanceResult, SealResult, WorkflowStepKey } from './claims-api';
+import { useClaimPrepared } from '@/lib/hooks/use-claim-prepared';
+import type {
+  FinanceResult,
+  PreparedActivity,
+  PreparedActivityEvidence,
+  PreparedContent,
+  PreparedExpenditureLine,
+  PreparedHypothesis,
+  PreparedNarrativeSection,
+  SealResult,
+  WorkflowStepKey,
+} from './claims-api';
 
 /**
  * UI lifecycle a claim moves through in this view:
@@ -176,6 +192,11 @@ export function ClaimReviewView({ claim, clientName, onBack }: ClaimReviewViewPr
   // Per-step state machine + live canAdvance gates.
   const { data: workflow, isLoading, error, notInitialized } = useClaimWorkflow(claimId);
   const initialize = useInitializeWorkflow(claimId);
+
+  // The REAL AI-prepared content the consultant judges, per step.
+  const { data: prepared, isLoading: preparedLoading } = useClaimPrepared(
+    notInitialized ? null : claimId,
+  );
 
   const approvedKeys = useMemo(() => {
     const set = new Set<WorkflowStepKey>();
@@ -357,6 +378,8 @@ export function ClaimReviewView({ claim, clientName, onBack }: ClaimReviewViewPr
                     workflow.workflow_state.steps[STEP_DEFS[activeOrdinal - 1]!.key]?.agreed_at ??
                     null
                   }
+                  prepared={prepared}
+                  preparedLoading={preparedLoading}
                   readOnly={wizardReadOnly}
                   // Drop the manual pin on approve so the wizard auto-advances
                   // to the next unapproved step (derivedOrdinal takes over).
@@ -367,6 +390,7 @@ export function ClaimReviewView({ claim, clientName, onBack }: ClaimReviewViewPr
                   allApproved={allApproved}
                   approvedCount={approvedKeys.size}
                   lifecycle={lifecycle}
+                  review={prepared?.step6_review ?? null}
                   sealResult={sealResult}
                   financeResult={financeResult}
                   seal={{
@@ -510,6 +534,8 @@ function WizardStep({
   approvedKeys,
   canAdvance,
   agreedAt,
+  prepared,
+  preparedLoading,
   readOnly,
   onApproved,
 }: {
@@ -518,6 +544,9 @@ function WizardStep({
   approvedKeys: Set<WorkflowStepKey>;
   canAdvance: { ok: true } | { ok: false; reason: string };
   agreedAt: string | null;
+  /** The AI-prepared content for ALL steps (undefined while loading). */
+  prepared: PreparedContent | undefined;
+  preparedLoading: boolean;
   /** Sealed claims are immutable — approvals + reopen are locked. */
   readOnly: boolean;
   onApproved: () => void;
@@ -527,12 +556,10 @@ function WizardStep({
 
   // This step is reachable only if the prior step is approved (or it's
   // step 1). The rail already gates selection, but we belt-and-suspender it.
-  const priorApproved =
-    def.ordinal === 1 || approvedKeys.has(STEP_DEFS[def.ordinal - 2]!.key);
+  const priorApproved = def.ordinal === 1 || approvedKeys.has(STEP_DEFS[def.ordinal - 2]!.key);
 
   const approved = agreedAt !== null;
-  const conflictReason =
-    agree.error instanceof ConflictError ? agree.error.message : null;
+  const conflictReason = agree.error instanceof ConflictError ? agree.error.message : null;
 
   return (
     <div style={{ background: ink2, border: `1px solid ${ruleStrong}`, borderRadius: 4 }}>
@@ -569,19 +596,24 @@ function WizardStep({
       </div>
 
       {/* Prepared-content surface.
-          The AI-prepared artefact for each step is produced by backend jobs
-          (claim-activity-proposal, claim-evidence-binding, narrative drafter)
-          but is not yet exposed through a single per-step read API. Rather
-          than fabricate content, we present the live readiness signal from
-          canAdvance — which IS derived from the prepared data — plus an
-          honest "awaiting AI preparation" state when the gate isn't met. */}
+          The AI-prepared artefact for each step comes from
+          GET /v1/claims/:id/prepared (produced by the claim-activity-proposal,
+          claim-evidence-binding, IP-search and narrative-drafter pipeline
+          jobs). We render the REAL content here. When a step's `prepared`
+          flag is false we show an honest "still preparing" state carrying the
+          live canAdvance reason — never fabricated content. */}
       <div style={{ padding: '20px 22px' }}>
         {!priorApproved ? (
           <Locked reason={`Approve step ${def.ordinal - 1} first to unlock this step.`} />
-        ) : canAdvance.ok ? (
-          <ReadyPanel label={def.label} approved={approved} />
         ) : (
-          <AwaitingPanel reason={canAdvance.reason} />
+          <PreparedStepContent
+            ordinal={def.ordinal}
+            label={def.label}
+            prepared={prepared}
+            preparedLoading={preparedLoading}
+            canAdvance={canAdvance}
+            approved={approved}
+          />
         )}
       </div>
 
@@ -649,6 +681,7 @@ function ReviewStep({
   allApproved,
   approvedCount,
   lifecycle,
+  review,
   sealResult,
   financeResult,
   seal,
@@ -657,6 +690,7 @@ function ReviewStep({
   allApproved: boolean;
   approvedCount: number;
   lifecycle: ClaimLifecycle;
+  review: PreparedContent['step6_review'] | null;
   sealResult: SealResult | null;
   financeResult: FinanceResult | null;
   seal: FinalizeAction & { onSeal: () => void };
@@ -687,6 +721,9 @@ function ReviewStep({
       </div>
 
       <div style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Roll-up of what the AI prepared across the five judged steps. */}
+        {review && <ReviewRollup review={review} />}
+
         {!allApproved && (
           <AwaitingPanel
             reason={`${approvedCount} of 5 steps approved — approve the remaining ${5 - approvedCount} to unlock sealing.`}
@@ -891,35 +928,568 @@ function conflictReasonFor(error: Error | null, _expectedCode: string): string |
   return error instanceof ConflictError ? error.message : null;
 }
 
-/* ───────────────────────────── Sub-panels ──────────────────────────── */
+/* ─────────────────────── Prepared-content surface ──────────────────── */
 
-function ReadyPanel({ label, approved }: { label: string; approved: boolean }) {
+/**
+ * Render the REAL AI-prepared content for a wizard step. Dispatches on the
+ * UI ordinal (1 Hypotheses · 2 Activities · 3 Apportionment · 4 Evidence ·
+ * 5 Narrative) to the matching renderer. Honest states throughout:
+ *   - loading → a "preparing" note while the fetch is in flight.
+ *   - empty (`prepared:false`) → "still preparing" carrying the live
+ *     canAdvance reason; never fabricated content.
+ *   - ready → the actual artefacts, with a one-line judgement prompt.
+ */
+function PreparedStepContent({
+  ordinal,
+  label,
+  prepared,
+  preparedLoading,
+  canAdvance,
+  approved,
+}: {
+  ordinal: number;
+  label: string;
+  prepared: PreparedContent | undefined;
+  preparedLoading: boolean;
+  canAdvance: { ok: true } | { ok: false; reason: string };
+  approved: boolean;
+}) {
+  if (preparedLoading && !prepared) {
+    return (
+      <div style={{ fontFamily: fSans, fontSize: 13, color: bone3, padding: '6px 2px' }}>
+        Loading the AI-prepared content…
+      </div>
+    );
+  }
+
+  // Resolve the per-step slice + a header line.
+  let isPrepared = false;
+  let body: ReactNode = null;
+  if (prepared) {
+    if (ordinal === 1) {
+      isPrepared = prepared.step1_hypotheses.prepared;
+      body = <HypothesesPanel items={prepared.step1_hypotheses.items} />;
+    } else if (ordinal === 2) {
+      isPrepared = prepared.step2_activities.prepared;
+      body = <ActivitiesPanel items={prepared.step2_activities.items} />;
+    } else if (ordinal === 3) {
+      isPrepared = prepared.step3_apportionment.prepared;
+      body = (
+        <ApportionmentPanel
+          items={prepared.step3_apportionment.items}
+          totalAmount={prepared.step3_apportionment.total_amount}
+          totalMapped={prepared.step3_apportionment.total_mapped}
+        />
+      );
+    } else if (ordinal === 4) {
+      isPrepared = prepared.step4_evidence.prepared;
+      body = <EvidencePanel items={prepared.step4_evidence.items} />;
+    } else if (ordinal === 5) {
+      isPrepared = prepared.step5_narrative.prepared;
+      body = <NarrativePanel items={prepared.step5_narrative.items} />;
+    }
+  }
+
+  if (!isPrepared) {
+    // Nothing authored yet for this step. Be honest: surface the live
+    // canAdvance reason if the gate isn't met, else a generic still-preparing.
+    return (
+      <StillPreparing
+        reason={
+          !canAdvance.ok
+            ? canAdvance.reason
+            : 'The AI is still preparing this step. It will appear here once the pipeline finishes.'
+        }
+      />
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Diamond size={7} color={approved ? sage : amber} />
+        <MonoLabel size={9.5} color={approved ? sage : amber}>
+          {approved ? `${label} APPROVED` : `${label} PREPARED BY AI — YOUR JUDGEMENT`}
+        </MonoLabel>
+      </div>
+      {body}
+    </div>
+  );
+}
+
+/** Shared card chrome for a prepared-content item. */
+function ContentCard({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        padding: '13px 15px',
+        background: ink3,
+        border: `1px solid ${rule}`,
+        borderRadius: 4,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const VERDICT_COLOR: Record<'pass' | 'fail' | 'inconclusive', string> = {
+  pass: sage,
+  fail: rust,
+  inconclusive: bone3,
+};
+
+/* ── Step 1 · Hypotheses + IP-search verdicts ── */
+function HypothesesPanel({ items }: { items: PreparedHypothesis[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {items.map((h) => (
+        <ContentCard key={h.verdict_id}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 12,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              {h.activity_code && (
+                <MonoLabel size={9} color={bone4}>
+                  {h.activity_code}
+                  {h.activity_title ? ` · ${h.activity_title}` : ''}
+                </MonoLabel>
+              )}
+              <div
+                style={{
+                  fontFamily: fSerif,
+                  fontSize: 16,
+                  lineHeight: 1.35,
+                  color: bone,
+                  marginTop: 4,
+                }}
+              >
+                {h.hypothesis_text}
+              </div>
+            </div>
+            <span
+              style={{
+                flexShrink: 0,
+                fontFamily: fMono,
+                fontSize: 9,
+                letterSpacing: '0.14em',
+                padding: '3px 8px',
+                borderRadius: 3,
+                border: `1px solid ${VERDICT_COLOR[h.verdict]}`,
+                color: VERDICT_COLOR[h.verdict],
+              }}
+            >
+              IP {h.verdict.toUpperCase()}
+            </span>
+          </div>
+          {h.analysis_markdown && (
+            <div
+              style={{
+                marginTop: 8,
+                fontFamily: fSans,
+                fontSize: 12.5,
+                lineHeight: 1.5,
+                color: bone3,
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {truncate(h.analysis_markdown, 480)}
+            </div>
+          )}
+          <div style={{ marginTop: 8, fontFamily: fMono, fontSize: 8.5, color: bone4 }}>
+            {h.status === 'approved' ? 'CONSULTANT-APPROVED VERDICT' : 'AI DRAFT VERDICT'}
+            {h.draft_verdict && h.draft_verdict !== h.verdict
+              ? ` · AI SUGGESTED ${h.draft_verdict.toUpperCase()}`
+              : ''}
+          </div>
+        </ContentCard>
+      ))}
+    </div>
+  );
+}
+
+/* ── Step 2 · Proposed Core / Supporting activities (Div 355) ── */
+function ActivitiesPanel({ items }: { items: PreparedActivity[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {items.map((a) => (
+        <ContentCard key={a.proposed_id}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 12,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <span
+                style={{
+                  fontFamily: fMono,
+                  fontSize: 9,
+                  letterSpacing: '0.14em',
+                  padding: '2px 7px',
+                  borderRadius: 3,
+                  border: `1px solid ${a.kind === 'core' ? amber : sage}`,
+                  color: a.kind === 'core' ? amber : sage,
+                }}
+              >
+                {a.kind === 'core' ? 'CORE' : 'SUPPORTING'}
+                {a.statutory_anchor ? ` · ${a.statutory_anchor}` : ''}
+              </span>
+              <div
+                style={{
+                  fontFamily: fSerif,
+                  fontSize: 17,
+                  lineHeight: 1.3,
+                  color: bone,
+                  marginTop: 6,
+                }}
+              >
+                {a.title}
+              </div>
+            </div>
+            <div style={{ flexShrink: 0, textAlign: 'right' }}>
+              {a.confidence !== null && (
+                <MonoLabel size={9} color={bone3}>
+                  {Math.round(a.confidence * 100)}% CONF
+                </MonoLabel>
+              )}
+              <div style={{ marginTop: 4 }}>
+                <MonoLabel size={8.5} color={a.accepted ? sage : bone4}>
+                  {a.accepted
+                    ? `ACCEPTED${a.activity_code ? ` · ${a.activity_code}` : ''}`
+                    : 'PROPOSED'}
+                </MonoLabel>
+              </div>
+            </div>
+          </div>
+          {a.hypothesis && <KeyVal label="HYPOTHESIS" value={a.hypothesis} />}
+          {a.technical_uncertainty && (
+            <KeyVal label="UNCERTAINTY" value={a.technical_uncertainty} />
+          )}
+          {a.rationale && <KeyVal label="WHY THIS CLUSTER" value={truncate(a.rationale, 360)} />}
+        </ContentCard>
+      ))}
+    </div>
+  );
+}
+
+/* ── Step 3 · Apportionment (ledger → activities) ── */
+function ApportionmentPanel({
+  items,
+  totalAmount,
+  totalMapped,
+}: {
+  items: PreparedExpenditureLine[];
+  totalAmount: number;
+  totalMapped: number;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 22,
+          padding: '10px 14px',
+          background: 'rgba(225,162,58,0.06)',
+          border: `1px solid ${amber}`,
+          borderRadius: 4,
+        }}
+      >
+        <Stat label="LEDGER TOTAL" value={formatAud(totalAmount)} />
+        <Stat label="MAPPED TO ACTIVITIES" value={formatAud(totalMapped)} accent={sage} />
+        <Stat
+          label="UNMAPPED"
+          value={formatAud(Math.max(0, totalAmount - totalMapped))}
+          accent={rust}
+        />
+      </div>
+      {items.map((e) => (
+        <ContentCard key={e.expenditure_id}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: fSans, fontSize: 14, color: bone }}>{e.vendor_name}</div>
+              <MonoLabel size={9} color={bone4}>
+                {e.expenditure_date}
+                {e.reference ? ` · ${e.reference}` : ''}
+              </MonoLabel>
+            </div>
+            <div style={{ flexShrink: 0, fontFamily: fMono, fontSize: 13, color: bone2 }}>
+              {formatAud(e.total_amount)}
+            </div>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            {e.mapping_kind === null ? (
+              <MonoLabel size={9} color={rust}>
+                UNMAPPED — NO ACTIVITY ALLOCATION
+              </MonoLabel>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {e.allocations.map((al, i) => (
+                  <div
+                    key={`${al.activity_id}-${i}`}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontFamily: fMono,
+                      fontSize: 10,
+                      color: bone3,
+                    }}
+                  >
+                    <span>
+                      {al.activity_code}
+                      {al.activity_title ? ` · ${al.activity_title}` : ''}
+                    </span>
+                    <span style={{ color: sage }}>{al.percentage}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </ContentCard>
+      ))}
+    </div>
+  );
+}
+
+/* ── Step 4 · Evidence bound to each activity ── */
+function EvidencePanel({ items }: { items: PreparedActivityEvidence[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {items.map((a) => (
+        <ContentCard key={a.activity_id}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ fontFamily: fSans, fontSize: 14, color: bone }}>
+              <MonoLabel size={9} color={bone4}>
+                {a.activity_code}
+              </MonoLabel>
+              <div style={{ marginTop: 2 }}>{a.activity_title}</div>
+            </div>
+            <MonoLabel size={9} color={a.artefacts.length > 0 ? sage : rust}>
+              {a.artefacts.length} ARTEFACT{a.artefacts.length === 1 ? '' : 'S'}
+            </MonoLabel>
+          </div>
+          {a.artefacts.length === 0 ? (
+            <div style={{ marginTop: 8, fontFamily: fSans, fontSize: 12.5, color: bone4 }}>
+              No evidence bound to this activity yet.
+            </div>
+          ) : (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {a.artefacts.map((art) => (
+                <div
+                  key={art.artefact_id}
+                  style={{
+                    padding: '7px 10px',
+                    background: ink2,
+                    border: `1px solid ${rule}`,
+                    borderRadius: 3,
+                  }}
+                >
+                  <MonoLabel size={8.5} color={amber}>
+                    {(art.artefact_label ?? art.artefact_kind).toUpperCase()}
+                  </MonoLabel>
+                  {art.link_reason && (
+                    <div
+                      style={{
+                        marginTop: 3,
+                        fontFamily: fSans,
+                        fontSize: 12,
+                        lineHeight: 1.45,
+                        color: bone3,
+                      }}
+                    >
+                      {truncate(art.link_reason, 240)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </ContentCard>
+      ))}
+    </div>
+  );
+}
+
+const SECTION_LABEL: Record<string, string> = {
+  new_knowledge: 'New knowledge',
+  hypothesis: 'Hypothesis',
+  uncertainty: 'Technical uncertainty',
+  experiments_and_results: 'Experiments & results',
+};
+
+/* ── Step 5 · Drafted narrative sections (cited) ── */
+function NarrativePanel({ items }: { items: PreparedNarrativeSection[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {items.map((n) => {
+        const citationCount = n.segments.reduce((c, s) => c + s.citing_events.length, 0);
+        return (
+          <ContentCard key={`${n.activity_id}-${n.section_kind}`}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <MonoLabel size={9} color={bone4}>
+                  {n.activity_code} ·{' '}
+                  {(SECTION_LABEL[n.section_kind] ?? n.section_kind).toUpperCase()}
+                </MonoLabel>
+              </div>
+              <MonoLabel size={8.5} color={n.status === 'accepted' ? sage : amber}>
+                {n.status.toUpperCase()}
+                {citationCount > 0 ? ` · ${citationCount} CITED` : ''}
+              </MonoLabel>
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {n.segments.map((s, i) => (
+                <div key={i}>
+                  <div
+                    style={{
+                      fontFamily: fSerif,
+                      fontSize: 14,
+                      lineHeight: 1.55,
+                      color: bone2,
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {s.text}
+                  </div>
+                  {s.type === 'claim' && s.citing_events.length > 0 && (
+                    <MonoLabel size={8} color={sage}>
+                      ↳ CITES {s.citing_events.length} EVENT
+                      {s.citing_events.length === 1 ? '' : 'S'}
+                    </MonoLabel>
+                  )}
+                </div>
+              ))}
+            </div>
+          </ContentCard>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── Step 6 · Review roll-up ── */
+function ReviewRollup({ review }: { review: PreparedContent['step6_review'] }) {
+  return (
+    <ContentCard>
+      <MonoLabel size={9.5} color={bone3}>
+        AI-PREPARED CLAIM AT A GLANCE
+      </MonoLabel>
+      <div
+        style={{
+          marginTop: 12,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+          gap: 14,
+        }}
+      >
+        <Stat label="HYPOTHESES" value={String(review.hypothesis_count)} />
+        <Stat
+          label="ACTIVITIES"
+          value={`${review.activities_accepted} / ${review.activity_count}`}
+        />
+        <Stat
+          label="LEDGER MAPPED"
+          value={`${review.expenditure_mapped} / ${review.expenditure_count}`}
+        />
+        <Stat label="EVIDENCE LINKS" value={String(review.evidence_links)} />
+        <Stat
+          label="NARRATIVE"
+          value={`${review.narrative_sections_accepted} / ${review.narrative_sections}`}
+        />
+      </div>
+    </ContentCard>
+  );
+}
+
+/* ── small shared bits ── */
+function KeyVal({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ marginTop: 8 }}>
+      <MonoLabel size={8.5} color={bone4}>
+        {label}
+      </MonoLabel>
+      <div
+        style={{
+          marginTop: 2,
+          fontFamily: fSans,
+          fontSize: 12.5,
+          lineHeight: 1.5,
+          color: bone3,
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div>
+      <MonoLabel size={8.5} color={bone4}>
+        {label}
+      </MonoLabel>
+      <div
+        style={{
+          marginTop: 3,
+          fontFamily: fMono,
+          fontSize: 15,
+          color: accent ?? bone,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function StillPreparing({ reason }: { reason: string }) {
   return (
     <div
       style={{
         padding: '14px 16px',
-        background: approved ? 'rgba(122,150,133,0.08)' : 'rgba(225,162,58,0.06)',
-        border: `1px solid ${approved ? sage : amber}`,
+        background: ink3,
+        border: `1px dashed ${ruleStrong}`,
         borderRadius: 4,
         display: 'flex',
         alignItems: 'center',
         gap: 12,
       }}
     >
-      <Diamond size={7} color={approved ? sage : amber} />
+      <Diamond size={6} filled={false} color={bone3} />
       <div>
-        <MonoLabel size={10} color={approved ? sage : amber}>
-          {approved ? `${label} APPROVED` : `${label} PREPARED — READY FOR YOUR JUDGEMENT`}
+        <MonoLabel size={10} color={bone3}>
+          STILL PREPARING
         </MonoLabel>
-        <div style={{ marginTop: 4, fontFamily: fSans, fontSize: 13, color: bone3 }}>
-          {approved
-            ? 'You have approved this step. Reopen it to revisit the AI-prepared content.'
-            : 'The AI-prepared content for this step is ready and meets the advance gate. Review it, then approve.'}
-        </div>
+        <div style={{ marginTop: 4, fontFamily: fSans, fontSize: 13, color: bone3 }}>{reason}</div>
       </div>
     </div>
   );
 }
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max).trimEnd()}…`;
+}
+
+function formatAud(amount: number): string {
+  return new Intl.NumberFormat('en-AU', {
+    style: 'currency',
+    currency: 'AUD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+/* ───────────────────────────── Sub-panels ──────────────────────────── */
 
 function AwaitingPanel({ reason }: { reason: string }) {
   return (

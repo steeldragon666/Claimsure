@@ -106,6 +106,25 @@ export function registerClaimWorkflow(app: FastifyInstance): void {
           requestId: req.id,
         });
       }
+      // "Prepare claim" kicks off the AI authoring pipeline (workflow.md):
+      // the proposal job classifies the claim's evidence and drafts the
+      // Core / Supporting activity register, whose output the consultant
+      // then judges in step 2. Runs OUTSIDE the sql.begin transaction (the
+      // workflow_state write has committed); pg-boss picks it up async.
+      // singletonKey=claimId dedupes a double-trigger; the 30-min expiry
+      // matches the step-1-agree enqueue below (Sonnet latency headroom).
+      // Non-fatal on failure: the route still returns 200 so the consultant
+      // sees the claim prepared; the job re-triggers on a step-1 agree.
+      try {
+        const boss = await getBoss();
+        await boss.send(
+          CLAIM_ACTIVITY_PROPOSAL_QUEUE,
+          { claim_id: claimId, tenant_id: tenantId },
+          { singletonKey: claimId, expireInSeconds: 30 * 60 },
+        );
+      } catch (err) {
+        req.log.error(err, 'claim-activity-proposal enqueue on prepare-claim failed');
+      }
       return reply.status(200).send({ workflow_state: next });
     },
   );

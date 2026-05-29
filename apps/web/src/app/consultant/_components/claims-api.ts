@@ -62,10 +62,7 @@ export async function listClaimsForClient(subjectTenantId: string): Promise<Clai
  * claim per claimant per FY → a duplicate create returns 409 (surfaced
  * by the caller as ConflictError).
  */
-export async function createClaim(
-  subjectTenantId: string,
-  fiscalYear: number,
-): Promise<Claim> {
+export async function createClaim(subjectTenantId: string, fiscalYear: number): Promise<Claim> {
   const res = await apiFetch<ClaimEnvelope>('/v1/claims', {
     method: 'POST',
     body: JSON.stringify({ subject_tenant_id: subjectTenantId, fiscal_year: fiscalYear }),
@@ -200,6 +197,129 @@ export async function reopenStep(claimId: string, step: WorkflowStepKey): Promis
     { method: 'POST', body: JSON.stringify({}) },
   );
   return res.workflow_state;
+}
+
+/* ─────────────────────── Prepared content (per step) ───────────────── */
+
+/**
+ * The AI-prepared content the consultant judges per wizard step, returned
+ * by GET /v1/claims/:id/prepared. This is the READ surface for the artefacts
+ * the "Prepare claim" pipeline authors — the wizard renders real content
+ * above each Approve button instead of the "awaiting AI preparation"
+ * placeholder. Each step carries a `prepared` flag (false + empty arrays
+ * when nothing has been generated yet — never fabricated). Web mirrors the
+ * API shape rather than importing across the package boundary.
+ */
+
+/** Step 1 — a hypothesis + its IP / prior-art verdict. */
+export interface PreparedHypothesis {
+  verdict_id: string;
+  activity_id: string;
+  activity_code: string | null;
+  activity_title: string | null;
+  hypothesis_text: string;
+  verdict: 'pass' | 'fail' | 'inconclusive';
+  draft_verdict: 'pass' | 'fail' | 'inconclusive' | null;
+  analysis_markdown: string;
+  approved_at: string | null;
+  status: 'draft' | 'approved';
+}
+
+/** Step 2 — a proposed Core / Supporting activity (Div 355). */
+export interface PreparedActivity {
+  proposed_id: string;
+  kind: 'core' | 'supporting';
+  title: string;
+  statutory_anchor: string | null;
+  hypothesis: string | null;
+  technical_uncertainty: string | null;
+  rationale: string | null;
+  confidence: number | null;
+  accepted: boolean;
+  activity_id: string | null;
+  activity_code: string | null;
+}
+
+/** Step 3 — a ledger expenditure mapped (or not) onto activities. */
+export interface PreparedExpenditureLine {
+  expenditure_id: string;
+  vendor_name: string;
+  reference: string | null;
+  expenditure_date: string;
+  total_amount: number;
+  mapping_kind: 'single' | 'apportioned' | null;
+  allocations: Array<{
+    activity_id: string;
+    activity_code: string;
+    activity_title: string;
+    percentage: number;
+  }>;
+}
+
+/** Step 4 — an activity with the artefacts the AI bound to it. */
+export interface PreparedActivityEvidence {
+  activity_id: string;
+  activity_code: string;
+  activity_title: string;
+  artefacts: Array<{
+    artefact_kind: string;
+    artefact_id: string;
+    link_reason: string | null;
+    linked_at: string;
+    artefact_label: string | null;
+  }>;
+}
+
+/** Step 5 — a drafted narrative section for an activity. */
+export interface PreparedNarrativeSection {
+  activity_id: string;
+  activity_code: string;
+  activity_title: string;
+  section_kind: string;
+  status: 'streaming' | 'complete' | 'accepted' | 'archived';
+  segments: Array<{
+    type: 'prose' | 'claim';
+    text: string;
+    citing_events: string[];
+  }>;
+}
+
+export interface PreparedStep<T> {
+  prepared: boolean;
+  items: T[];
+}
+
+export interface PreparedContent {
+  step1_hypotheses: PreparedStep<PreparedHypothesis>;
+  step2_activities: PreparedStep<PreparedActivity>;
+  step3_apportionment: PreparedStep<PreparedExpenditureLine> & {
+    total_amount: number;
+    total_mapped: number;
+  };
+  step4_evidence: PreparedStep<PreparedActivityEvidence>;
+  step5_narrative: PreparedStep<PreparedNarrativeSection>;
+  step6_review: {
+    hypothesis_count: number;
+    activity_count: number;
+    activities_accepted: number;
+    expenditure_count: number;
+    expenditure_mapped: number;
+    evidence_links: number;
+    narrative_sections: number;
+    narrative_sections_accepted: number;
+  };
+}
+
+/**
+ * Fetch the per-step AI-prepared content for a claim. Returns the
+ * PreparedContent envelope, or surfaces a 404 (claim not found in this
+ * firm) as a NotFoundError the caller can render as an empty state.
+ */
+export async function getPreparedContent(claimId: string): Promise<PreparedContent> {
+  const res = await apiFetch<{ prepared: PreparedContent }>(
+    `/v1/claims/${encodeURIComponent(claimId)}/prepared`,
+  );
+  return res.prepared;
 }
 
 /* ───────────────────────────── Finalize ────────────────────────────── */
